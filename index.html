@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Blazing</title>
+  <meta name="description" content="Blazing — your library, one tap away." />
+  <meta name="theme-color" content="#0b0b0d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Blazing" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">
+      <svg class="brand-flame" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M12 2c1 3-1.5 4.5-1.5 7 0 1.4 1 2.3 1 2.3s.6-1 .6-2.2c1.6 1 2.9 2.9 2.9 5.2A5 5 0 0 1 7 14c0-2.1 1-3.4 1-3.4S8.4 12 9.4 12c-1.2-2.6.6-6.4 2.6-10z" fill="url(#bf)"/>
+        <defs><linearGradient id="bf" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#FFB03A"/><stop offset="1" stop-color="#FF5A2C"/>
+        </linearGradient></defs>
+      </svg>
+      <span class="brand-word">Blazing</span>
+    </span>
+  </header>
+
+  <main id="home" class="home">
+    <div id="rows" class="rows"></div>
+  </main>
+
+  <!-- Full-screen player overlay -->
+  <div id="player" class="player" hidden>
+    <div class="player-bar">
+      <button id="player-close" class="player-close" type="button" aria-label="Close player">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Back</span>
+      </button>
+      <span id="player-title" class="player-title"></span>
+    </div>
+    <div class="player-stage">
+      <video id="video" class="video" controls playsinline webkit-playsinline preload="metadata"></video>
+      <div id="player-spinner" class="spinner big" hidden></div>
+      <p id="player-msg" class="player-msg" hidden></p>
+    </div>
+  </div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
