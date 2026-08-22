@@ -2,6 +2,7 @@
 'use strict';
 
 const API_BASE = 'https://addon.lyreosai.com';
+const FLEET_BASE = 'https://fleet.lyreosai.com';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const FETCH_TIMEOUT = 20000;
 const LIST_KEY = 'blazing-my-list-v1';
@@ -89,6 +90,7 @@ const state = {
 const homeView = $('#home-view');
 const searchView = $('#search-view');
 const libraryView = $('#library-view');
+const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
 const rowsWrap = $('#rows');
 const hero = $('#hero');
@@ -106,12 +108,18 @@ const detailYear = $('#detail-year');
 const detailArt = $('#detail-art');
 const detailSource = $('#detail-source');
 const detailSourceLink = $('#detail-source-link');
+const detailPlay = $('#detail-play');
 const detailStatus = $('#detail-status');
 const player = $('#player');
 const video = $('#video');
 const playerSpinner = $('#player-spinner');
 const playerMsg = $('#player-msg');
 const playerTitle = $('#player-title');
+const discoverTitle = $('#discover-title');
+const discoverCopy = $('#discover-copy');
+const discoverStatus = $('#discover-status');
+const discoverResults = $('#discover-results');
+let discoverRequest = 0;
 
 function persistList() {
   localStorage.setItem(LIST_KEY, JSON.stringify(state.myList));
@@ -175,6 +183,7 @@ function showRoute(route) {
   homeView.hidden = !browseRoute;
   searchView.hidden = route !== 'search';
   libraryView.hidden = route !== 'library';
+  discoverView.hidden = route !== 'discover';
   roadmapsView.hidden = route !== 'roadmaps';
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -304,10 +313,14 @@ function openDetail(meta) {
   const source = sourceLabel(meta);
   detailSource.hidden = !source;
   detailSource.textContent = source;
+  const sourceOnly = isMwp(meta);
+  detailPlay.hidden = sourceOnly;
   const sourceUrl = isMwp(meta) ? meta.website : '';
   detailSourceLink.hidden = !sourceUrl;
   if (sourceUrl) detailSourceLink.href = sourceUrl;
-  detailStatus.textContent = '';
+  detailStatus.textContent = sourceOnly
+    ? 'Source page only. Open MrWorldPremiere in a web browser to watch.'
+    : '';
   updateSaveLabels();
   if (typeof detailDialog.showModal === 'function') detailDialog.showModal();
   else detailDialog.setAttribute('open', '');
@@ -447,8 +460,46 @@ function renderLibrary() {
   target.appendChild(buildResultRow('Saved titles', state.myList));
 }
 
+function safeDiscoverMeta(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return safeMeta({ ...raw, releaseInfo: raw.year || raw.releaseInfo });
+}
+
+async function openDiscover(kind, slug, label) {
+  if (!/^(filter|provider)$/.test(kind) || !/^[a-z0-9-]{1,48}$/.test(slug)) return;
+  const request = ++discoverRequest;
+  showRoute('discover');
+  discoverTitle.textContent = label;
+  discoverCopy.textContent = kind === 'provider'
+    ? `Titles available with ${label}.`
+    : `Browse ${label.toLowerCase()} titles.`;
+  discoverStatus.textContent = `Loading ${label}…`;
+  discoverResults.replaceChildren();
+  try {
+    const data = await fetchJSON(`${FLEET_BASE}/discover/${kind}/${encodeURIComponent(slug)}`);
+    if (request !== discoverRequest || state.route !== 'discover') return;
+    const metas = (Array.isArray(data.items) ? data.items : []).map(safeDiscoverMeta).filter(Boolean);
+    discoverTitle.textContent = plainText(data.name, label);
+    if (!metas.length) {
+      discoverStatus.textContent = `Nothing came back for ${plainText(data.name, label)}.`;
+      return;
+    }
+    discoverStatus.textContent = `${metas.length} titles`;
+    discoverResults.appendChild(buildResultRow(plainText(data.name, label), metas));
+  } catch {
+    if (request === discoverRequest && state.route === 'discover') {
+      discoverStatus.textContent = `Could not load ${label}. Try again.`;
+    }
+  }
+}
+
 $$('[data-view]').forEach((button) => {
   button.addEventListener('click', () => showRoute(button.dataset.view || 'home'));
+});
+$$('[data-discover-kind]').forEach((button) => {
+  button.addEventListener('click', () => {
+    openDiscover(button.dataset.discoverKind || '', button.dataset.discoverSlug || '', button.textContent || 'Discover');
+  });
 });
 $('#menu-button').addEventListener('click', openDrawer);
 $('#drawer-backdrop').addEventListener('click', closeDrawer);

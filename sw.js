@@ -2,7 +2,7 @@
    and opens instantly. Backend API calls are always fetched live. */
 'use strict';
 
-const CACHE = 'blazing-shell-v2';
+const CACHE = 'blazing-shell-v4';
 const SHELL = [
   './',
   './index.html',

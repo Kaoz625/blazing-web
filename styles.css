@@ -136,9 +136,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: relative;
   z-index: 1;
   width: min(340px, calc(100% - 32px));
-  min-height: min(580px, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
   margin: 16px;
   padding: 24px;
+  overflow-y: auto;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 24px;
   background: var(--surface);
@@ -149,6 +150,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .drawer-nav { display: grid; gap: 6px; }
 .drawer-nav button { padding: 13px 14px; text-align: left; font-size: 15px; }
 .drawer-nav button.active, .drawer-nav button:hover { background: var(--surface-focus); color: #fff; }
+.drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: 11px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
 
 /* Main library */
 #app-main { width: min(1440px, 100%); margin: 0 auto; padding-bottom: calc(42px + var(--safe-bottom)); }

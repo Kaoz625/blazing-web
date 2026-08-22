@@ -49,6 +49,25 @@
         <button type="button" data-view="library">Library</button>
         <button type="button" data-view="search">Search</button>
       </nav>
+      <p class="drawer-section">More</p>
+      <nav class="drawer-nav" aria-label="More">
+        <button type="button" data-discover-kind="filter" data-discover-slug="in-theaters">In Theaters</button>
+        <button type="button" data-discover-kind="filter" data-discover-slug="coming-soon">Coming Soon</button>
+        <button type="button" data-discover-kind="filter" data-discover-slug="new-seasons">New Seasons</button>
+        <button type="button" data-discover-kind="filter" data-discover-slug="top-rated">Top Rated</button>
+      </nav>
+      <p class="drawer-section">Channels &amp; Apps</p>
+      <nav class="drawer-nav" aria-label="Channels and apps">
+        <button type="button" data-discover-kind="provider" data-discover-slug="netflix">Netflix</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="prime-video">Prime Video</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="disney-plus">Disney+</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="hulu">Hulu</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="hbo-max">HBO Max</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="apple-tv-plus">Apple TV+</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="paramount-plus">Paramount+</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="peacock">Peacock</button>
+        <button type="button" data-discover-kind="provider" data-discover-slug="amc-plus">AMC+</button>
+      </nav>
     </aside>
   </div>
 
@@ -91,6 +110,16 @@
         <p>Titles saved on this device.</p>
       </div>
       <div id="library-results" class="library-results"></div>
+    </section>
+
+    <section id="discover-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Discover</p>
+        <h1 id="discover-title">Discover</h1>
+        <p id="discover-copy">A curated filter from the Blazing catalog.</p>
+      </div>
+      <p id="discover-status" class="search-status" role="status"></p>
+      <div id="discover-results" class="search-results"></div>
     </section>
 
     <section id="roadmaps-view" class="view" hidden>
