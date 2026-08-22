@@ -77,3 +77,24 @@ hear each other.
 
 Next step: unchanged — read the diff, get Markus's go-ahead, test with two real
 devices, then commit and push.
+
+--- same session, after Markus answered ---
+
+PUSHED. Markus said push it now, so watch-party.js, the index.html script tag,
+the sw.js v6 cache bump and watch-party.smoke.mjs are committed and on
+origin/main @ 1bcd89c. .omc/ is now gitignored.
+
+FACT CORRECTION for whoever reads the note above: this repo deploys to GITHUB
+PAGES (https://kaoz625.github.io/blazing-web/), not Cloudflare Pages. The
+earlier handoff said Cloudflare. Deploy is `gh api repos/Kaoz625/blazing-web/pages`
+-> status, and it takes a minute or two after a push.
+
+TURN RELAY: Markus said leave it off for now. So /party/ice keeps answering
+relay:false and calling only works between people whose networks form a direct
+path — it will often fail on phone data or across two different houses. The
+server side is ready the moment he changes his mind: fill TURN_URLS plus either
+TURN_SECRET or TURN_USERNAME/TURN_PASSWORD into ~/blazing-fleet/.env on mac2 and
+`docker compose up -d`. No code change on either side.
+
+Next step: two real people, two real devices, one party code off a TV. That is
+the only thing left that has never been proven.
