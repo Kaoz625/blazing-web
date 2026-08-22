@@ -1,2 +1,5 @@
 .DS_Store
 .wrangler/
+
+# OMC session state, not part of the site
+.omc/
