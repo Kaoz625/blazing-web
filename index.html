@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Blazing</title>
-  <meta name="description" content="Blazing — your library, one tap away." />
-  <meta name="theme-color" content="#0b0b0d" />
+  <meta name="description" content="Blazing — one clear place for your library." />
+  <meta name="theme-color" content="#0A0A0B" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Blazing" />
@@ -15,30 +15,123 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <span class="brand">
-      <svg class="brand-flame" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-        <path d="M12 2c1 3-1.5 4.5-1.5 7 0 1.4 1 2.3 1 2.3s.6-1 .6-2.2c1.6 1 2.9 2.9 2.9 5.2A5 5 0 0 1 7 14c0-2.1 1-3.4 1-3.4S8.4 12 9.4 12c-1.2-2.6.6-6.4 2.6-10z" fill="url(#bf)"/>
-        <defs><linearGradient id="bf" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#FFB03A"/><stop offset="1" stop-color="#FF5A2C"/>
-        </linearGradient></defs>
-      </svg>
-      <span class="brand-word">Blazing</span>
-    </span>
+  <header class="topbar" aria-label="Primary navigation">
+    <button id="menu-button" class="icon-button" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+    </button>
+    <button id="brand-button" class="brand" type="button" data-view="home" aria-label="Blazing home">
+      <span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span>
+    </button>
+    <nav class="topnav" aria-label="Browse">
+      <button type="button" data-view="home">Home</button>
+      <button type="button" data-view="movies">Movies</button>
+      <button type="button" data-view="shows">Shows</button>
+      <button type="button" data-view="anime">Anime</button>
+      <button type="button" data-view="roadmaps">Roadmaps</button>
+      <button type="button" data-view="library">Library</button>
+    </nav>
+    <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" /><path d="m15.2 15.2 4.3 4.3" /></svg>
+    </button>
   </header>
 
-  <main id="home" class="home">
-    <div id="rows" class="rows"></div>
+  <div id="drawer-layer" class="drawer-layer" hidden>
+    <button id="drawer-backdrop" class="drawer-backdrop" type="button" aria-label="Close menu"></button>
+    <aside id="drawer" class="drawer" aria-label="Browse menu">
+      <div class="drawer-heading"><span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span></div>
+      <p class="drawer-copy">Find something good, fast.</p>
+      <nav class="drawer-nav" aria-label="Browse">
+        <button type="button" data-view="home">Home</button>
+        <button type="button" data-view="movies">Movies</button>
+        <button type="button" data-view="shows">Shows</button>
+        <button type="button" data-view="anime">Anime</button>
+        <button type="button" data-view="roadmaps">Roadmaps</button>
+        <button type="button" data-view="library">Library</button>
+        <button type="button" data-view="search">Search</button>
+      </nav>
+    </aside>
+  </div>
+
+  <main id="app-main">
+    <section id="home-view" class="view">
+      <section id="hero" class="hero hero-loading" aria-live="polite">
+        <div id="hero-art" class="hero-art" aria-hidden="true"></div>
+        <div class="hero-content">
+          <p class="eyebrow">Featured now</p>
+          <h1 id="hero-title">Loading your library</h1>
+          <p id="hero-copy">Getting fresh rows from Blazing.</p>
+          <div class="hero-actions">
+            <button id="hero-open" class="primary-button" type="button" disabled>View title</button>
+            <button id="hero-save" class="secondary-button" type="button" disabled>My list</button>
+          </div>
+        </div>
+      </section>
+      <div id="rows" class="rows"></div>
+    </section>
+
+    <section id="search-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Search</p>
+        <h1>Find a title</h1>
+        <p>Search the main catalog and MrWorldPremiere together.</p>
+      </div>
+      <form id="search-form" class="search-form" role="search">
+        <label class="sr-only" for="search-input">Search titles</label>
+        <input id="search-input" name="q" type="search" autocomplete="off" maxlength="160" placeholder="Search movies and shows" />
+        <button class="primary-button" type="submit">Search</button>
+      </form>
+      <p id="search-status" class="search-status" role="status"></p>
+      <div id="search-results" class="search-results"></div>
+    </section>
+
+    <section id="library-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Library</p>
+        <h1>My list</h1>
+        <p>Titles saved on this device.</p>
+      </div>
+      <div id="library-results" class="library-results"></div>
+    </section>
+
+    <section id="roadmaps-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Roadmaps</p>
+        <h1>What is next</h1>
+        <p>Blazing keeps one source list and one visual language across your devices.</p>
+      </div>
+      <div class="roadmap-grid">
+        <article><span>01</span><h2>Search</h2><p>Catalog and source results appear in one place.</p></article>
+        <article><span>02</span><h2>Source checks</h2><p>Only a direct, compatible stream is offered to the player.</p></article>
+        <article><span>03</span><h2>My list</h2><p>Keep titles you want to return to on this device.</p></article>
+      </div>
+    </section>
   </main>
 
-  <!-- Full-screen player overlay -->
-  <div id="player" class="player" hidden>
+  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
+    <article class="detail-card">
+      <button id="detail-close" class="detail-close icon-button" type="button" aria-label="Close details">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+      <div id="detail-art" class="detail-art" aria-hidden="true"></div>
+      <div class="detail-body">
+        <p id="detail-source" class="source-pill" hidden></p>
+        <p id="detail-year" class="eyebrow"></p>
+        <h2 id="detail-title"></h2>
+        <p id="detail-copy" class="detail-copy"></p>
+        <div class="detail-actions">
+          <button id="detail-play" class="primary-button" type="button">Play</button>
+          <button id="detail-save" class="secondary-button" type="button">My list</button>
+          <a id="detail-source-link" class="text-link" target="_blank" rel="noreferrer" hidden>Open source page</a>
+        </div>
+        <p id="detail-status" class="detail-status" role="status"></p>
+      </div>
+    </article>
+  </dialog>
+
+  <section id="player" class="player" hidden aria-label="Video player">
     <div class="player-bar">
-      <button id="player-close" class="player-close" type="button" aria-label="Close player">
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-          <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Back</span>
+      <button id="player-close" class="player-close" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7" /></svg><span>Back</span>
       </button>
       <span id="player-title" class="player-title"></span>
     </div>
@@ -47,8 +140,9 @@
       <div id="player-spinner" class="spinner big" hidden></div>
       <p id="player-msg" class="player-msg" hidden></p>
     </div>
-  </div>
+  </section>
 
+  <script src="./profile.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>
