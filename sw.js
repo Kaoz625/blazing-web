@@ -2,7 +2,9 @@
    and opens instantly. Backend API calls are always fetched live. */
 'use strict';
 
-const CACHE = 'blazing-shell-v4';
+// Bump when a cached shell file changes. Without this, installed PWAs can keep
+// an older Home implementation even after GitHub Pages publishes the new app.js.
+const CACHE = 'blazing-shell-v5';
 const SHELL = [
   './',
   './index.html',

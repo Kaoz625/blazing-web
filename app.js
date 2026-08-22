@@ -6,6 +6,26 @@ const FLEET_BASE = 'https://fleet.lyreosai.com';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const FETCH_TIMEOUT = 20000;
 const LIST_KEY = 'blazing-my-list-v1';
+const FRESH_HOME_SHELVES = Object.freeze([
+  {
+    id: 'fresh-in-theaters',
+    title: 'New Movies · In Theaters',
+    type: 'movie',
+    path: '/discover/filter/in-theaters',
+  },
+  {
+    id: 'fresh-new-seasons',
+    title: 'New Shows · Now Airing',
+    type: 'series',
+    path: '/discover/filter/new-seasons',
+  },
+  {
+    id: 'fresh-top-rated',
+    title: 'Top Rated Movies',
+    type: 'movie',
+    path: '/discover/filter/top-rated',
+  },
+]);
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -270,6 +290,25 @@ async function loadRow(catalog, section) {
   }
 }
 
+async function loadFreshHomeRow(shelf, section) {
+  const track = $('.row-track', section);
+  try {
+    const data = await fetchJSON(`${FLEET_BASE}${shelf.path}`);
+    const metas = (Array.isArray(data.items) ? data.items : [])
+      .map((item) => safeDiscoverMeta({ ...item, type: item.type || shelf.type }))
+      .filter(Boolean);
+    if (!metas.length) {
+      section.remove();
+      return [];
+    }
+    track.replaceChildren(...metas.map(buildCard));
+    return metas;
+  } catch {
+    section.remove();
+    return [];
+  }
+}
+
 function activeCatalogs(rawCatalogs) {
   const adult = /adult|nsfw|jav|hentai|porn|xxx|18\+/i;
   return rawCatalogs.filter((catalog) => {
@@ -281,27 +320,54 @@ function activeCatalogs(rawCatalogs) {
 
 async function boot() {
   rowsWrap.replaceChildren();
+  state.featured = null;
   hero.classList.add('hero-loading');
-  try {
-    const manifest = await fetchJSON(`${API_BASE}/manifest.json`);
-    state.catalogs = activeCatalogs(Array.isArray(manifest.catalogs) ? manifest.catalogs : []);
-    if (!state.catalogs.length) {
-      emptyHero('No catalog rows are available yet.');
-      return;
-    }
-    const jobs = state.catalogs.map((catalog) => {
-      const section = buildRowSkeleton(catalog);
-      rowsWrap.appendChild(section);
-      return loadRow(catalog, section);
-    });
-    const rows = await Promise.all(jobs);
+
+  // These fleet shelves are current when the add-on manifest is stale or slow.
+  // They are added first and kept in fixed visual order. Existing add-on rows
+  // still load below them as the broad catalog fallback.
+  const freshJobs = FRESH_HOME_SHELVES.map((shelf) => {
+    const section = buildRowSkeleton({ id: shelf.id, name: shelf.title, type: shelf.type });
+    section.dataset.freshShelf = 'true';
+    rowsWrap.appendChild(section);
+    return loadFreshHomeRow(shelf, section);
+  });
+  const freshDone = Promise.all(freshJobs).then((rows) => {
     const first = rows.find((metas) => metas.length)?.[0];
     if (first) setHero(first);
-    else emptyHero('Nothing is available right now. Try again soon.');
-    applyRowFilter(state.route);
-  } catch {
-    emptyHero('Could not reach the library. Check your connection and try again.');
+    return rows;
+  });
+
+  const catalogDone = fetchJSON(`${API_BASE}/manifest.json`)
+    .then((manifest) => {
+      state.catalogs = activeCatalogs(Array.isArray(manifest.catalogs) ? manifest.catalogs : []);
+      const jobs = state.catalogs.map((catalog) => {
+        const section = buildRowSkeleton(catalog);
+        rowsWrap.appendChild(section);
+        return loadRow(catalog, section);
+      });
+      return Promise.all(jobs);
+    })
+    .then((rows) => {
+      // Do not leave a usable catalog behind a slow fresh-feed request. A fresh
+      // result replaces this temporary hero as soon as it arrives.
+      const first = rows.find((metas) => metas.length)?.[0];
+      if (first && !state.featured) setHero(first);
+      return rows;
+    })
+    .catch(() => []);
+
+  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone]);
+  const first = freshRows.find((metas) => metas.length)?.[0]
+    || catalogRows.find((metas) => metas.length)?.[0];
+  if (first) {
+    // `freshDone` normally sets this early. This covers the case where a cache
+    // or test stub resolves the two sources in a different order.
+    if (!state.featured) setHero(first);
+  } else {
+    emptyHero('Nothing is available right now. Try again soon.');
   }
+  applyRowFilter(state.route);
 }
 
 function openDetail(meta) {
