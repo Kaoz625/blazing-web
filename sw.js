@@ -4,7 +4,7 @@
 
 // Bump when a cached shell file changes. Without this, installed PWAs can keep
 // an older Home implementation even after GitHub Pages publishes the new app.js.
-const CACHE = 'blazing-shell-v6';
+const CACHE = 'blazing-shell-v7';
 const SHELL = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   './app.js',
   './profile.js',
   './watch-party.js',
+  './locker.js',
   './manifest.webmanifest',
   './icon.svg',
   './icon-180.png',
