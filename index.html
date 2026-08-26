@@ -73,7 +73,13 @@
     </aside>
   </div>
 
+  
+  <dialog id="profile-picker" class="detail-dialog" style="padding: 24px; text-align: center;">
+    <h2>Who's Watching?</h2>
+    <div id="profile-list" style="display: flex; gap: 16px; justify-content: center; margin-top: 24px; flex-wrap: wrap;"></div>
+  </dialog>
   <main id="app-main">
+
     <section id="home-view" class="view">
       <section id="hero" class="hero hero-loading" aria-live="polite">
         <div id="hero-art" class="hero-art" aria-hidden="true"></div>
@@ -97,6 +103,7 @@
         <p>Search the main catalog and MrWorldPremiere together.</p>
       </div>
       <form id="search-form" class="search-form" role="search">
+        <button type="button" id="ai-search-toggle" class="secondary-button" style="width: auto;">🤖 AI</button>
         <label class="sr-only" for="search-input">Search titles</label>
         <input id="search-input" name="q" type="search" autocomplete="off" maxlength="160" placeholder="Search movies and shows" />
         <button class="primary-button" type="submit">Search</button>
@@ -195,6 +202,7 @@
     <div class="player-stage">
       <video id="video" class="video" controls playsinline webkit-playsinline preload="metadata"></video>
       <div id="player-spinner" class="spinner big" hidden></div>
+      <button id="resume-btn" class="primary-button" hidden style="position: absolute; bottom: 60px; z-index: 10;">Resume</button>
       <p id="player-msg" class="player-msg" hidden></p>
     </div>
   </section>

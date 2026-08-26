@@ -109,6 +109,7 @@ const state = {
 
 const homeView = $('#home-view');
 const searchView = $('#search-view');
+let aiSearchActive = false;
 const libraryView = $('#library-view');
 const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
@@ -320,6 +321,32 @@ function activeCatalogs(rawCatalogs) {
 }
 
 async function boot() {
+  
+  const profileId = localStorage.getItem('profileId');
+  if (!profileId) {
+    try {
+      const pRes = await fetch(`${API_BASE}/api/profiles`);
+      const pData = await pRes.json();
+      if (pData.profiles && pData.profiles.length > 1) {
+        const d = $('#profile-picker');
+        const l = $('#profile-list');
+        pData.profiles.forEach(p => {
+          const b = document.createElement('button');
+          b.className = 'primary-button';
+          b.textContent = p.name;
+          b.onclick = () => { localStorage.setItem('profileId', p.id); d.close(); loadContinueWatching(); };
+          l.appendChild(b);
+        });
+        d.showModal();
+      } else if (pData.profiles && pData.profiles.length === 1) {
+        localStorage.setItem('profileId', pData.profiles[0].id);
+        loadContinueWatching();
+      }
+    } catch (e) {}
+  } else {
+    loadContinueWatching();
+  }
+
   rowsWrap.replaceChildren();
   state.featured = null;
   hero.classList.add('hero-loading');
@@ -497,13 +524,32 @@ async function openPlayer(title, rawUrl) {
   video.addEventListener('error', () => {
     setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
   }, { once: true });
+  
   video.src = finalUrl;
   video.load();
+  startSync({ id: state.selected?.id });
+  const profileId = localStorage.getItem('profileId');
+  if (profileId && state.selected?.id) {
+    fetch(`${API_BASE}/api/sync/progress/${state.selected.id}?profileId=${profileId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.position && d.position > 60) {
+          const b = $('#resume-btn');
+          b.hidden = false;
+          b.textContent = `Resume from ${Math.floor(d.position / 60)}:${Math.floor(d.position % 60).toString().padStart(2, '0')}?`;
+          b.onclick = () => { video.currentTime = d.position; b.hidden = true; };
+          setTimeout(() => { b.hidden = true; }, 10000);
+        }
+      }).catch(()=>{});
+  }
+
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => setPlayerState('playing'));
 }
 
 function closePlayer() {
+  stopSync();
+  if($('#resume-btn')) $('#resume-btn').hidden = true;
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -541,6 +587,29 @@ async function runSearch(event) {
     status.textContent = 'Type a title first.';
     return;
   }
+  
+  if (aiSearchActive) {
+    status.textContent = 'Searching with AI...';
+    try {
+      const res = await fetch(`${API_BASE}/api/ai-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      const data = await res.json();
+      const metas = (Array.isArray(data.results) ? data.results : []).map(safeMeta).filter(Boolean);
+      if (metas.length) {
+        target.appendChild(buildResultRow('AI Results', metas));
+        status.textContent = `Found ${metas.length} AI results.`;
+      } else {
+        status.textContent = 'No titles found via AI.';
+      }
+    } catch {
+      status.textContent = 'AI search failed.';
+    }
+    return;
+  }
+
   status.textContent = 'Searching all sources…';
   const [movies, shows, mwp] = await Promise.allSettled([
     catalogSearch('movie', query),
@@ -710,10 +779,21 @@ async function loadStreams(meta) {
       const q = s.name || 'SD';
       const title = s.title || '';
       
+      let qualityBadge = 'badge-sd';
+      if (/4k|2160/i.test(q)) qualityBadge = 'badge-4k';
+      else if (/1080/i.test(q)) qualityBadge = 'badge-1080';
+      else if (/720/i.test(q)) qualityBadge = 'badge-720';
+      
+      const sizeMatch = title.match(/(?:\b\d+(?:\.\d+)?\s*(?:GB|MB)\b)/i);
+      const seedMatch = title.match(/(?:👤|👥|S:|Seeders?:?)\s*(\d+)/i);
+      const size = sizeMatch ? sizeMatch[0] : '';
+      const seeders = seedMatch ? `👤 ${seedMatch[1]}` : '';
+      
       row.innerHTML = `
         <div class="stream-info">
-          <div class="stream-q">${q}</div>
+          <div class="stream-q"><span class="badge ${qualityBadge}">${q}</span></div>
           <div class="stream-title">${title}</div>
+          <div class="stream-meta"><span>${size}</span><span>${seeders}</span></div>
         </div>
       `;
       
@@ -736,4 +816,65 @@ async function loadStreams(meta) {
   } catch (err) {
     detailStatus.textContent = 'Failed to load streams.';
   }
+}
+
+const aiToggle = $('#ai-search-toggle');
+if (aiToggle) {
+  aiToggle.addEventListener('click', () => {
+    aiSearchActive = !aiSearchActive;
+    aiToggle.style.background = aiSearchActive ? 'var(--accent)' : '';
+    $('#search-input').placeholder = aiSearchActive ? 'Describe a plot or storyline...' : 'Search movies and shows';
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && document.activeElement !== $('#search-input')) {
+    e.preventDefault();
+    if (state.route !== 'search') showRoute('search');
+    else $('#search-input').focus();
+  }
+});
+
+async function loadContinueWatching() {
+  const profileId = localStorage.getItem('profileId');
+  if (!profileId) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/sync/progress/recent?profileId=${profileId}`);
+    const data = await res.json();
+    if (data.items && data.items.length) {
+      const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
+      rowsWrap.prepend(section);
+      const track = $('.row-track', section);
+      const metas = data.items.map(safeDiscoverMeta).filter(Boolean);
+      track.replaceChildren(...metas.map(m => {
+        const c = buildCard(m);
+        if (m.progress) {
+          const bar = document.createElement('div');
+          bar.className = 'progress-bar';
+          bar.innerHTML = `<div class="progress-fill" style="width: ${Math.min(100, (m.progress.position / m.progress.duration) * 100)}%"></div>`;
+          c.appendChild(bar);
+        }
+        return c;
+      }));
+    }
+  } catch (e) {}
+}
+
+
+let syncInterval = null;
+function startSync(meta) {
+  stopSync();
+  syncInterval = setInterval(() => {
+    if (!video.duration || video.paused) return;
+    const profileId = localStorage.getItem('profileId');
+    if (!profileId) return;
+    fetch(`${API_BASE}/api/sync/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imdbId: meta.id, position: video.currentTime, duration: video.duration, profileId })
+    }).catch(()=>{});
+  }, 30000);
+}
+function stopSync() {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = null;
 }
