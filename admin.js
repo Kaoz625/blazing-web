@@ -94,6 +94,61 @@ export async function initAdmin() {
   }
   
   // Set up polling for activity when visible
+  
+  // Fetch upscale requests
+  async function fetchUpscaleRequests() {
+    if (adminView.hidden) return;
+    
+    const list = document.getElementById('admin-upscale-list');
+    try {
+      const res = await fetch('https://upscale.lyreosai.com/api/upscale/list');
+      if (res.ok) {
+        renderUpscale(await res.json());
+        return;
+      }
+      // SAY SO. This panel is the admin's diagnostic surface, and `if (res.ok)`
+      // with no else meant a missing endpoint looked identical to an empty
+      // queue. /api/upscale/list is in fact a 404 right now — the service's own
+      // spec at /openapi.json lists only POST /api/search,
+      // /api/upscale/request, /api/upscale/approve and /api/clone. So this
+      // panel cannot fill until the backend adds it, and it now says that
+      // rather than showing a blank box that reads as "nothing queued".
+      if (list) {
+        list.innerHTML = "<p>The upscale service has no /api/upscale/list endpoint yet (HTTP " +
+          res.status + "), so the queue cannot be listed here.</p>";
+      }
+    } catch (e) {
+      console.error("[Admin] Failed to fetch upscale requests", e);
+      if (list) list.innerHTML = "<p>Could not reach the upscale service.</p>";
+    }
+  }
+
+  function renderUpscale(data) {
+    const list = document.getElementById('admin-upscale-list');
+    if (!list) return;
+    
+    
+    const requests = data.requests || [];
+    if (requests.length === 0) {
+      list.innerHTML = "<p>No upscale requests yet.</p>";
+      return;
+    }
+    
+    list.innerHTML = requests.map(req => {
+      const users = req.requested_by || [];
+      return \`
+        <div class="card" style="padding: 1rem;">
+          <h3 style="margin-top: 0;">${req.title}</h3>
+          <p><strong>Type:</strong> ${req.media_type}</p>
+          <p><strong>Requests:</strong> ${req.request_count || 1}</p>
+          <p><strong>Users IP:</strong><br>${users.join('<br>')}</p>
+        </div>
+      \`;
+    }).join('');
+  }
+  setInterval(fetchUpscaleRequests, 10000);
+  fetchUpscaleRequests();
+
   setInterval(fetchActivity, 10000);
   
   // Listen for admin token button if needed

@@ -136,6 +136,13 @@
         <p id="admin-link-text">A new device wants to connect.</p>
         <button id="admin-approve-btn" class="primary-button">Approve Device</button>
       </div>
+      <!-- Its own panel, a SIBLING of the activity one. It was opened inside
+           `admin-activity` and before that panel's own heading, so the upscale
+           queue rendered nested in "Currently Watching". -->
+      <div id="admin-upscale" class="admin-panel">
+        <h2>4K Upscale Requests</h2>
+        <div id="admin-upscale-list" class="grid-list"></div>
+      </div>
       <div id="admin-activity" class="admin-panel">
         <h2>Currently Watching</h2>
         <div id="admin-activity-list" class="grid-list"></div>
