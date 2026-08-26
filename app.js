@@ -3,8 +3,18 @@
 
 const API_BASE = 'https://addon.lyreosai.com';
 const FLEET_BASE = 'https://fleet.lyreosai.com';
+// The ONLY host that serves the upscale routes. Measured 26 Aug 2026:
+//   GET  https://upscale.lyreosai.com/api/upscale/request -> 405 (allow: POST)  route exists
+//   GET  https://addon.lyreosai.com/api/upscale/request   -> 404               wrong host
+// This page is served over https, so this must stay https — a http:// call is
+// blocked outright as mixed content. That has already broken this repo once.
+const UPSCALE_BASE = 'https://upscale.lyreosai.com';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const FETCH_TIMEOUT = 20000;
+const RESOLVE_TIMEOUT = 12000;
+const PLAYER_STALL_TIMEOUT = 25000;
+const TOAST_LIFETIME_MS = 4200;
+const UPSCALE_LABEL = '4K Upscale';
 const LIST_KEY = 'blazing-my-list-v1';
 const FRESH_HOME_SHELVES = Object.freeze([
   {
@@ -50,6 +60,48 @@ async function fetchJSON(url) {
 function plainText(value, fallback = '') {
   const text = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
   return text || fallback;
+}
+
+/* Transient messages. There was no app-wide toast before this: watch-party.js has
+   one, but it is an emoji float positioned inside the party call panel, so it is
+   not reusable here. This is the one general-purpose transient message widget.
+
+   The host is MOVED rather than duplicated, because #detail-dialog is opened with
+   showModal(): a body-level element renders under the top layer no matter its
+   z-index, and .detail-dialog also sets backdrop-filter (which makes it the
+   containing block for position:fixed descendants) plus overflow:hidden. So while
+   a dialog is open the host is parked inside that dialog's card and positioned
+   absolutely; otherwise it is fixed to the viewport. */
+let toastHost = null;
+
+function ensureToastHost() {
+  if (!toastHost) {
+    toastHost = el('div', 'toast-host');
+    toastHost.setAttribute('role', 'status');
+    toastHost.setAttribute('aria-live', 'polite');
+  }
+  const openDialog = $('dialog[open]');
+  const parent = openDialog ? ($('.detail-card', openDialog) || openDialog) : document.body;
+  if (toastHost.parentNode !== parent) {
+    // Never carry a stale message across the move.
+    while (toastHost.firstChild) toastHost.firstChild.remove();
+    parent.appendChild(toastHost);
+  }
+  toastHost.classList.toggle('toast-host-inline', Boolean(openDialog));
+  return toastHost;
+}
+
+function showToast(message, kind = 'info') {
+  const text = plainText(message);
+  if (!text) return;
+  const host = ensureToastHost();
+  const node = el('p', kind === 'error' ? 'toast toast-error' : 'toast');
+  node.textContent = text;
+  host.appendChild(node);
+  window.setTimeout(() => {
+    node.classList.add('toast-out');
+    window.setTimeout(() => node.remove(), 220);
+  }, TOAST_LIFETIME_MS);
 }
 
 function safeHttpsUrl(value) {
@@ -111,6 +163,11 @@ const homeView = $('#home-view');
 const searchView = $('#search-view');
 let aiSearchActive = false;
 const libraryView = $('#library-view');
+// showRoute() has read this on every navigation since 67776fb, but nothing ever
+// declared it. Under 'use strict' that threw ReferenceError before
+// updateNavigation() and closeDrawer() could run. Proven with locker.smoke.mjs
+// against a pristine HEAD checkout: "ReferenceError: adminView is not defined".
+const adminView = $('#admin-view');
 const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
 const rowsWrap = $('#rows');
@@ -130,6 +187,7 @@ const detailArt = $('#detail-art');
 const detailSource = $('#detail-source');
 const detailSourceLink = $('#detail-source-link');
 const detailPlay = $('#detail-play');
+const detailUpscale = $('#detail-upscale');
 const detailStatus = $('#detail-status');
 const player = $('#player');
 const video = $('#video');
@@ -398,6 +456,151 @@ async function boot() {
   applyRowFilter(state.route);
 }
 
+/* ---------------------------------------------------------------------------
+   4K Upscale button.
+
+   Contract, shared by every Blazing client:
+     GET  {UPSCALE_BASE}/api/upscale/status?title=<url-encoded title>  -> {"count": N}
+     POST {UPSCALE_BASE}/api/upscale/request
+          {"title": ..., "media_type": "movie"|"series", "video_url": ...}
+          -> {"status": "queued"|"error", "message": "...", "count": N}
+   No imdb_id is ever sent.
+
+   HONESTY RULE: a 200 is not success. The body must say status == "queued".
+   The backend answers 200 with {"status":"error"} when its insert is rejected.
+
+   MEASURED 26 Aug 2026 against the live service, so the tolerances below are not
+   defensive guesswork:
+     - the status route is NOT deployed yet (404), so the open-time lookup
+       normally fails and the button just keeps its normal label;
+     - a successful POST returns NO "count" field and its message reads
+       "'<title>' has been added to the AI Queue and is awaiting Admin approval."
+       -- not "Requested N times". So the count falls back to 1.
+--------------------------------------------------------------------------- */
+let upscaleCount = 0;
+let upscaleBusy = false;
+let upscaleStatusRequest = 0;
+
+function upscaleRequestedLabel(count) {
+  // Wording is fixed by the cross-client contract. Not pluralised on purpose.
+  return `Requested ${count} times`;
+}
+
+/* count, then the number inside a "Requested N times" message, then 1.
+   The message is matched strictly: a loose /(\d+)/ would read the "2" out of a
+   title like "Dune 2" in the message the service actually returns today. */
+function upscaleCountFrom(data) {
+  const direct = Math.floor(Number(data && data.count));
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const match = /requested\s+(\d+)\s+time/i.exec(plainText(data && data.message));
+  if (match) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 1;
+}
+
+// Visibly done, but still focusable so the keyboard and a TV D-pad do not skip it.
+function markUpscaleSpent(count) {
+  upscaleCount = count;
+  detailUpscale.disabled = false;
+  detailUpscale.textContent = upscaleRequestedLabel(count);
+  detailUpscale.classList.add('is-spent');
+  detailUpscale.setAttribute('aria-pressed', 'true');
+}
+
+function resetUpscaleButton() {
+  upscaleCount = 0;
+  upscaleBusy = false;
+  detailUpscale.disabled = false;
+  detailUpscale.textContent = UPSCALE_LABEL;
+  detailUpscale.classList.remove('is-spent');
+  detailUpscale.setAttribute('aria-pressed', 'false');
+}
+
+function refreshUpscaleButton(meta) {
+  resetUpscaleButton();
+  const title = plainText(meta && meta.name);
+  // `meta` has no `title` field -- safeMeta() produces `name`. Asking for
+  // meta.title sent the literal string "undefined" to the service.
+  if (!title) return;
+  const request = (upscaleStatusRequest += 1);
+  fetchJSON(`${UPSCALE_BASE}/api/upscale/status?title=${encodeURIComponent(title)}`)
+    .then((data) => {
+      if (request !== upscaleStatusRequest) return; // another title was opened
+      const count = Math.floor(Number(data && data.count));
+      if (Number.isFinite(count) && count > 0) markUpscaleSpent(count);
+    })
+    .catch(() => {
+      // Route not deployed, offline, or CORS-blocked: keep the normal button.
+    });
+}
+
+async function requestUpscale() {
+  const meta = state.selected;
+  if (!meta || upscaleBusy) return;
+  if (upscaleCount > 0) {
+    // Already done. Re-pressing must never fire a second request.
+    showToast(upscaleRequestedLabel(upscaleCount));
+    return;
+  }
+  const title = plainText(meta.name);
+  if (!title) {
+    showToast('This title has no name to send.', 'error');
+    return;
+  }
+
+  upscaleBusy = true;
+  detailUpscale.disabled = true;
+  detailUpscale.textContent = 'Requesting…';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  try {
+    const response = await fetch(`${UPSCALE_BASE}/api/upscale/request`, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        media_type: meta.type === 'series' ? 'series' : 'movie',
+        video_url: 'pending:no-stream-selected',
+      }),
+      signal: controller.signal,
+    });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+    if (data && data.status === 'queued') {
+      const count = upscaleCountFrom(data);
+      markUpscaleSpent(count);
+      showToast(plainText(data.message, upscaleRequestedLabel(count)));
+      return;
+    }
+    // 200 with status "error", or any non-queued body: this did NOT land.
+    resetUpscaleButton();
+    showToast(
+      plainText(data && data.message, `The upscale service did not accept this request (HTTP ${response.status}).`),
+      'error'
+    );
+  } catch (error) {
+    resetUpscaleButton();
+    showToast(
+      error && error.name === 'AbortError'
+        ? 'The upscale service did not answer in time. Try again.'
+        : 'Could not reach the upscale service. Try again.',
+      'error'
+    );
+  } finally {
+    clearTimeout(timeout);
+    upscaleBusy = false;
+  }
+}
+
 function openDetail(meta) {
   state.selected = meta;
   detailTitle.textContent = meta.name;
@@ -410,19 +613,8 @@ function openDetail(meta) {
   const sourceOnly = isMwp(meta);
   detailPlay.hidden = sourceOnly;
   
-  if (typeof detailUpscale !== 'undefined') {
-    detailUpscale.disabled = false;
-    detailUpscale.textContent = '4K Upscale';
-    fetch('https://upscale.lyreosai.com/api/upscale/status?title=' + encodeURIComponent(meta.title))
-      .then(res => res.json())
-      .then(data => {
-        if (data.count > 0) {
-          detailUpscale.textContent = '4K Upscale (' + data.count + ' requests)';
-        }
-      })
-      .catch(console.error);
-  }
-  
+  refreshUpscaleButton(meta);
+
   const sourceUrl = isMwp(meta) ? meta.website : '';
   detailSourceLink.hidden = !sourceUrl;
   if (sourceUrl) detailSourceLink.href = sourceUrl;
@@ -496,36 +688,111 @@ function setPlayerState(kind, message) {
   video.classList.toggle('ready', kind === 'playing');
 }
 
-async function openPlayer(title, rawUrl) {
+/* ---------------------------------------------------------------------------
+   Playback, and the proxy resolver as a FALLBACK.
+
+   The add-on now embeds GET /proxy/resolve/redirect (a 302 straight to the
+   media) into the stream URL it hands out, and a <video> src follows a 302 on
+   its own. So the plain server URL is the default path and is tried FIRST.
+   Only when that URL fails to load -- an `error` event, or nothing at all
+   within PLAYER_STALL_TIMEOUT -- is /proxy/resolve asked for a direct link.
+
+   MEASURED 26 Aug 2026: GET https://addon.lyreosai.com/proxy/resolve -> 404
+   {"error":"Not found"}, and /proxy/resolve/redirect -> 404 as well. Neither is
+   deployed yet. That is exactly why this is a fallback and not the default:
+   with the old code every embed-looking URL waited on a 404 before playing.
+
+   Nothing here can strand the viewer on a spinner: the resolve fetch is
+   aborted after RESOLVE_TIMEOUT, the initial load has a stall watchdog, and
+   every dead end ends in a visible error message.
+--------------------------------------------------------------------------- */
+let playSession = 0;
+let playerWatchdog = null;
+
+function clearPlayerWatchdog() {
+  if (playerWatchdog !== null) {
+    clearTimeout(playerWatchdog);
+    playerWatchdog = null;
+  }
+}
+
+async function resolveViaProxy(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT);
+  try {
+    const response = await fetch(`${API_BASE}/proxy/resolve?url=${encodeURIComponent(url)}`, {
+      mode: 'cors',
+      credentials: 'omit',
+      signal: controller.signal,
+    });
+    if (!response.ok) return '';
+    const data = await response.json();
+    return safeHttpsUrl(data && data.url);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Attach the one-shot outcome listeners for a single load attempt. `session`
+// pins them to this openPlayer() call, so a stale listener left over from a
+// closed player (closePlayer() also removes src, which fires `error`) is inert.
+function watchPlayerLoad(session, originalUrl, canRetry) {
+  const onReady = () => {
+    if (session !== playSession) return;
+    clearPlayerWatchdog();
+    video.removeEventListener('error', onFail);
+    setPlayerState('playing');
+  };
+  const onFail = () => {
+    if (session !== playSession) return;
+    clearPlayerWatchdog();
+    video.removeEventListener('loadedmetadata', onReady);
+    if (canRetry) retryViaProxy(session, originalUrl);
+    else setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
+  };
+  video.addEventListener('loadedmetadata', onReady, { once: true });
+  video.addEventListener('error', onFail, { once: true });
+  clearPlayerWatchdog();
+  playerWatchdog = window.setTimeout(() => {
+    playerWatchdog = null;
+    if (session !== playSession) return;
+    video.removeEventListener('loadedmetadata', onReady);
+    video.removeEventListener('error', onFail);
+    if (canRetry) retryViaProxy(session, originalUrl);
+    else setPlayerState('error', 'This stream did not start. Try another source.');
+  }, PLAYER_STALL_TIMEOUT);
+}
+
+async function retryViaProxy(session, originalUrl) {
+  setPlayerState('loading', 'Finding a direct link…');
+  const resolved = await resolveViaProxy(originalUrl);
+  if (session !== playSession) return;
+  if (!resolved || resolved === originalUrl) {
+    setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
+    return;
+  }
+  setPlayerState('loading');
+  watchPlayerLoad(session, resolved, false);
+  video.src = resolved;
+  video.load();
+  const play = video.play();
+  if (play && typeof play.catch === 'function') play.catch(() => {});
+}
+
+function openPlayer(title, rawUrl) {
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
+  const session = (playSession += 1);
   playerTitle.textContent = title;
   player.hidden = false;
   document.body.classList.add('no-scroll');
-  
-  const isEmbed = url.includes('voe.sx') || url.includes('streamtape') || url.includes('dood') || (!url.includes('.mp4') && !url.includes('.m3u8') && !url.includes('.mkv'));
-  
-  let finalUrl = url;
-  if (isEmbed) {
-    setPlayerState('loading', 'Bypassing Security...');
-    try {
-      const res = await fetch(`${API_BASE}/proxy/resolve?url=${encodeURIComponent(url)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) finalUrl = data.url;
-      }
-    } catch (e) {
-      console.error('Failed to resolve URL:', e);
-    }
-  }
 
   setPlayerState('loading');
-  video.addEventListener('loadedmetadata', () => setPlayerState('playing'), { once: true });
-  video.addEventListener('error', () => {
-    setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
-  }, { once: true });
-  
-  video.src = finalUrl;
+  watchPlayerLoad(session, url, true);
+
+  video.src = url;
   video.load();
   startSync({ id: state.selected?.id });
   const profileId = localStorage.getItem('profileId');
@@ -543,17 +810,26 @@ async function openPlayer(title, rawUrl) {
       }).catch(()=>{});
   }
 
+  // A rejected play() is usually only the autoplay policy; `loadedmetadata`
+  // still arrives for a good stream and clears the spinner. Do NOT claim
+  // 'playing' here -- that used to hide the spinner for streams that never
+  // loaded at all.
   const play = video.play();
-  if (play && typeof play.catch === 'function') play.catch(() => setPlayerState('playing'));
+  if (play && typeof play.catch === 'function') play.catch(() => {});
 }
 
 function closePlayer() {
+  // Retire this session first: removing src below fires a stray `error`, and a
+  // live watchdog would otherwise report a failure for a player that is gone.
+  playSession += 1;
+  clearPlayerWatchdog();
   stopSync();
   if($('#resume-btn')) $('#resume-btn').hidden = true;
   video.pause();
   video.removeAttribute('src');
   video.load();
   player.hidden = true;
+  setPlayerState('idle');
   document.body.classList.remove('no-scroll');
 }
 
@@ -716,33 +992,7 @@ if ('serviceWorker' in navigator) {
 
 boot();
 
-const detailUpscale = $('#detail-upscale');
-
-detailUpscale.addEventListener('click', async () => {
-  const meta = state.selected;
-  if (!meta) return;
-  detailUpscale.disabled = true;
-  detailUpscale.textContent = 'Requesting...';
-  try {
-    const res = await fetch('https://upscale.lyreosai.com/api/upscale/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: meta.name,
-        media_type: meta.type,
-        video_url: 'pending:no-stream-selected'
-      })
-    });
-    const data = await res.json();
-    if (data.status === 'queued') {
-      detailUpscale.textContent = data.message || 'Queued';
-    } else {
-      detailUpscale.textContent = 'Service does not accept it';
-    }
-  } catch (err) {
-    detailUpscale.textContent = 'Failed';
-  }
-});
+detailUpscale.addEventListener('click', requestUpscale);
 
 async function loadStreams(meta) {
   const container = $('#detail-streams');

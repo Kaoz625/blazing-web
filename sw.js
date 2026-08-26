@@ -4,7 +4,9 @@
 
 // Bump when a cached shell file changes. Without this, installed PWAs can keep
 // an older Home implementation even after GitHub Pages publishes the new app.js.
-const CACHE = 'blazing-shell-v7';
+// v8: upscale button popup + pressed state (app.js, styles.css) and the
+// proxy resolver moved to a playback fallback (app.js).
+const CACHE = 'blazing-shell-v8';
 const SHELL = [
   './',
   './index.html',
