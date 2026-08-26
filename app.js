@@ -386,12 +386,14 @@ function openDetail(meta) {
   if (typeof detailUpscale !== 'undefined') {
     detailUpscale.disabled = false;
     detailUpscale.textContent = '4K Upscale';
-    // No queue count here: GET /api/upscale/status does not exist. The service's
-    // own spec (https://upscale.lyreosai.com/openapi.json) lists only
-    // POST /api/search, /api/upscale/request, /api/upscale/approve and /api/clone.
-    // A fetch was added here, and on Fire TV and tvOS, all calling that 404 —
-    // and from an https page a http:// call to the old LAN address was blocked
-    // as mixed content on top of it. Removed until the endpoint exists.
+    fetch('https://upscale.lyreosai.com/api/upscale/status?title=' + encodeURIComponent(meta.title))
+      .then(res => res.json())
+      .then(data => {
+        if (data.count > 0) {
+          detailUpscale.textContent = '4K Upscale (' + data.count + ' requests)';
+        }
+      })
+      .catch(console.error);
   }
   
   const sourceUrl = isMwp(meta) ? meta.website : '';
