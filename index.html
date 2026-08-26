@@ -29,6 +29,7 @@
       <button type="button" data-view="anime">Anime</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
       <button type="button" data-view="library">Library</button>
+      <button type="button" data-view="admin">Admin</button>
     </nav>
     <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" /><path d="m15.2 15.2 4.3 4.3" /></svg>
@@ -47,6 +48,7 @@
         <button type="button" data-view="anime">Anime</button>
         <button type="button" data-view="roadmaps">Roadmaps</button>
         <button type="button" data-view="library">Library</button>
+      <button type="button" data-view="admin">Admin</button>
         <button type="button" data-view="search">Search</button>
       </nav>
       <p class="drawer-section">More</p>
@@ -122,6 +124,23 @@
       <div id="discover-results" class="search-results"></div>
     </section>
 
+
+    <section id="admin-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Admin</p>
+        <h1>Dashboard</h1>
+        <p>Manage devices and view network activity.</p>
+      </div>
+      <div id="admin-linking" class="admin-panel" hidden>
+        <h2>Device Linking Request</h2>
+        <p id="admin-link-text">A new device wants to connect.</p>
+        <button id="admin-approve-btn" class="primary-button">Approve Device</button>
+      </div>
+      <div id="admin-activity" class="admin-panel">
+        <h2>Currently Watching</h2>
+        <div id="admin-activity-list" class="grid-list"></div>
+      </div>
+    </section>
     <section id="roadmaps-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Roadmaps</p>
@@ -150,9 +169,11 @@
         <div class="detail-actions">
           <button id="detail-play" class="primary-button" type="button">Play</button>
           <button id="detail-save" class="secondary-button" type="button">My list</button>
+          <button id="detail-upscale" class="secondary-button" type="button">4K Upscale</button>
           <a id="detail-source-link" class="text-link" target="_blank" rel="noreferrer" hidden>Open source page</a>
         </div>
         <p id="detail-status" class="detail-status" role="status"></p>
+        <div id="detail-streams" class="detail-streams"></div>
       </div>
     </article>
   </dialog>

@@ -203,6 +203,7 @@ function showRoute(route) {
   homeView.hidden = !browseRoute;
   searchView.hidden = route !== 'search';
   libraryView.hidden = route !== 'library';
+  adminView.hidden = route !== 'admin' && route !== 'link';
   discoverView.hidden = route !== 'discover';
   roadmapsView.hidden = route !== 'roadmaps';
   if (browseRoute) applyRowFilter(route);
@@ -381,6 +382,12 @@ function openDetail(meta) {
   detailSource.textContent = source;
   const sourceOnly = isMwp(meta);
   detailPlay.hidden = sourceOnly;
+  
+  if (typeof detailUpscale !== 'undefined') {
+    detailUpscale.disabled = false;
+    detailUpscale.textContent = '4K Upscale';
+  }
+  
   const sourceUrl = isMwp(meta) ? meta.website : '';
   detailSourceLink.hidden = !sourceUrl;
   if (sourceUrl) detailSourceLink.href = sourceUrl;
@@ -390,12 +397,19 @@ function openDetail(meta) {
   updateSaveLabels();
   if (typeof detailDialog.showModal === 'function') detailDialog.showModal();
   else detailDialog.setAttribute('open', '');
+  
+  if (!sourceOnly) {
+    loadStreams(meta);
+  } else {
+    $('#detail-streams').innerHTML = '';
+  }
 }
 
 function closeDetail() {
   if (detailDialog.open && typeof detailDialog.close === 'function') detailDialog.close();
   else detailDialog.removeAttribute('open');
   state.selected = null;
+  $('#detail-streams').innerHTML = '';
 }
 
 async function resolveStreams(meta) {
@@ -411,7 +425,16 @@ async function playSelected() {
   detailStatus.textContent = 'Checking direct streams…';
   try {
     const streams = await resolveStreams(meta);
-    const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url));
+    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
+    const getPenalty = (s) => {
+      if (deadLinks.includes(s.url)) return 1000;
+      let p = 0;
+      const b = (s.name + ' ' + (s.title || '')).toLowerCase();
+      if (/rus|russian|ita|italian|latino|french/.test(b)) p += 100;
+      return p;
+    };
+    streams.sort((a, b) => getPenalty(a) - getPenalty(b));
+    const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url) && !deadLinks.includes(stream.url)) || streams.find((stream) => stream && safeHttpsUrl(stream.url));
     if (!playable) {
       detailStatus.textContent = isMwp(meta)
         ? 'This source page has no verified direct stream for this device yet.'
@@ -592,3 +615,94 @@ if ('serviceWorker' in navigator) {
 }
 
 boot();
+
+const detailUpscale = $('#detail-upscale');
+
+detailUpscale.addEventListener('click', async () => {
+  const meta = state.selected;
+  if (!meta) return;
+  detailUpscale.disabled = true;
+  detailUpscale.textContent = 'Requesting...';
+  try {
+    const res = await fetch('http://192.168.86.49:8000/api/upscale/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: meta.name,
+        media_type: meta.type,
+        video_url: 'pending:no-stream-selected'
+      })
+    });
+    const data = await res.json();
+    if (data.status === 'queued') {
+      detailUpscale.textContent = data.message || 'Queued';
+    } else {
+      detailUpscale.textContent = 'Service does not accept it';
+    }
+  } catch (err) {
+    detailUpscale.textContent = 'Failed';
+  }
+});
+
+async function loadStreams(meta) {
+  const container = $('#detail-streams');
+  container.innerHTML = '';
+  if (isMwp(meta)) return;
+  
+  detailStatus.textContent = 'Loading streams...';
+  try {
+    let streams = await resolveStreams(meta);
+    if (!streams.length) {
+      detailStatus.textContent = 'No compatible stream available.';
+      return;
+    }
+    
+    // Sort logic
+    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
+    const getPenalty = (s) => {
+      if (deadLinks.includes(s.url)) return 1000;
+      let p = 0;
+      const b = (s.name + ' ' + (s.title || '')).toLowerCase();
+      if (/rus|russian|ita|italian|latino|french/.test(b)) p += 100;
+      return p;
+    };
+    
+    streams.sort((a, b) => getPenalty(a) - getPenalty(b));
+    
+    detailStatus.textContent = '';
+    
+    streams.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'stream-row';
+      if (deadLinks.includes(s.url)) row.classList.add('dead');
+      
+      const q = s.name || 'SD';
+      const title = s.title || '';
+      
+      row.innerHTML = `
+        <div class="stream-info">
+          <div class="stream-q">${q}</div>
+          <div class="stream-title">${title}</div>
+        </div>
+      `;
+      
+      row.onclick = () => {
+        closeDetail();
+        openPlayer(meta.name, s.url);
+      };
+      
+      row.oncontextmenu = (e) => {
+        e.preventDefault();
+        if (!deadLinks.includes(s.url)) deadLinks.push(s.url);
+        localStorage.setItem('dead_links', JSON.stringify(deadLinks));
+        row.classList.add('dead');
+        container.appendChild(row); // move to bottom
+      };
+      
+      container.appendChild(row);
+    });
+    
+  } catch (err) {
+    detailStatus.textContent = 'Failed to load streams.';
+  }
+}

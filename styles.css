@@ -299,3 +299,47 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .detail-dialog { width: calc(100% - 16px); }
   .detail-body { padding: 55px 20px 26px; }
 }
+
+.detail-streams {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 250px;
+  overflow-y: auto;
+}
+.stream-row {
+  background: var(--bg-card);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid transparent;
+  user-select: none;
+}
+.stream-row:hover {
+  border-color: var(--accent);
+}
+.stream-row.dead {
+  opacity: 0.4;
+}
+.stream-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.stream-title {
+  font-size: 0.85rem;
+  color: var(--text-base);
+}
+.stream-tags {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.stream-q {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
