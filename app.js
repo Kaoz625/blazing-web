@@ -458,23 +458,46 @@ async function playSelected() {
 
 function setPlayerState(kind, message) {
   playerSpinner.hidden = kind !== 'loading';
-  playerMsg.hidden = kind !== 'error';
-  playerMsg.textContent = kind === 'error' ? message || 'Something went wrong.' : '';
+  playerMsg.hidden = (kind !== 'error' && kind !== 'loading') || !message;
+  if (kind === 'error') {
+    playerMsg.textContent = message || 'Something went wrong.';
+  } else if (kind === 'loading' && message) {
+    playerMsg.textContent = message;
+  } else {
+    playerMsg.textContent = '';
+  }
   video.classList.toggle('ready', kind === 'playing');
 }
 
-function openPlayer(title, rawUrl) {
+async function openPlayer(title, rawUrl) {
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
   playerTitle.textContent = title;
   player.hidden = false;
   document.body.classList.add('no-scroll');
+  
+  const isEmbed = url.includes('voe.sx') || url.includes('streamtape') || url.includes('dood') || (!url.includes('.mp4') && !url.includes('.m3u8') && !url.includes('.mkv'));
+  
+  let finalUrl = url;
+  if (isEmbed) {
+    setPlayerState('loading', 'Bypassing Security...');
+    try {
+      const res = await fetch(`${API_BASE}/proxy/resolve?url=${encodeURIComponent(url)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) finalUrl = data.url;
+      }
+    } catch (e) {
+      console.error('Failed to resolve URL:', e);
+    }
+  }
+
   setPlayerState('loading');
   video.addEventListener('loadedmetadata', () => setPlayerState('playing'), { once: true });
   video.addEventListener('error', () => {
     setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
   }, { once: true });
-  video.src = url;
+  video.src = finalUrl;
   video.load();
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => setPlayerState('playing'));
