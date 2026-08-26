@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Blazing</title>
   <meta name="description" content="Blazing — one clear place for your library." />
-  <meta name="theme-color" content="#0A0A0B" />
+  <meta name="theme-color" content="#0A0A0A" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Blazing" />
@@ -27,6 +27,8 @@
       <button type="button" data-view="movies">Movies</button>
       <button type="button" data-view="shows">Shows</button>
       <button type="button" data-view="anime">Anime</button>
+      <button type="button" data-view="trailers">🎬 Trailers</button>
+      <button type="button" data-view="education">📚 Education</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
       <button type="button" data-view="library">Library</button>
       <button type="button" data-view="admin">Admin</button>
@@ -46,9 +48,11 @@
         <button type="button" data-view="movies">Movies</button>
         <button type="button" data-view="shows">Shows</button>
         <button type="button" data-view="anime">Anime</button>
+        <button type="button" data-view="trailers">🎬 Trailers</button>
+        <button type="button" data-view="education">📚 Education</button>
         <button type="button" data-view="roadmaps">Roadmaps</button>
         <button type="button" data-view="library">Library</button>
-      <button type="button" data-view="admin">Admin</button>
+        <button type="button" data-view="admin">Admin</button>
         <button type="button" data-view="search">Search</button>
       </nav>
       <p class="drawer-section">More</p>
@@ -155,6 +159,7 @@
         <div id="admin-activity-list" class="grid-list"></div>
       </div>
     </section>
+
     <section id="roadmaps-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Roadmaps</p>
@@ -167,6 +172,35 @@
         <article><span>03</span><h2>My list</h2><p>Keep titles you want to return to on this device.</p></article>
       </div>
     </section>
+
+    <!-- ── Trailers View ── -->
+    <section id="trailers-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Trailers</p>
+        <h1>🎬 What to Watch</h1>
+        <p>New in theaters and coming soon — click any title to preview the trailer.</p>
+      </div>
+      <div id="trailers-rows" class="rows"></div>
+    </section>
+
+    <!-- ── Education View ── -->
+    <section id="education-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Education</p>
+        <h1>📚 Learn Something</h1>
+        <p>Documentaries, courses, and educational content — organized by topic.</p>
+      </div>
+      <div class="edu-tabs" role="tablist" aria-label="Education categories">
+        <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">🔬 Science</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="history" aria-selected="false">🏛️ History</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="stem" aria-selected="false">💻 STEM</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="kids" aria-selected="false">🎨 Kids</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="languages" aria-selected="false">🌍 Languages</button>
+      </div>
+      <p id="edu-status" class="search-status" role="status"></p>
+      <div id="edu-results" class="search-results"></div>
+    </section>
+
   </main>
 
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
@@ -174,7 +208,10 @@
       <button id="detail-close" class="detail-close icon-button" type="button" aria-label="Close details">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
       </button>
-      <div id="detail-art" class="detail-art" aria-hidden="true"></div>
+      <!-- Trailer embed lives inside the art layer so it sits behind the content -->
+      <div id="detail-art" class="detail-art" aria-hidden="true">
+        <div id="detail-trailer" class="detail-trailer" aria-hidden="true"></div>
+      </div>
       <div class="detail-body">
         <p id="detail-source" class="source-pill" hidden></p>
         <p id="detail-year" class="eyebrow"></p>
@@ -184,6 +221,10 @@
           <button id="detail-play" class="primary-button" type="button">Play</button>
           <button id="detail-save" class="secondary-button" type="button">My list</button>
           <button id="detail-upscale" class="secondary-button" type="button" aria-pressed="false">4K Upscale</button>
+          <!-- Quality selector — hidden until streams are loaded -->
+          <select id="quality-select" class="quality-select" hidden aria-label="Stream quality">
+            <option value="">All Quality</option>
+          </select>
           <a id="detail-source-link" class="text-link" target="_blank" rel="noreferrer" hidden>Open source page</a>
         </div>
         <p id="detail-status" class="detail-status" role="status"></p>
@@ -207,6 +248,9 @@
     </div>
   </section>
 
+  <!-- Loaded before app.js so window.BlazingTelemetry exists by the time the
+       first screen_view fires. app.js guards for it anyway. -->
+  <script src="./telemetry.js" defer></script>
   <script src="./profile.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>

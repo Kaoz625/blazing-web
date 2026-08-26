@@ -113,6 +113,34 @@ function safeHttpsUrl(value) {
   }
 }
 
+/**
+ * Only https, and only a map of short label -> https url. Anything else is
+ * dropped rather than trusted: this value ends up in a <video src>, so it is
+ * exactly the field an upstream catalog could use to point the player somewhere
+ * it should not go.
+ */
+function safeQualityMap(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  for (const [key, value] of Object.entries(raw).slice(0, 8)) {
+    const label = plainText(key).slice(0, 12);
+    const url = safeHttpsUrl(typeof value === 'string' ? value : (value && value.url));
+    if (label && url) out[label] = url;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * safeMeta is an ALLOW list — anything not named here is thrown away.
+ *
+ * That is deliberate and worth keeping, but it also meant trailerUrl and
+ * streamsByQuality were being deleted from every response before any screen
+ * could see them. Trailer autoplay and the quality picker would have stayed
+ * dead even after the addon is redeployed, and it would have looked like a
+ * backend problem. The rating fields are here for the same reason: the brief
+ * asks for IMDb/TMDB age and star ratings on the detail page, and they cannot
+ * be shown if they are stripped on arrival.
+ */
 function safeMeta(raw) {
   if (!raw || typeof raw !== 'object' || !raw.id) return null;
   return {
@@ -124,6 +152,12 @@ function safeMeta(raw) {
     description: plainText(raw.description),
     releaseInfo: plainText(raw.releaseInfo),
     website: safeHttpsUrl(raw.website),
+    trailerUrl: safeHttpsUrl(raw.trailerUrl),
+    streamsByQuality: safeQualityMap(raw.streamsByQuality),
+    imdbRating: plainText(raw.imdbRating || raw.rating).slice(0, 5),
+    certification: plainText(raw.certification || raw.ageRating).slice(0, 12),
+    runtime: plainText(raw.runtime).slice(0, 16),
+    genres: Array.isArray(raw.genres) ? raw.genres.slice(0, 4).map((g) => plainText(g).slice(0, 24)).filter(Boolean) : [],
   };
 }
 
@@ -265,6 +299,16 @@ function showRoute(route) {
   adminView.hidden = route !== 'admin' && route !== 'link';
   discoverView.hidden = route !== 'discover';
   roadmapsView.hidden = route !== 'roadmaps';
+  // The Trailers and Education sections shipped as markup with no code behind
+  // them, so both tabs opened a blank page. They are lazy: a tab that is never
+  // pressed costs nothing, and both back onto rows that are empty today.
+  const trailersView = $('#trailers-view');
+  const educationView = $('#education-view');
+  if (trailersView) trailersView.hidden = route !== 'trailers';
+  if (educationView) educationView.hidden = route !== 'education';
+  if (route === 'trailers') loadTrailersView();
+  if (route === 'education') loadEducationView();
+  telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
   if (route === 'search') setTimeout(() => $('#search-input').focus(), 0);
@@ -283,6 +327,67 @@ function buildRowSkeleton(catalog) {
   for (let i = 0; i < 6; i += 1) track.appendChild(el('div', 'card skeleton'));
   section.append(heading, track);
   return section;
+}
+
+/**
+ * Rows whose backend is committed but not deployed. MEASURED 26 Aug 2026: both
+ * answer 200 with `metas: []`, because the running addon predates b65e115.
+ * loadRow() already removes a section that comes back empty, so these cost one
+ * request and leave no blank shelf behind.
+ */
+const TRENDING_ROWS = Object.freeze([
+  { id: 'blazing-trending-movies', type: 'movie', name: '🔥 Trending Now' },
+  { id: 'blazing-trending-series', type: 'series', name: '🔥 Trending Shows' },
+]);
+
+const TRAILER_ROWS = Object.freeze([
+  { id: 'blazing-trailers-new', type: 'movie', name: '🎬 New in Theaters' },
+  { id: 'blazing-trailers-upcoming', type: 'movie', name: '🗓 Coming Soon' },
+]);
+
+const EDU_SLUGS = Object.freeze(['science', 'history', 'stem', 'kids', 'languages']);
+
+const HOVER_TRAILER_MS = 1000;
+
+/**
+ * Fade a card's poster into its muted trailer after a dwell.
+ *
+ * On dwell, not on hover: a mouse crossing a row would otherwise start and
+ * cancel a video load per card, which on a slow connection queues a dozen
+ * requests for something nobody asked to see.
+ */
+function attachHoverTrailer(card, meta) {
+  if (!meta || !meta.trailerUrl) return;
+  let timer = null;
+  let video = null;
+  const stop = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (video) {
+      video.remove();
+      video = null;
+      card.classList.remove('card-previewing');
+    }
+  };
+  card.addEventListener('mouseenter', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const url = safeHttpsUrl(meta.trailerUrl);
+      if (!url) return;
+      video = el('video', 'card-video');
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.src = url;
+      video.addEventListener('error', stop, { once: true });
+      card.appendChild(video);
+      card.classList.add('card-previewing');
+      const played = video.play();
+      if (played && played.catch) played.catch(() => {});
+    }, HOVER_TRAILER_MS);
+  });
+  card.addEventListener('mouseleave', stop);
+  card.addEventListener('focusout', stop);
 }
 
 function buildCard(meta) {
@@ -308,6 +413,7 @@ function buildCard(meta) {
     card.appendChild(badge);
   }
   card.append(image, label);
+  attachHoverTrailer(card, meta);
   card.addEventListener('click', () => openDetail(meta));
   return card;
 }
@@ -412,6 +518,15 @@ async function boot() {
   // These fleet shelves are current when the add-on manifest is stale or slow.
   // They are added first and kept in fixed visual order. Existing add-on rows
   // still load below them as the broad catalog fallback.
+  // Trending goes in before the fresh shelves so it lands directly under the
+  // Continue Watching row, which prepends itself when it resolves.
+  const trendingJobs = TRENDING_ROWS.map((catalog) => {
+    const section = buildRowSkeleton(catalog);
+    section.dataset.softRow = 'true';
+    rowsWrap.appendChild(section);
+    return loadRow(catalog, section);
+  });
+
   const freshJobs = FRESH_HOME_SHELVES.map((shelf) => {
     const section = buildRowSkeleton({ id: shelf.id, name: shelf.title, type: shelf.type });
     section.dataset.freshShelf = 'true';
@@ -443,7 +558,7 @@ async function boot() {
     })
     .catch(() => []);
 
-  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone]);
+  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
   const first = freshRows.find((metas) => metas.length)?.[0]
     || catalogRows.find((metas) => metas.length)?.[0];
   if (first) {
@@ -621,10 +736,15 @@ function openDetail(meta) {
   detailStatus.textContent = sourceOnly
     ? 'Source page only. Open MrWorldPremiere in a web browser to watch.'
     : '';
+  renderRatingChips(meta);
   updateSaveLabels();
+  resetQualitySelect();
   if (typeof detailDialog.showModal === 'function') detailDialog.showModal();
   else detailDialog.setAttribute('open', '');
-  
+
+  startDetailTrailer(meta);
+  telemetry('nav_action', { action: 'open_detail', from: state.route || 'home' });
+
   if (!sourceOnly) {
     loadStreams(meta);
   } else {
@@ -635,6 +755,7 @@ function openDetail(meta) {
 function closeDetail() {
   if (detailDialog.open && typeof detailDialog.close === 'function') detailDialog.close();
   else detailDialog.removeAttribute('open');
+  stopDetailTrailer();
   state.selected = null;
   $('#detail-streams').innerHTML = '';
 }
@@ -880,8 +1001,13 @@ async function runSearch(event) {
       } else {
         status.textContent = 'No titles found via AI.';
       }
+      telemetry('search', { query, results: metas.length, kind: 'ai' });
     } catch {
       status.textContent = 'AI search failed.';
+      // The deployed addon answers "Method is not allowed" to this route, so a
+      // zero here is a missing backend, not a content gap. Worth counting
+      // separately from a genuine empty result.
+      telemetry('error', { where: 'app.runSearch.ai', code: 'post_failed', message: 'ai-search unavailable' });
     }
     return;
   }
@@ -911,6 +1037,10 @@ async function runSearch(event) {
     target.appendChild(buildResultRow(title, metas));
   }
   status.textContent = count ? `${count} result${count === 1 ? '' : 's'} found.` : 'No titles found.';
+  // A query with results: 0 is a content gap — that is the whole point of
+  // v_searches. The query text itself is not a secret; the deny-list only
+  // strips props whose NAME looks like a credential.
+  telemetry('search', { query, results: count, kind: 'text' });
 }
 
 function renderLibrary() {
@@ -1018,12 +1148,18 @@ async function loadStreams(meta) {
     };
     
     streams.sort((a, b) => getPenalty(a) - getPenalty(b));
-    
+
     detailStatus.textContent = '';
+    // The dropdown is filled from the meta's streamsByQuality when the backend
+    // supplies one, and otherwise from the qualities actually present in this
+    // list. Deriving it is what makes the control work today: streamsByQuality
+    // is part of the undeployed addon commit and is absent from every response.
+    fillQualitySelect(meta, streams);
     
     streams.forEach(s => {
       const row = document.createElement('div');
       row.className = 'stream-row';
+      row.dataset.quality = qualityOf(s);
       if (deadLinks.includes(s.url)) row.classList.add('dead');
       
       const q = s.name || 'SD';
@@ -1048,6 +1184,13 @@ async function loadStreams(meta) {
       `;
       
       row.onclick = () => {
+        // No URL here — rule 6. The host and the resolution are what make
+        // v_source_health useful; the link itself is exactly what must not go.
+        telemetry('play_start', {
+          id: meta.id, title: meta.name, type: meta.type,
+          source: String(s._from || '').replace(/^site:/, ''),
+          res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
+        });
         closeDetail();
         openPlayer(meta.name, s.url);
       };
@@ -1065,6 +1208,7 @@ async function loadStreams(meta) {
     
   } catch (err) {
     detailStatus.textContent = 'Failed to load streams.';
+    telemetry('error', { where: 'app.loadStreams', code: 'fetch', message: String(err && err.message || err).slice(0, 200) });
   }
 }
 
@@ -1127,4 +1271,291 @@ function startSync(meta) {
 function stopSync() {
   if (syncInterval) clearInterval(syncInterval);
   syncInterval = null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Trailers, Education, the quality control, and telemetry call sites.
+
+   The markup for the first two shipped earlier today with no code behind it,
+   so both tabs opened a blank page. Everything below is the missing half.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Fire-and-forget. telemetry.js may not have loaded; that must never throw. */
+function telemetry(name, props) {
+  try { window.BlazingTelemetry && window.BlazingTelemetry.log(name, props); } catch (e) {}
+}
+
+/* ── quality ─────────────────────────────────────────────────────────────── */
+
+const qualitySelect = $('#quality-select');
+
+/** One label per stream, from whatever the name and title happen to say. */
+function qualityOf(stream) {
+  const hay = `${stream.name || ''} ${stream.title || ''}`;
+  if (/2160|4k|uhd/i.test(hay)) return '4K';
+  if (/1080|fhd/i.test(hay)) return '1080p';
+  if (/720/i.test(hay)) return '720p';
+  if (/480|360|\bsd\b/i.test(hay)) return 'SD';
+  return 'Other';
+}
+
+function resetQualitySelect() {
+  if (!qualitySelect) return;
+  qualitySelect.hidden = true;
+  qualitySelect.replaceChildren(new Option('All Quality', ''));
+}
+
+/**
+ * Fill the dropdown.
+ *
+ * `streamsByQuality` is the field the brief describes, and it does not exist on
+ * any response the deployed backend returns (measured 26 Aug 2026 — it belongs
+ * to the undeployed addon commit). Falling back to the qualities actually
+ * present in the stream list means the control does something useful today and
+ * needs no second pass when the backend lands.
+ */
+function fillQualitySelect(meta, streams) {
+  if (!qualitySelect) return;
+  const order = ['4K', '1080p', '720p', 'SD', 'Other'];
+  const counts = new Map();
+
+  const declared = meta && meta.streamsByQuality;
+  if (declared && typeof declared === 'object' && Object.keys(declared).length) {
+    for (const key of Object.keys(declared)) counts.set(key, counts.get(key) || 0);
+  }
+  for (const s of streams) {
+    const q = qualityOf(s);
+    counts.set(q, (counts.get(q) || 0) + 1);
+  }
+
+  const keys = [...counts.keys()].sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  if (keys.length < 2) { resetQualitySelect(); return; }  // a filter with one option is furniture
+
+  qualitySelect.replaceChildren(new Option(`All Quality (${streams.length})`, ''));
+  for (const k of keys) {
+    const n = counts.get(k) || 0;
+    qualitySelect.appendChild(new Option(n ? `${k} (${n})` : k, k));
+  }
+  qualitySelect.hidden = false;
+}
+
+if (qualitySelect) {
+  qualitySelect.addEventListener('change', () => {
+    const want = qualitySelect.value;
+    let shown = 0;
+    $$('#detail-streams .stream-row').forEach((row) => {
+      const match = !want || row.dataset.quality === want;
+      row.hidden = !match;
+      if (match) shown += 1;
+    });
+    detailStatus.textContent = want && !shown ? `No ${want} source for this title.` : '';
+    telemetry('nav_action', { action: 'quality_filter', from: want || 'all' });
+  });
+}
+
+/* ── the detail hero trailer ─────────────────────────────────────────────── */
+
+let detailTrailerVideo = null;
+
+/**
+ * Autoplay the trailer muted behind the title, with a mute toggle.
+ *
+ * Muted is not a preference, it is the only way a browser will autoplay at all;
+ * an unmuted autoplay is rejected and leaves a dead black box. The toggle is
+ * how the user opts in to sound, which is also the gesture the browser wants.
+ */
+function startDetailTrailer(meta) {
+  stopDetailTrailer();
+  const host = $('#detail-trailer');
+  if (!host || !meta || !meta.trailerUrl) return;
+  const url = safeHttpsUrl(meta.trailerUrl);
+  if (!url) return;
+
+  const video = el('video');
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.src = url;
+
+  const toggle = el('button', 'detail-mute-btn');
+  toggle.type = 'button';
+  toggle.textContent = '🔇';
+  toggle.setAttribute('aria-label', 'Unmute trailer');
+  toggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    video.muted = !video.muted;
+    toggle.textContent = video.muted ? '🔇' : '🔊';
+    toggle.setAttribute('aria-label', video.muted ? 'Unmute trailer' : 'Mute trailer');
+    telemetry('nav_action', { action: video.muted ? 'trailer_mute' : 'trailer_unmute', from: 'detail' });
+  });
+
+  video.addEventListener('error', stopDetailTrailer, { once: true });
+  host.replaceChildren(video, toggle);
+  host.setAttribute('aria-hidden', 'false');
+  host.classList.add('loaded');
+  detailTrailerVideo = video;
+  const played = video.play();
+  if (played && played.catch) played.catch(() => {});
+  telemetry('nav_action', { action: 'trailer_autoplay', from: 'detail' });
+}
+
+function stopDetailTrailer() {
+  const host = $('#detail-trailer');
+  if (detailTrailerVideo) {
+    try { detailTrailerVideo.pause(); detailTrailerVideo.removeAttribute('src'); } catch (e) {}
+    detailTrailerVideo = null;
+  }
+  if (host) {
+    host.replaceChildren();
+    host.classList.remove('loaded');
+    host.setAttribute('aria-hidden', 'true');
+  }
+}
+
+/* ── the Trailers tab ────────────────────────────────────────────────────── */
+
+let trailersLoaded = false;
+
+async function loadTrailersView() {
+  const wrap = $('#trailers-rows');
+  if (!wrap || trailersLoaded) return;
+  trailersLoaded = true;
+  wrap.replaceChildren();
+
+  const jobs = TRAILER_ROWS.map((catalog) => {
+    const section = buildRowSkeleton(catalog);
+    wrap.appendChild(section);
+    return loadRow(catalog, section);   // removes its own section when empty
+  });
+  const rows = await Promise.all(jobs);
+
+  if (!rows.some((metas) => metas.length)) {
+    // Say why, rather than showing a page that looks broken. Both routes answer
+    // 200 with no items until the addon is redeployed.
+    // el() takes (tag, className) only — a third argument is silently dropped,
+    // which is how this shipped as an empty <p> the first time.
+    const note = el('p', 'search-status');
+    note.textContent = 'No trailers yet — this needs the trailer pipeline on the server, which is built but not deployed.';
+    wrap.appendChild(note);
+  }
+}
+
+/* ── the Education tab ───────────────────────────────────────────────────── */
+
+const eduCache = new Map();
+
+async function loadEducationView(slug) {
+  const status = $('#edu-status');
+  const results = $('#edu-results');
+  if (!results) return;
+
+  const tabs = $$('.edu-tab');
+  const active = slug || (tabs.find((t) => t.classList.contains('active'))?.dataset.eduSlug) || EDU_SLUGS[0];
+  tabs.forEach((tab) => {
+    const on = tab.dataset.eduSlug === active;
+    tab.classList.toggle('active', on);
+    tab.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+
+  if (eduCache.has(active)) {
+    renderEducation(eduCache.get(active), active);
+    return;
+  }
+  if (status) status.textContent = 'Loading…';
+  results.replaceChildren();
+  try {
+    const data = await fetchJSON(`${API_BASE}/catalog/tv/blazing-edu-${encodeURIComponent(active)}.json`);
+    const metas = (Array.isArray(data.metas) ? data.metas : []).map(safeMeta).filter(Boolean);
+    eduCache.set(active, metas);
+    renderEducation(metas, active);
+  } catch (err) {
+    if (status) status.textContent = 'Could not load that category.';
+    telemetry('error', { where: 'app.loadEducationView', code: 'fetch', message: String(err && err.message || err).slice(0, 200) });
+  }
+}
+
+function renderEducation(metas, slug) {
+  const status = $('#edu-status');
+  const results = $('#edu-results');
+  if (!results) return;
+  results.replaceChildren(...metas.map(buildCard));
+  if (status) {
+    status.textContent = metas.length
+      ? `${metas.length} in ${slug}`
+      : 'Nothing here yet — the education catalogs are built on the server but not deployed.';
+  }
+}
+
+$$('.edu-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    loadEducationView(tab.dataset.eduSlug);
+    telemetry('nav_action', { action: 'edu_tab', from: tab.dataset.eduSlug || '' });
+  });
+});
+
+/* ── remaining telemetry call sites ──────────────────────────────────────── */
+
+video.addEventListener('error', () => {
+  const meta = state.selected;
+  telemetry('play_failed', {
+    id: meta ? meta.id : '',
+    source: 'web',
+    code: String(video.error ? video.error.code : 'unknown'),
+    message: 'html5 media error',
+  });
+});
+
+video.addEventListener('ended', () => {
+  telemetry('play_end', {
+    id: state.selected ? state.selected.id : '',
+    positionSecs: Math.floor(video.currentTime || 0),
+    durationSecs: Math.floor(video.duration || 0),
+    percent: video.duration ? Math.round((video.currentTime / video.duration) * 100) : 0,
+    reason: 'finished',
+  });
+});
+
+$('#player-close').addEventListener('click', () => {
+  if (!video.duration) return;
+  telemetry('play_end', {
+    id: state.selected ? state.selected.id : '',
+    positionSecs: Math.floor(video.currentTime || 0),
+    durationSecs: Math.floor(video.duration || 0),
+    percent: Math.round((video.currentTime / video.duration) * 100),
+    reason: 'back',
+  });
+});
+
+/** Contract: heartbeat every 15 minutes, and it is what reports app_version. */
+setInterval(() => telemetry('heartbeat', {}), 15 * 60 * 1000);
+
+/**
+ * Age rating and star rating on the detail page.
+ *
+ * The chips row is created on demand rather than added to index.html, because
+ * index.html is being edited by someone else right now and a second hand in the
+ * same file is how merge damage happens. It lands right under the year line.
+ */
+function renderRatingChips(meta) {
+  let host = $('#detail-chips');
+  if (!host) {
+    host = el('div', 'detail-chips');
+    host.id = 'detail-chips';
+    detailYear.insertAdjacentElement('afterend', host);
+  }
+  host.replaceChildren();
+  const add = (text, cls) => {
+    if (!text) return;
+    const chip = el('span', cls ? `detail-chip ${cls}` : 'detail-chip');
+    chip.textContent = text;
+    host.appendChild(chip);
+  };
+  add(meta.certification, 'detail-chip-cert');
+  add(meta.imdbRating ? `★ ${meta.imdbRating}` : '', 'detail-chip-star');
+  add(meta.runtime);
+  if (meta.genres && meta.genres.length) add(meta.genres.join(' · '));
+  host.hidden = !host.childElementCount;
 }

@@ -6,12 +6,17 @@
 // an older Home implementation even after GitHub Pages publishes the new app.js.
 // v8: upscale button popup + pressed state (app.js, styles.css) and the
 // proxy resolver moved to a playback fallback (app.js).
-const CACHE = 'blazing-shell-v8';
+// v9: Trailers + Education tabs wired up, hover and detail trailer autoplay,
+// the quality control, rating chips (app.js, styles.css), and the new
+// telemetry.js. Without this bump an installed PWA keeps serving v8's app.js
+// and every one of those looks broken on a device that already has the app.
+const CACHE = 'blazing-shell-v9';
 const SHELL = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './telemetry.js',
   './profile.js',
   './watch-party.js',
   './locker.js',
