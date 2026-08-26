@@ -1,0 +1,14 @@
+{
+  "id": "com.lyreosai.blazing",
+  "version": "1.0.0",
+  "vendor": "Lyreos",
+  "type": "web",
+  "main": "index.html",
+  "title": "Blazing",
+  "icon": "icon-192.png",
+  "largeIcon": "icon-512.png",
+  "bgColor": "#000000",
+  "resolution": "1920x1080",
+  "transparent": false,
+  "appDescription": "The ultimate private streaming ecosystem."
+}
