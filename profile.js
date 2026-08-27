@@ -166,6 +166,7 @@
 
   function updateConnectButton() {
     const profile = state.activeProfile;
+    syncGateChrome();
     ui.connect.textContent = profile ? profile.name : 'Connect profile';
     ui.connect.dataset.connected = profile ? 'true' : 'false';
     ui.connect.setAttribute('aria-label', profile ? `Profile: ${profile.name}` : 'Connect profile');
@@ -265,6 +266,10 @@
     renderProfileList();
     dispatchProfileSelection(profile);
     setStatus(`${profile.name} is selected for this browser session.`, 'info');
+    // Picking somebody IS the answer to "who is watching?", so get out of the
+    // way. Leaving the panel up made the user close a dialog they had just
+    // finished with — and while it was the gate, that read as "it did not work".
+    closePanel();
   }
 
   function addDigit(digit) {
@@ -511,17 +516,53 @@
     showProfiles();
     dispatchProfileSelection(profile);
     setStatus(`${profile.name} is selected. Its unlock stays only in this browser session.`, 'info');
+    closePanel();
+  }
+
+  /**
+   * Show or hide the ways out, so the panel does not offer a button that will
+   * refuse. Called whenever the gate state can have changed.
+   */
+  function syncGateChrome() {
+    const held = gateRequired();
+    if (ui.copy) {
+      ui.copy.textContent = held
+        ? 'Choose a profile to start watching.'
+        : 'Connect this browser only when you want to use a shared profile.';
+    }
+    if (ui.close) ui.close.hidden = held;
+    if (ui.keepBrowsing) ui.keepBrowsing.hidden = held;
+    if (ui.layer) ui.layer.dataset.gate = held ? 'required' : 'optional';
   }
 
   function openPanel() {
+    syncGateChrome();
     ui.layer.hidden = false;
     ui.layer.setAttribute('aria-hidden', 'false');
     document.body.classList.add('no-scroll');
     window.setTimeout(() => ui.close.focus(), 0);
   }
 
+  /**
+   * Is the gate still holding the screen?
+   *
+   * Until a profile is chosen there is nobody to apply a rating cap to, and the
+   * four televisions all refuse to show anything in that state. The web now
+   * matches them: this returns true, and every way out of the panel — Close, the
+   * backdrop, Escape, "Keep browsing" — refuses while it does.
+   */
+  function gateRequired() {
+    return !state.activeProfile;
+  }
+
   function closePanel() {
     if (state.busy) return;
+    if (gateRequired()) {
+      // Not an error, and not silent either. Saying nothing here reads as a
+      // broken button.
+      setStatus('Choose who is watching before you start.', 'info');
+      return;
+    }
     state.pendingProfile = null;
     clearPinEntry();
     ui.pin.hidden = true;
@@ -559,7 +600,11 @@
     const kicker = element('p', 'bp-kicker', 'Profiles');
     const heading = element('h2', 'bp-heading', 'Who is watching?');
     heading.id = 'bp-heading';
-    const copy = element('p', 'bp-copy', 'Connect this browser only when you want to use a shared profile.');
+    // Two lines, because the panel is now two different things: a gate on first
+    // load, and an ordinary profile switcher afterwards. Telling a person who
+    // cannot proceed that this is optional is worse than saying nothing.
+    ui.copy = element('p', 'bp-copy', 'Choose a profile to start watching.');
+    const copy = ui.copy;
     ui.status = element('p', 'bp-status');
     ui.status.setAttribute('role', 'status');
     ui.status.setAttribute('aria-live', 'polite');
@@ -606,8 +651,9 @@
     const footer = element('div', 'bp-footer');
     ui.refresh = element('button', 'bp-refresh', 'Refresh profiles');
     ui.refresh.type = 'button';
-    const keepBrowsing = element('button', 'bp-secondary', 'Keep browsing');
-    keepBrowsing.type = 'button';
+    ui.keepBrowsing = element('button', 'bp-secondary', 'Keep browsing');
+    ui.keepBrowsing.type = 'button';
+    const keepBrowsing = ui.keepBrowsing;
     footer.append(ui.refresh, keepBrowsing);
     panel.append(ui.close, kicker, heading, copy, ui.status, ui.profiles, ui.pin, footer);
     ui.layer.append(backdrop, panel);
@@ -630,6 +676,8 @@
       if (ui.layer.hidden || state.busy) return;
       if (event.key === 'Escape') {
         event.preventDefault();
+        // closePanel() itself refuses while the gate holds; going through it
+        // rather than around it keeps that decision in ONE place.
         closePanel();
         return;
       }
@@ -648,9 +696,23 @@
     return true;
   }
 
+  /**
+   * THE GATE. The web used to ask "Connect profile" as an invitation and let
+   * anyone browse the whole library without answering. The four televisions have
+   * always asked first and refused to go on. This makes the web behave the same.
+   *
+   * It opens on every load, because the selection lives in this tab only — an
+   * unlock is a session, not a login, and that is deliberate.
+   */
+  function boot() {
+    if (!buildUi()) return;
+    openPanel();
+    connectProfiles();
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', buildUi, { once: true });
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
-    buildUi();
+    boot();
   }
 })();

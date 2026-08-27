@@ -1649,15 +1649,15 @@ const RATINGS = ['general', 'teen', 'mature', 'adult'];
  * An empty or unrecognised tier is UNKNOWN, not safe: it passes for an adult cap
  * and fails for a kids one, so an unrated title never slips past a kids profile.
  *
- * WITH NO PROFILE CONNECTED THERE IS NO CAP, and everything is shown. That is a
- * deliberate choice and it is the one hole left: the web app, unlike the four
- * televisions, has no mandatory profile gate, so a viewer who never connects a
- * profile is never capped. Closing that means making the gate mandatory on the
- * web, which is a product decision, not a filter.
+ * NO PROFILE MEANS THE STRICTEST CAP, not "no cap". That was the hole, and it is
+ * now closed at both ends: profile.js holds the screen until somebody chooses,
+ * AND nothing mature is drawn while nobody has. Two independent stops, because a
+ * gate is a piece of UI and UI can fail — if the profile server is unreachable
+ * and the panel somehow yields, the shelves are still capped at 'general' rather
+ * than showing the whole library.
  */
 function ratingAllowed(tier) {
-  const cap = state.profileCap;
-  if (!cap) return true;
+  const cap = state.profileCap || 'general';
   const capIndex = RATINGS.indexOf(String(cap).toLowerCase());
   if (capIndex < 0) return false;
   const tierIndex = RATINGS.indexOf(String(tier || '').toLowerCase());

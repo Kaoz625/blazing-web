@@ -13,7 +13,12 @@
 // v10: the app moved to blazingstream.lyreosai.com/app/, where fleet calls go
 // through a same-origin /fleet path. An installed PWA holding v9's app.js would
 // keep calling fleet.lyreosai.com directly and be refused by its CORS allow-list.
-const CACHE = 'blazing-shell-v10';
+// v11: the kids gate (app.js) and the mandatory profile gate (profile.js). This
+// bump is a SAFETY bump, not a cosmetic one — an installed PWA still holding
+// v10 would keep serving the app.js with no rating filter and the profile.js
+// that lets anyone browse without answering, so a child on a device that already
+// had the app would see the whole library.
+const CACHE = 'blazing-shell-v11';
 const SHELL = [
   './',
   './index.html',
@@ -21,6 +26,9 @@ const SHELL = [
   './app.js',
   './telemetry.js',
   './profile.js',
+  // emby.js was never in this list, although index.html has loaded it since the
+  // Emby rows were added. It was reaching devices through the HTTP cache alone.
+  './emby.js',
   './watch-party.js',
   './locker.js',
   './manifest.webmanifest',
