@@ -827,3 +827,60 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .bm-transmute-wrap { margin-top: 32px; padding: 24px; background: rgba(229, 9, 20, 0.05); border: 1px solid var(--accent-glow); border-radius: 16px; }
 .bm-transmute-result { margin-top: 16px; line-height: 1.6; font-style: italic; }
 
+
+/* ── Phase 4 Delight CSS ──────────────────────────────────── */
+
+/* Circadian Engine */
+html.circadian-night {
+  --bg: #120e0a;
+  --surface: #1f1812;
+  --surface-soft: #17110d;
+}
+html.circadian-night body {
+  /* Very subtle warm amber filter over the whole UI after 8PM */
+  filter: sepia(0.2) hue-rotate(-5deg) saturate(1.1);
+}
+
+/* Voice Button */
+#voice-btn {
+  font-size: 20px;
+  transition: transform 0.2s, text-shadow 0.2s;
+}
+#voice-btn.recording {
+  color: var(--accent);
+  text-shadow: 0 0 15px var(--accent);
+  animation: pulse-mic 1s infinite alternate;
+}
+@keyframes pulse-mic {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.2); }
+}
+
+/* Modal Dialog Base */
+.bm-dialog {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 24px;
+  padding: 40px;
+  max-width: 400px;
+  margin: auto;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px);
+}
+.bm-dialog::backdrop {
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(4px);
+}
+
+/* Volumetric Fog Hero */
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0; height: 50%;
+  background: linear-gradient(to top, var(--bg) 0%, transparent 100%);
+  pointer-events: none;
+}
+.hero-art {
+  transition: transform 0.3s ease-out; /* Parallax smooth trailing */
+}
