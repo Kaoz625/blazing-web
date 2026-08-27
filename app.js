@@ -323,6 +323,19 @@ function showRoute(route) {
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
   if (requestsView) requestsView.hidden = route !== 'requests';
+  
+  const storiesView = $('#brightminds-stories');
+  const podcastsView = $('#brightminds-podcasts');
+  const familyView = $('#brightminds-family');
+  
+  if (storiesView) storiesView.hidden = route !== 'stories';
+  if (podcastsView) podcastsView.hidden = route !== 'podcasts';
+  if (familyView) familyView.hidden = route !== 'family';
+  
+  if (route === 'stories' && !storiesView.innerHTML.trim()) window.mountStorybook?.();
+  if (route === 'podcasts' && !podcastsView.innerHTML.trim()) window.mountPodcastStudio?.();
+  if (route === 'family' && !familyView.innerHTML.trim()) window.mountFamilyTree?.();
+
   if (route === 'trailers') loadTrailersView();
   if (route === 'education') loadEducationView();
   if (route === 'comics') loadComicsView();
