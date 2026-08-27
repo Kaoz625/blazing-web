@@ -6,6 +6,11 @@
   const DEVICE_STORAGE_KEY = 'blazing-web-profile-device-v1';
   const REQUEST_TIMEOUT_MS = 15000;
   const DEVICE_VERSION = 73;
+  // The OWNER pin is 7 digits; profile pins stay 4. This constant was USED in
+  // two places and declared in none, and this file is 'use strict' inside an
+  // IIFE — so the first reference threw ReferenceError and took the whole pad
+  // with it. The pad was not rejecting a wrong length; it was not working.
+  const OWNER_PIN_LENGTH = 7;
 
   const state = {
     credentials: null,
