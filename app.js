@@ -157,6 +157,14 @@ function safeMeta(raw) {
     imdbRating: plainText(raw.imdbRating || raw.rating).slice(0, 5),
     certification: plainText(raw.certification || raw.ageRating).slice(0, 12),
     runtime: plainText(raw.runtime).slice(0, 16),
+    // Emby titles play straight off the fleet rather than through the addon's
+    // /stream route, so the id has to survive this allow list. Dropping it here
+    // is how the Emby play button ends up doing nothing at all.
+    embyId: plainText(raw.embyId).slice(0, 64),
+    // A Blazing tier (general/teen/mature/adult) or empty when unknown. Carried
+    // so the profile cap has something to judge; the web app has no kids gate
+    // yet, and this is the field it will need when it gets one.
+    contentRating: plainText(raw.contentRating).slice(0, 12),
     genres: Array.isArray(raw.genres) ? raw.genres.slice(0, 4).map((g) => plainText(g).slice(0, 24)).filter(Boolean) : [],
   };
 }
@@ -304,10 +312,16 @@ function showRoute(route) {
   // pressed costs nothing, and both back onto rows that are empty today.
   const trailersView = $('#trailers-view');
   const educationView = $('#education-view');
+  const comicsView = $('#comics-view');
+  const requestsView = $('#requests-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
+  if (comicsView) comicsView.hidden = route !== 'comics';
+  if (requestsView) requestsView.hidden = route !== 'requests';
   if (route === 'trailers') loadTrailersView();
   if (route === 'education') loadEducationView();
+  if (route === 'comics') loadComicsView();
+  if (route === 'requests') loadRequestsView();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -520,6 +534,10 @@ async function boot() {
   // still load below them as the broad catalog fallback.
   // Trending goes in before the fresh shelves so it lands directly under the
   // Continue Watching row, which prepends itself when it resolves.
+  // Fire and forget: an Emby outage costs three hidden rows, never a slow or
+  // broken home screen. Each row appends itself when it arrives.
+  loadEmbyRows();
+
   const trendingJobs = TRENDING_ROWS.map((catalog) => {
     const section = buildRowSkeleton(catalog);
     section.dataset.softRow = 'true';
@@ -745,7 +763,13 @@ function openDetail(meta) {
   startDetailTrailer(meta);
   telemetry('nav_action', { action: 'open_detail', from: state.route || 'home' });
 
-  if (!sourceOnly) {
+  // An Emby title is not in the addon catalog, so /stream/<type>/emby:<id>.json
+  // is a guaranteed 404. Asking anyway would spin the streams panel and then
+  // report "no sources" for something that plays perfectly.
+  if (meta.embyId) {
+    $('#detail-streams').innerHTML = '';
+    detailStatus.textContent = 'On the Emby server. Press Play.';
+  } else if (!sourceOnly) {
     loadStreams(meta);
   } else {
     $('#detail-streams').innerHTML = '';
@@ -770,6 +794,13 @@ async function resolveStreams(meta) {
 async function playSelected() {
   const meta = state.selected;
   if (!meta) return;
+  // Emby needs no stream resolution: the fleet IS the stream, and it forwards
+  // Range so the scrub bar works.
+  if (meta.embyId && window.BlazingEmby) {
+    closeDetail();
+    openPlayer(meta.name, window.BlazingEmby.streamUrl(meta.embyId));
+    return;
+  }
   detailStatus.textContent = 'Checking direct streams…';
   try {
     const streams = await resolveStreams(meta);
@@ -1558,4 +1589,190 @@ function renderRatingChips(meta) {
   add(meta.runtime);
   if (meta.genres && meta.genres.length) add(meta.genres.join(' · '));
   host.hidden = !host.childElementCount;
+}
+
+/* ---------------------------------------------------------------------------
+   Emby rows, the Seerr request desk, and the Comics shelf.
+
+   ALL THREE GO THROUGH THE FLEET. The first version of this section could not
+   work on a deployed page, for reasons worth keeping written down:
+
+     - it called `embyClient.authenticate('<user>', '<password>')` with the real
+       Emby login as literals, in a file served from a public CDN;
+     - it fetched `http://Killah.TV:8096` from an HTTPS page, which the browser
+       blocks as mixed content, so the rows were permanently empty;
+     - the Requests tab fetched `http://localhost:3030`, which is the developer's
+       own Mac and is not reachable from anybody else's browser, let alone a TV;
+     - it called `openPlayer(url, name)` — the arguments the wrong way round, so
+       even a working stream would have been titled with a URL and asked to play
+       a title;
+     - and the Comics tab printed "Connected to Pullbox server. 0 comics found."
+       while connected to nothing at all. There is no Pullbox. The fleet has had
+       real comics routes the whole time.
+
+   See emby.js for the client, and the fleet's emby.js for why the credentials
+   live on mac2.
+--------------------------------------------------------------------------- */
+
+/** Turn a fleet Emby meta into the shape the rest of this app already draws. */
+function embyMeta(raw) {
+  const meta = safeMeta(raw);
+  if (!meta) return null;
+  // safeMeta is an ALLOW LIST, so embyId would be dropped on the way through and
+  // the play button would have nothing to play. It is added to that list rather
+  // than smuggled around it, so there is one place that decides what survives.
+  return meta;
+}
+
+async function appendEmbyRow(title, type, load) {
+  const metas = (await load()).map(embyMeta).filter(Boolean);
+  // An empty row is NOT drawn. A shelf that says "Emby" over six grey rectangles
+  // reads as broken; no shelf reads as "not today".
+  if (!metas.length) return;
+  const section = buildRowSkeleton({ id: `emby-${type}`, type, name: title });
+  section.dataset.embyRow = 'true';
+  $('.row-track', section).replaceChildren(...metas.map(buildCard));
+  rowsWrap.appendChild(section);
+  applyRowFilter(state.route);
+}
+
+/**
+ * Loaded CONCURRENTLY with everything else and never awaited by boot: a slow or
+ * dead Emby must not hold up the home screen. Each row appends itself when it
+ * arrives, in whatever order they arrive.
+ */
+function loadEmbyRows() {
+  if (!window.BlazingEmby) return;
+  appendEmbyRow('Emby · Latest Movies', 'movie', () => window.BlazingEmby.latest('movie', 12));
+  appendEmbyRow('Emby · Latest Shows', 'series', () => window.BlazingEmby.latest('series', 12));
+  appendEmbyRow('Emby · Live TV', 'tv', () => window.BlazingEmby.livetv(12));
+}
+
+/* ---- Comics ------------------------------------------------------------- */
+
+async function loadComicsView() {
+  const host = $('#comics-rows');
+  if (!host || host.dataset.loaded === 'true') return;
+  host.dataset.loaded = 'true';
+  const shelf = (name, comics) => {
+    if (!comics.length) return null;
+    const section = buildRowSkeleton({ id: `comics-${name}`, type: 'comic', name });
+    $('.row-track', section).replaceChildren(...comics.map((c) => {
+      // NOT buildCard: its click opens the detail dialog, which would ask the
+      // addon for streams for a comic id and then report "no sources" for
+      // something that reads perfectly. A comic opens the reader.
+      const id = plainText(c.id);
+      const name = plainText(c.name, 'Untitled');
+      const card = el('button', 'card');
+      card.type = 'button';
+      card.setAttribute('aria-label', `Read ${name}`);
+      const poster = safeHttpsUrl(c.poster);
+      const image = el('img', 'card-image');
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.alt = '';
+      if (poster) image.src = poster;
+      else card.classList.add('no-image');
+      const label = el('span', 'card-label');
+      label.textContent = name;
+      card.append(image, label);
+      card.addEventListener('click', () => {
+        if (window.comicReader) window.comicReader.open(id, name);
+      });
+      return card;
+    }));
+    return section;
+  };
+  try {
+    const data = await fetchJSON(`${FLEET_BASE}/comics/discover`);
+    const sections = [
+      shelf('Popular Comics', Array.isArray(data.popular) ? data.popular : []),
+      shelf('Newest', Array.isArray(data.newest) ? data.newest : []),
+    ].filter(Boolean);
+    if (!sections.length) {
+      host.replaceChildren(el('p', 'error'));
+      $('.error', host).textContent = 'No comics are available right now.';
+      host.dataset.loaded = 'false';
+      return;
+    }
+    host.replaceChildren(...sections);
+  } catch {
+    host.replaceChildren(el('p', 'error'));
+    $('.error', host).textContent = 'Could not reach the comics library.';
+    // NOT sticky: a failure must be retried the next time the tab is opened.
+    host.dataset.loaded = 'false';
+  }
+}
+
+/* ---- Requests (Seerr) --------------------------------------------------- */
+
+function seerrCard(result) {
+  const card = el('article', 'seerr-card');
+  const art = el('div', 'seerr-art');
+  if (result.poster) setBackground(art, result.poster);
+  const body = el('div', 'seerr-body');
+  const title = el('h3', 'seerr-title');
+  title.textContent = `${result.title}${result.releaseInfo ? ` (${result.releaseInfo})` : ''}`;
+  const status = el('span', 'seerr-status');
+  status.dataset.status = String(result.status);
+  status.textContent = result.statusText;
+  body.append(title, status);
+
+  // Only a title the server does not have can be requested. Anything already
+  // pending, processing or available gets no button — a button that cannot do
+  // anything is worse than no button.
+  if (Number(result.status) <= 1) {
+    const button = el('button', 'primary-button');
+    button.type = 'button';
+    button.textContent = 'Request';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = 'Requesting…';
+      try {
+        const out = await window.BlazingEmby.seerrRequest(result.tmdbId, result.mediaType);
+        button.textContent = out.already ? 'Already requested' : 'Requested';
+        status.textContent = 'Pending';
+        status.dataset.status = '2';
+        toast(`${result.title} was requested.`);
+      } catch (e) {
+        // HONESTY RULE: say it failed. Do not leave a button reading "Requested"
+        // for something that never reached the server.
+        button.disabled = false;
+        button.textContent = 'Request';
+        toast(`Could not request ${result.title}.`);
+        console.warn('[seerr] request', e && e.message);
+      }
+    });
+    body.appendChild(button);
+  }
+  card.append(art, body);
+  return card;
+}
+
+function loadRequestsView() {
+  const form = $('#requests-form');
+  const results = $('#requests-results');
+  if (!form || !results || form.dataset.bound === 'true') return;
+  form.dataset.bound = 'true';
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const q = ($('#requests-input').value || '').trim();
+    if (!q) return;
+    results.replaceChildren(el('div', 'spinner big'));
+    const found = await window.BlazingEmby.seerrSearch(q);
+    if (found === null) {
+      // null is "the search failed", which is NOT "no results". Saying "no
+      // results" for an outage sends people away thinking the film does not exist.
+      results.replaceChildren(el('p', 'error'));
+      $('.error', results).textContent = 'Could not reach the request server.';
+      return;
+    }
+    if (!found.length) {
+      results.replaceChildren(el('p', 'error'));
+      $('.error', results).textContent = `Nothing found for “${q}”.`;
+      return;
+    }
+    results.replaceChildren(...found.map(seerrCard));
+  });
 }

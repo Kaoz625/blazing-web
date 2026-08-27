@@ -45,8 +45,10 @@
       <button type="button" data-view="shows">Shows</button>
       <button type="button" data-view="anime">Anime</button>
       <button type="button" data-view="trailers">🎬 Trailers</button>
+      <button type="button" data-view="comics">📖 Comics</button>
       <button type="button" data-view="education">📚 Education</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
+      <button type="button" data-view="requests">🚀 Requests</button>
       <button type="button" data-view="library">Library</button>
       <button type="button" data-view="admin">Admin</button>
     </nav>
@@ -66,8 +68,10 @@
         <button type="button" data-view="shows">Shows</button>
         <button type="button" data-view="anime">Anime</button>
         <button type="button" data-view="trailers">🎬 Trailers</button>
+        <button type="button" data-view="comics">📖 Comics</button>
         <button type="button" data-view="education">📚 Education</button>
         <button type="button" data-view="roadmaps">Roadmaps</button>
+        <button type="button" data-view="requests">🚀 Requests</button>
         <button type="button" data-view="library">Library</button>
         <button type="button" data-view="admin">Admin</button>
         <button type="button" data-view="search">Search</button>
@@ -190,6 +194,42 @@
       </div>
     </section>
 
+    <!-- ── Comics View ── -->
+    <section id="comics-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Comics &amp; Manga</p>
+        <h1>📖 Comics</h1>
+        <p>Pick a cover to read it. Arrow keys turn the page, Escape closes.</p>
+      </div>
+      <div id="comics-rows" class="rows">
+         <div class="row"><div class="row-track"><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div></div></div>
+      </div>
+    </section>
+
+    <!-- ── Comic reader overlay ── -->
+    <div id="comic-reader" class="comic-reader" hidden>
+      <div class="comic-bar">
+        <span class="comic-label"></span>
+        <span class="comic-counter"></span>
+        <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
+      </div>
+      <img class="comic-page" alt="" />
+    </div>
+
+    <!-- ── Requests View ── -->
+    <section id="requests-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">KillahRequest (Seerr)</p>
+        <h1>🚀 Requests</h1>
+        <p>Search and request movies or shows to be added to the server.</p>
+      </div>
+      <form id="requests-form" class="search-form" role="search">
+        <input id="requests-input" name="rq" type="search" autocomplete="off" placeholder="Search for a title to request" />
+        <button class="primary-button" type="submit">Search Seerr</button>
+      </form>
+      <div id="requests-results" class="search-results"></div>
+    </section>
+
     <!-- ── Trailers View ── -->
     <section id="trailers-view" class="view" hidden>
       <div class="page-heading">
@@ -269,6 +309,8 @@
        first screen_view fires. app.js guards for it anyway. -->
   <script src="./telemetry.js" defer></script>
   <script src="./profile.js" defer></script>
+  <script src="./emby.js" defer></script>
+  <script src="./tv-comics-reader.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>
