@@ -797,8 +797,12 @@ async function playSelected() {
   // Emby needs no stream resolution: the fleet IS the stream, and it forwards
   // Range so the scrub bar works.
   if (meta.embyId && window.BlazingEmby) {
+    // ORDER MATTERS. closeDetail() sets state.selected = null, and openPlayer
+    // reads state.selected?.id to start progress sync and offer Resume. Closing
+    // first silently disabled both for every Emby title.
+    const url = window.BlazingEmby.streamUrl(meta.embyId);
+    openPlayer(meta.name, url);
     closeDetail();
-    openPlayer(meta.name, window.BlazingEmby.streamUrl(meta.embyId));
     return;
   }
   detailStatus.textContent = 'Checking direct streams…';
@@ -1733,13 +1737,13 @@ function seerrCard(result) {
         button.textContent = out.already ? 'Already requested' : 'Requested';
         status.textContent = 'Pending';
         status.dataset.status = '2';
-        toast(`${result.title} was requested.`);
+        showToast(`${result.title} was requested.`);
       } catch (e) {
         // HONESTY RULE: say it failed. Do not leave a button reading "Requested"
         // for something that never reached the server.
         button.disabled = false;
         button.textContent = 'Request';
-        toast(`Could not request ${result.title}.`);
+        showToast(`Could not request ${result.title}.`, 'error');
         console.warn('[seerr] request', e && e.message);
       }
     });
@@ -1759,6 +1763,12 @@ function loadRequestsView() {
     event.preventDefault();
     const q = ($('#requests-input').value || '').trim();
     if (!q) return;
+    if (!window.BlazingEmby) {
+      // emby.js failed to load. Saying so beats a spinner that never stops.
+      results.replaceChildren(el('p', 'error'));
+      $('.error', results).textContent = 'The request client did not load. Reload the page.';
+      return;
+    }
     results.replaceChildren(el('div', 'spinner big'));
     const found = await window.BlazingEmby.seerrSearch(q);
     if (found === null) {
