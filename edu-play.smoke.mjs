@@ -62,8 +62,18 @@ for (const slug of ['blazing-edu-kids', 'blazing-edu-science', 'blazing-edu-stem
   const hit = (d?.metas || []).find((m) => String(m.id || '').startsWith('yt:edu:'));
   if (hit) { eduId = hit.id; eduName = hit.name || 'lesson'; break; }
 }
-check('a live catalog offers a yt:edu: card', !!eduId, eduId || 'no catalog returned one');
-if (!eduId) { server.close(); process.exit(1); }
+// A fallback id, and a deliberate one. The education CATALOGS depend on the
+// YouTube Data API, whose free tier allows 10,000 units a day and whose
+// search.list costs 100 units per call — so the catalogs go empty for the rest of
+// the day once that runs out (measured 27 Aug 2026: HTTP 429 rateLimitExceeded,
+// "Search Queries per day"). /proxy/yt-resolve does NOT use that quota; it uses
+// yt-dlp. Falling back keeps this test measuring PLAYBACK rather than reporting
+// someone else's rate limit as a playback failure.
+const FALLBACK_ID = 'yt:edu:Lo-PFoUhBZk';
+const usedFallback = !eduId;
+if (!eduId) { eduId = FALLBACK_ID; eduName = 'fallback id (catalogs are quota-limited today)'; }
+check('an education id is available to test', !!eduId,
+  usedFallback ? 'catalogs empty — using the known-good fallback id' : eduId);
 
 const browser = await chromium.launch({ executablePath: CHROME });
 const ctx = await browser.newContext();
@@ -140,14 +150,29 @@ const playback = await page.evaluate(async (payload) => {
   const err = attachSource(url, format);
   if (err) return { attachError: err };
   v.muted = true;
-  try { await v.play(); } catch (e) { /* autoplay policy — readyState still advances */ }
-  const deadline = Date.now() + 25000;
+  // NOT awaited. play() returns a promise that neither resolves nor rejects while
+  // nothing is buffering, so awaiting it hangs forever on exactly the failure this
+  // test is here to catch. Fire it and let the polling below decide.
+  try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {}
+  // Watch for hls.js's own verdict as well as the video element's. A CORS refusal
+  // shows up as a fatal networkError and NOTHING on the element, so polling
+  // videoWidth alone just burns the whole deadline and reports "0x0" with no
+  // reason attached.
+  let fatal = '';
+  if (hlsInstance) {
+    hlsInstance.on(window.Hls.Events.ERROR, (_e, d) => {
+      if (d && d.fatal && !fatal) fatal = `${d.type}/${d.details}`;
+    });
+  }
+  const deadline = Date.now() + 12000;
   while (Date.now() < deadline) {
     if (v.videoWidth > 0 && v.readyState >= 2) break;
-    await new Promise((r) => setTimeout(r, 250));
+    if (fatal) break;
+    await new Promise((r) => setTimeout(r, 200));
   }
+  if (fatal) return { attachError: '', usedHlsJs: !!hlsInstance, fatal, videoWidth: 0, readyState: v.readyState, levels: hlsInstance ? (hlsInstance.levels||[]).length : 0 };
   const t0 = v.currentTime;
-  await new Promise((r) => setTimeout(r, 2500));
+  await new Promise((r) => setTimeout(r, 2000));
   return {
     attachError: '',
     usedHlsJs: !!hlsInstance,
@@ -161,6 +186,7 @@ const playback = await page.evaluate(async (payload) => {
 }, { url: resolved.r.url, format: resolved.r.streamFormat });
 
 check('attachSource() reported no error', playback.attachError === '', playback.attachError);
+check('hls.js reported no FATAL error', !playback.fatal, playback.fatal || 'none');
 check('it routed through hls.js (not a bare src=)', playback.usedHlsJs === true);
 check('the manifest parsed into quality levels', (playback.levels || 0) > 0,
   `${playback.levels} levels`);

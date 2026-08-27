@@ -1064,13 +1064,25 @@ async function resolveEduStream(id) {
   // cache. RESOLVE_TIMEOUT is tuned for a redirect lookup and is far too short.
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {
+    // via=proxy, because this is a BROWSER. Google serves the signed HLS manifest
+    // with no Access-Control-Allow-Origin, so a page cannot fetch it at all —
+    // measured in real Chrome as hls.js networkError/manifestLoadError, with the
+    // element left at 0x0 and no error event of its own. The addon re-serves the
+    // manifest and its segments with a CORS header. Televisions do NOT pass this
+    // flag: they are not browsers, and the direct URL is faster.
     const res = await fetch(
-      `${API_BASE}/proxy/yt-resolve?id=${encodeURIComponent(videoId)}&json=1`,
+      `${API_BASE}/proxy/yt-resolve?id=${encodeURIComponent(videoId)}&json=1&via=proxy`,
       { mode: 'cors', credentials: 'omit', signal: controller.signal }
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const url = safeHttpsUrl(data && data.url);
+    // The proxied form comes back as a path, not an absolute URL, so that the
+    // addon does not have to know which hostname it is being served under.
+    const raw = data && data.url;
+    const absolute = (typeof raw === 'string' && raw.startsWith('/'))
+      ? `${API_BASE}${raw}`
+      : raw;
+    const url = safeHttpsUrl(absolute);
     if (!url) return null;
     return { url, streamFormat: (data && data.streamFormat) || '' };
   } catch {
@@ -1324,7 +1336,11 @@ function nativeHlsOnly() {
  */
 function looksLikeHls(url, declared) {
   if (String(declared || '').toLowerCase() === 'hls') return true;
-  return /\.m3u8(\?|$)/i.test(url) || /manifest\.googlevideo\.com/i.test(url);
+  return /\.m3u8(\?|$)/i.test(url) ||
+    /manifest\.googlevideo\.com/i.test(url) ||
+    // The proxied form: /proxy/hls?u=… carries neither the googlevideo host nor
+    // an .m3u8 path, so neither sniff above would catch it.
+    /\/proxy\/hls\?/i.test(url);
 }
 
 /**
