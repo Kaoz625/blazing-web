@@ -171,6 +171,30 @@
         <h1>Dashboard</h1>
         <p>Manage devices and view network activity.</p>
       </div>
+      <!-- WHERE DEVICES ARE ACTUALLY APPROVED.
+           Markus, 27 Aug 2026: "i also need to know how to get to the dashboard
+           so i can accept on the fly". It is the fleet's own console, and it
+           already lists every device with its pending count and an Approve
+           button each. It asks for the admin bearer token once.
+
+           The three panels below it are NOT that. admin.js, which is the only
+           code that fills them, is not loaded by this file and could not work if
+           it were: its first line imports { getConfig } from './locker.js', and
+           locker.js exports nothing at all. So the panels sit empty and the
+           Approve Device button below has never had a handler. Left in place
+           rather than deleted, with this note, so the next person reaches for
+           the dashboard instead of wiring up something that cannot run. -->
+      <div class="admin-panel">
+        <h2>Approve a device</h2>
+        <p>The fleet console lists every television and browser, which ones are
+           waiting, and approves them. It asks for the admin token once.</p>
+        <p><a class="primary-button" href="https://fleet.lyreosai.com/dashboard"
+              target="_blank" rel="noopener">Open the fleet dashboard</a></p>
+        <p class="muted">Locked out of a fresh browser instead? Use
+           &ldquo;I am the owner&rdquo; on the profile gate and type the
+           seven-digit owner PIN &mdash; that approves the browser you are
+           holding, with no second device.</p>
+      </div>
       <div id="admin-linking" class="admin-panel" hidden>
         <h2>Device Linking Request</h2>
         <p id="admin-link-text">A new device wants to connect.</p>
