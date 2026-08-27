@@ -19,6 +19,9 @@
 // that lets anyone browse without answering, so a child on a device that already
 // had the app would see the whole library.
 const CACHE = 'blazing-shell-v11';
+
+/** How long the code fetch may take before the cached copy is served instead. */
+const NETWORK_TIMEOUT_MS = 3000;
 const SHELL = [
   './',
   './index.html',
@@ -81,22 +84,60 @@ self.addEventListener('fetch', (event) => {
   const home = new URL('./', self.location.href).pathname;
   if (!url.pathname.startsWith(home)) return;
 
-  // App shell: cache-first, fall back to network, then to cached index for navigations.
+  /**
+   * CODE IS NETWORK-FIRST. ASSETS ARE CACHE-FIRST.
+   *
+   * This split exists because cache-first for everything is how a shipped fix can
+   * fail to reach anybody. It bit on 2026-08-27: the kids rating filter went out in
+   * app.js with no CACHE bump, and every device that already had the app would have
+   * gone on serving the OLD app.js — with no filter — for ever. The bump was the
+   * only thing standing between a child and the whole library, and a bump is a line
+   * a person has to remember to edit.
+   *
+   * So the guarantee no longer depends on remembering. HTML, JS and CSS go to the
+   * network first and only fall back to the cache when the network does not answer.
+   * A safety fix now lands on the next load, bump or no bump.
+   *
+   * The cost is one network round trip for the code on each load, bounded by
+   * NETWORK_TIMEOUT_MS below, and offline still works because the fallback is the
+   * same cache as before. Icons, the manifest and images stay cache-first: they are
+   * content-addressed in practice and never carry a safety decision.
+   *
+   * Bump CACHE anyway when the shell changes. It is now cache HYGIENE — it evicts
+   * the old copies — rather than the thing that makes a fix reach a device.
+   */
+  const isCode = req.mode === 'navigate' ||
+    ['document', 'script', 'style'].includes(req.destination) ||
+    /\.(html|js|css)$/.test(url.pathname);
+
+  const putCopy = (res) => {
+    if (res && res.ok && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy));
+    }
+    return res;
+  };
+
+  const fromCache = () => caches.match(req)
+    .then((cached) => cached || (req.mode === 'navigate' ? caches.match('./index.html') : null))
+    .then((cached) => cached || Response.error());
+
+  if (isCode) {
+    // A network that hangs must not hang the app. Losing the race falls back to
+    // the cache, which is exactly the old behaviour, so a dead connection is no
+    // worse off than before.
+    const network = new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), NETWORK_TIMEOUT_MS);
+      fetch(req)
+        .then((res) => { clearTimeout(timer); resolve(putCopy(res)); })
+        .catch(() => { clearTimeout(timer); resolve(null); });
+    });
+    event.respondWith(network.then((res) => res || fromCache()));
+    return;
+  }
+
+  // Everything else: cache-first, as before.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (res && res.ok && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => {
-          if (req.mode === 'navigate') return caches.match('./index.html');
-          return Response.error();
-        });
-    })
+    caches.match(req).then((cached) => cached || fetch(req).then(putCopy).catch(fromCache))
   );
 });
