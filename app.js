@@ -2,7 +2,7 @@
 'use strict';
 
 const API_BASE = 'https://addon.lyreosai.com';
-const FLEET_BASE = 'https://fleet.lyreosai.com';
+const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
 // The ONLY host that serves the upscale routes. Measured 26 Aug 2026:
 //   GET  https://upscale.lyreosai.com/api/upscale/request -> 405 (allow: POST)  route exists
 //   GET  https://addon.lyreosai.com/api/upscale/request   -> 404               wrong host

@@ -22,7 +22,7 @@
 'use strict';
 
 (() => {
-  const FLEET_BASE = 'https://fleet.lyreosai.com';
+  const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
   const DEVICE_KEY = 'blazing-web-profile-device-v1'; // owned by profile.js; read-only here
   const LIST_TIMEOUT_MS = 15000;
   const RESOLVE_TIMEOUT_MS = 45000; // Streamtape enforces a ~6s wait before it hands over a link.

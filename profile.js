@@ -2,7 +2,7 @@
 'use strict';
 
 (() => {
-  const FLEET_BASE = 'https://fleet.lyreosai.com';
+  const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
   const DEVICE_STORAGE_KEY = 'blazing-web-profile-device-v1';
   const REQUEST_TIMEOUT_MS = 15000;
   const DEVICE_VERSION = 73;

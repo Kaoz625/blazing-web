@@ -13,6 +13,23 @@
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
   <link rel="apple-touch-icon" href="./icon-180.png" />
   <link rel="stylesheet" href="./styles.css" />
+  <script>
+    // Which host answers fleet calls depends on where this page is served from.
+    //
+    // The fleet's CORS allow-list names exactly ONE browser origin — the GitHub
+    // Pages address this app used to live at. Any other origin gets a preflight
+    // refusal on every fleet call: Discover shelves, profiles, the locker, watch
+    // party, and telemetry. Telemetry is the dangerous one, because it is built
+    // to fail silently and would simply stop reporting.
+    //
+    // blazingstream.lyreosai.com carries a same-origin /fleet proxy, so from
+    // there we use a path instead of a host and CORS never applies. Everywhere
+    // else — GitHub Pages, localhost, blazing-web.pages.dev — keeps the direct
+    // address, so nothing that worked before changes.
+    if (location.hostname === 'blazingstream.lyreosai.com') {
+      window.BLAZING_FLEET_BASE = location.origin + '/fleet';
+    }
+  </script>
 </head>
 <body>
   <header class="topbar" aria-label="Primary navigation">

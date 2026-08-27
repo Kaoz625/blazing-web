@@ -19,7 +19,7 @@
 'use strict';
 
 (() => {
-  const FLEET_BASE = 'https://fleet.lyreosai.com';
+  const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
   const DEVICE_KEY = 'blazing-web-profile-device-v1'; // owned by profile.js
   const APP_VERSION = '1.0.0-web';
 

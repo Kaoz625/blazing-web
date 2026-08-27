@@ -26,7 +26,7 @@
 'use strict';
 
 (() => {
-  const FLEET_BASE = 'https://fleet.lyreosai.com';
+  const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
   const FLEET_WS_BASE = 'wss://fleet.lyreosai.com';
   const REQUEST_TIMEOUT_MS = 15000;
   const ACTIVE_POLL_MS = 25000;
