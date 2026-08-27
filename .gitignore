@@ -3,3 +3,6 @@
 
 # OMC session state, not part of the site
 .omc/
+
+# TV packages. Rebuild with ./build-tvs.sh — do not commit binaries.
+dist/
