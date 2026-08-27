@@ -290,6 +290,135 @@ function updateNavigation(route) {
   });
 }
 
+/* ── Discover: browse by streaming service ───────────────────────────────────
+ *
+ * This existed as MARKUP ONLY. index.html carried "Netflix", "Hulu", "Disney+"
+ * and the rest as buttons with data-discover-kind and data-discover-slug, the view
+ * shell was in the page, and app.js declared discoverTitle / discoverResults /
+ * discoverRequest — and then nothing. No listener was ever attached and
+ * #discover-results was never written to, so every one of those buttons did
+ * nothing at all when pressed. Roku and Fire TV have had this working for months.
+ *
+ * The list is also no longer hardcoded. It was, and it had drifted: 9 of the
+ * fleet's 24 providers and 4 of its 6 filters, missing Tubi, Pluto, Plex,
+ * Crunchyroll, BritBox, Starz, Showtime, MGM+, YouTube and six more. It is built
+ * from /discover/menu now, so a provider added on the fleet appears here without
+ * anyone editing HTML.
+ */
+const DISCOVER_MENU_PATH = '/discover/menu';
+
+async function loadDiscoverMenu() {
+  const filters = $('#drawer nav[aria-label="More"]');
+  const providers = $('#drawer nav[aria-label="Channels and apps"]');
+  if (!filters && !providers) return;
+  let menu;
+  try {
+    menu = await fetchJSON(`${FLEET_BASE}${DISCOVER_MENU_PATH}`);
+  } catch (e) {
+    // The hardcoded buttons stay in the page as a fallback, so a fleet outage
+    // leaves the short list rather than an empty drawer.
+    console.warn('[discover] menu', e && e.message);
+    return;
+  }
+  const build = (host, entries, kind) => {
+    if (!host || !Array.isArray(entries) || !entries.length) return;
+    host.replaceChildren(...entries
+      .filter((entry) => entry && entry.slug && entry.name)
+      .map((entry) => {
+        const button = el('button');
+        button.type = 'button';
+        button.dataset.discoverKind = kind;
+        button.dataset.discoverSlug = entry.slug;
+        button.textContent = entry.name;
+        return button;
+      }));
+  };
+  build(filters, menu.more, 'filter');
+  build(providers, menu.providers, 'provider');
+}
+
+/**
+ * Called HERE, right after the definition, and that placement is the fix.
+ *
+ * It lived in two other places first and ran in neither: inside the
+ * blazing-profile-selected listener, which never fires while the profile gate is
+ * holding the screen; and then at the end of boot(), which is DEAD CODE — `boot`
+ * is defined around line 780 and nothing in this file calls it. A third attempt at
+ * the very end of the file did not run either, while the click listener a few lines
+ * above this one did, so something between the two stops top-level execution.
+ *
+ * This spot is proven by the same evidence: the Discover click handler below it
+ * works on the live site, so this line is reached.
+ */
+loadDiscoverMenu();
+
+async function openDiscover(kind, slug, label) {
+  if (!slug) return;
+  const request = ++discoverRequest;
+  closeDrawer();
+  showRoute('discover');
+  discoverTitle.textContent = label || slug;
+  discoverCopy.textContent = kind === 'provider'
+    ? 'What is streaming on this service right now.'
+    : 'A curated filter from the Blazing catalog.';
+  discoverStatus.textContent = '';
+  discoverResults.replaceChildren(el('div', 'spinner big'));
+  telemetry('nav_action', { action: 'discover', from: `${kind}:${slug}` });
+
+  let data = null;
+  try {
+    data = await fetchJSON(`${FLEET_BASE}/discover/${kind}/${encodeURIComponent(slug)}`);
+  } catch (e) {
+    // A stale request must not overwrite a newer one — the user can press three
+    // services before the first answers.
+    if (request !== discoverRequest) return;
+    discoverResults.replaceChildren();
+    discoverStatus.textContent = 'That did not load. Try again in a moment.';
+    return;
+  }
+  if (request !== discoverRequest) return;
+
+  // The provider route answers {slug,name,subtitle,items}; the filter route uses
+  // the same shape. Items carry imdb ids, so they open the ordinary detail sheet.
+  const items = (data && (data.items || data.metas)) || [];
+  if (data && data.name) discoverTitle.textContent = data.name;
+  if (data && data.subtitle) discoverCopy.textContent = data.subtitle;
+  const cards = items.map(embyMetaSafe).filter(Boolean);
+  if (!cards.length) {
+    discoverResults.replaceChildren();
+    discoverStatus.textContent = 'Nothing is listed here today.';
+    return;
+  }
+  discoverStatus.textContent = '';
+  discoverResults.replaceChildren(...cards.map(buildCard));
+}
+
+/**
+ * Discover items come from TMDB through the fleet, not from the add-on, so they
+ * carry {id,type,name,poster,year} rather than a full add-on meta. buildCard wants
+ * the add-on shape; this is the smallest honest translation, and it drops anything
+ * with no id or no poster rather than drawing a grey rectangle.
+ */
+function embyMetaSafe(item) {
+  if (!item || !item.id || !item.poster) return null;
+  return {
+    id: String(item.id),
+    type: item.type === 'series' || item.mediaType === 'series' ? 'series' : 'movie',
+    name: String(item.name || ''),
+    poster: String(item.poster),
+    description: String(item.description || ''),
+    releaseInfo: String(item.year || item.releaseInfo || ''),
+    contentRating: String(item.contentRating || ''),
+  };
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-discover-kind][data-discover-slug]');
+  if (!button) return;
+  event.preventDefault();
+  openDiscover(button.dataset.discoverKind, button.dataset.discoverSlug, button.textContent.trim());
+});
+
 function applyRowFilter(route) {
   $$('.row', rowsWrap).forEach((row) => {
     const type = row.dataset.type || '';

@@ -18,7 +18,12 @@
 // v10 would keep serving the app.js with no rating filter and the profile.js
 // that lets anyone browse without answering, so a child on a device that already
 // had the app would see the whole library.
-const CACHE = 'blazing-shell-v11';
+// v12: Discover became real (app.js) and the owner-recovery PIN reached the gate
+// (profile.js). Bumped because the worker being REPLACED is a cache-first one from
+// v11 — the network-first rule below only applies once THIS worker is in control,
+// and until then the old one keeps answering app.js from its cache. Measured
+// 2026-08-27: profile.js updated while app.js did not, on the same reload.
+const CACHE = 'blazing-shell-v15';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

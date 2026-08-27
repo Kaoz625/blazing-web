@@ -12,6 +12,8 @@
     profiles: [],
     activeProfile: null,
     pendingProfile: null,
+    // True while the pad is asking for the OWNER PIN rather than a profile PIN.
+    ownerMode: false,
     pinDigits: [],
     unlockToken: null,
     unlockExpiresAt: 0,
@@ -210,19 +212,25 @@
   }
 
   function renderPin() {
+    // The pad serves two jobs now: unlocking a profile, and proving ownership of
+    // this browser. `ownerMode` is the only difference, and the owner PIN is six
+    // digits rather than four — a hundred times the keyspace for the same effort,
+    // which matters because this one is reachable from the open internet.
     const profile = state.pendingProfile;
-    ui.pin.hidden = !profile;
-    if (!profile) return;
-    ui.pinName.textContent = profile.name;
+    const active = state.ownerMode || !!profile;
+    ui.pin.hidden = !active;
+    if (!active) return;
+    const length = pinLength();
+    ui.pinName.textContent = state.ownerMode ? 'Owner PIN' : profile.name;
     ui.dots.replaceChildren();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < length; index += 1) {
       const dot = element('span', 'bp-dot');
       dot.dataset.filled = index < state.pinDigits.length ? 'true' : 'false';
       dot.setAttribute('aria-hidden', 'true');
       ui.dots.appendChild(dot);
     }
-    ui.dots.setAttribute('aria-label', `${state.pinDigits.length} of 4 digits entered`);
-    ui.verify.disabled = state.busy || state.pinDigits.length !== 4;
+    ui.dots.setAttribute('aria-label', `${state.pinDigits.length} of ${length} digits entered`);
+    ui.verify.disabled = state.busy || state.pinDigits.length !== length;
     ui.clear.disabled = state.busy || state.pinDigits.length === 0;
     ui.delete.disabled = state.busy || state.pinDigits.length === 0;
   }
@@ -244,8 +252,78 @@
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
   }
 
+  /**
+   * Ask for the owner PIN so this browser can approve itself.
+   *
+   * Only reachable from the pending screen. The server does the deciding — this
+   * only collects six digits and posts them — and it needs this browser's device
+   * token, so the PIN alone is not enough from somewhere else.
+   */
+  function openOwnerPin() {
+    if (state.busy) return;
+    if (!state.credentials) {
+      setStatus('This browser has no connection to approve yet. Select Refresh profiles first.', 'error');
+      return;
+    }
+    state.pendingProfile = null;
+    state.ownerMode = true;
+    clearPinEntry();
+    ui.profiles.hidden = true;
+    ui.owner.hidden = true;
+    ui.pin.hidden = false;
+    setStatus('Enter the six-digit owner PIN to approve this browser. Attempts are limited.', 'info');
+    window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
+  }
+
+  async function verifyOwnerPin() {
+    if (state.busy || !state.ownerMode || state.pinDigits.length !== 6) return;
+    if (!state.credentials) {
+      setStatus('This browser has no connection to approve. Select Refresh profiles first.', 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Checking…', 'info');
+    try {
+      const result = await request('/devices/self-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        body: JSON.stringify({ deviceId: state.credentials.id, pin: state.pinDigits.join('') }),
+      });
+      clearPinEntry();
+      if (result.status === 503) {
+        // Said plainly rather than as "wrong PIN", because the two need different
+        // actions and confusing them sends the owner hunting for a typo.
+        state.ownerMode = false;
+        showProfiles();
+        setStatus('Owner approval is not switched on for this fleet. Approve this browser in the Blazing dashboard instead.', 'error');
+        return;
+      }
+      if (result.status === 429) {
+        setStatus('Too many attempts. Wait an hour, or approve this browser in the Blazing dashboard.', 'error');
+        return;
+      }
+      if (!result.ok) {
+        const left = result.body && Number.isFinite(result.body.attemptsLeft)
+          ? ` ${result.body.attemptsLeft} attempt(s) left before this browser is locked out for an hour.`
+          : '';
+        setStatus(`That is not the owner PIN.${left}`, 'error');
+        return;
+      }
+      // Approved. Go straight back and load the profiles it can now see, so the
+      // owner is not left to work out that a second button press is needed.
+      state.ownerMode = false;
+      showProfiles();
+      setStatus('This browser is approved.', 'info');
+      await connectProfiles();
+    } finally {
+      setBusy(false);
+      renderPin();
+    }
+  }
+
   function showProfiles(message) {
     state.pendingProfile = null;
+    state.ownerMode = false;
     clearPinEntry();
     ui.pin.hidden = true;
     ui.profiles.hidden = false;
@@ -272,8 +350,10 @@
     closePanel();
   }
 
+  const pinLength = () => (state.ownerMode ? 6 : 4);
+
   function addDigit(digit) {
-    if (state.busy || !/^\d$/.test(digit) || state.pinDigits.length >= 4) return;
+    if (state.busy || !/^\d$/.test(digit) || state.pinDigits.length >= pinLength()) return;
     state.pinDigits.push(digit);
     renderPin();
   }
@@ -369,13 +449,19 @@
   }
 
   function applyProfileList(result) {
+    if (ui.owner) ui.owner.hidden = true;
     if (result.status === 403) {
       state.profiles = [];
       state.activeProfile = null;
       clearUnlock();
       updateConnectButton();
       showProfiles();
-      setStatus('This browser is waiting for admin approval. Its connection is saved. Approve it in the Blazing dashboard, then select Refresh profiles.', 'pending');
+      setStatus('This browser is waiting for approval. Approve it in the Blazing dashboard, or use "I am the owner" below.', 'pending');
+      // THE OWNER MUST NEVER BE LOCKED OUT. Approval is an admin action, and since
+      // this gate became mandatory a pending browser cannot be used at all — so
+      // without a way in from the pending screen itself, a new phone away from home
+      // is simply locked out of the household's own service.
+      if (ui.owner) ui.owner.hidden = false;
       return;
     }
     if (!result.ok) {
@@ -443,6 +529,9 @@
   }
 
   async function verifyPin() {
+    // One button, two jobs. The branch is here rather than at the listener so the
+    // keyboard Enter path cannot diverge from the button.
+    if (state.ownerMode) return verifyOwnerPin();
     const profile = state.pendingProfile;
     if (state.busy || !profile || state.pinDigits.length !== 4 || !state.credentials) return;
     let candidate = state.pinDigits.join('');
@@ -651,10 +740,14 @@
     const footer = element('div', 'bp-footer');
     ui.refresh = element('button', 'bp-refresh', 'Refresh profiles');
     ui.refresh.type = 'button';
+    // Only ever shown while this browser is pending. See applyProfileList.
+    ui.owner = element('button', 'bp-secondary', 'I am the owner');
+    ui.owner.type = 'button';
+    ui.owner.hidden = true;
     ui.keepBrowsing = element('button', 'bp-secondary', 'Keep browsing');
     ui.keepBrowsing.type = 'button';
     const keepBrowsing = ui.keepBrowsing;
-    footer.append(ui.refresh, keepBrowsing);
+    footer.append(ui.refresh, ui.owner, keepBrowsing);
     panel.append(ui.close, kicker, heading, copy, ui.status, ui.profiles, ui.pin, footer);
     ui.layer.append(backdrop, panel);
     document.body.appendChild(ui.layer);
@@ -664,6 +757,7 @@
       connectProfiles();
     });
     ui.refresh.addEventListener('click', connectProfiles);
+    ui.owner.addEventListener('click', () => openOwnerPin());
     ui.close.addEventListener('click', closePanel);
     keepBrowsing.addEventListener('click', closePanel);
     backdrop.addEventListener('click', closePanel);
@@ -681,14 +775,14 @@
         closePanel();
         return;
       }
-      if (!state.pendingProfile) return;
+      if (!state.pendingProfile && !state.ownerMode) return;
       if (/^\d$/.test(event.key)) {
         event.preventDefault();
         addDigit(event.key);
       } else if (event.key === 'Backspace') {
         event.preventDefault();
         deleteDigit();
-      } else if (event.key === 'Enter' && state.pinDigits.length === 4) {
+      } else if (event.key === 'Enter' && state.pinDigits.length === pinLength()) {
         event.preventDefault();
         verifyPin();
       }
