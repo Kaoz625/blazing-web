@@ -199,6 +199,11 @@ const state = {
   selected: null,
   route: 'home',
   myList: readList(),
+  // The rating cap of the connected profile, or null when nobody has connected
+  // one. profile.js has broadcast this on blazing-profile-selected since it was
+  // written; until now NOTHING listened, so every Emby row reached every viewer
+  // and the Kids profile on the web saw the whole library.
+  profileCap: null,
 };
 
 const homeView = $('#home-view');
@@ -1628,8 +1633,41 @@ function embyMeta(raw) {
   return meta;
 }
 
+/**
+ * The four-name tier ladder, and the only one this app may know.
+ *
+ * Duplicated in server/profiles.js, ProfileClient.kt, Profiles.brs, tvOS's
+ * ProfileSession and Tizen's ui.js, and every one of them treats a name it does
+ * not recognise as a BLOCK under a kids cap. A fifth name taught to nobody does
+ * not narrow a kids profile, it EMPTIES one.
+ */
+const RATINGS = ['general', 'teen', 'mature', 'adult'];
+
+/**
+ * May the connected profile see a title rated `tier`?
+ *
+ * An empty or unrecognised tier is UNKNOWN, not safe: it passes for an adult cap
+ * and fails for a kids one, so an unrated title never slips past a kids profile.
+ *
+ * WITH NO PROFILE CONNECTED THERE IS NO CAP, and everything is shown. That is a
+ * deliberate choice and it is the one hole left: the web app, unlike the four
+ * televisions, has no mandatory profile gate, so a viewer who never connects a
+ * profile is never capped. Closing that means making the gate mandatory on the
+ * web, which is a product decision, not a filter.
+ */
+function ratingAllowed(tier) {
+  const cap = state.profileCap;
+  if (!cap) return true;
+  const capIndex = RATINGS.indexOf(String(cap).toLowerCase());
+  if (capIndex < 0) return false;
+  const tierIndex = RATINGS.indexOf(String(tier || '').toLowerCase());
+  if (tierIndex < 0) return String(cap).toLowerCase() !== 'general';
+  return tierIndex <= capIndex;
+}
+
 async function appendEmbyRow(title, type, load) {
-  const metas = (await load()).map(embyMeta).filter(Boolean);
+  const metas = (await load()).map(embyMeta).filter(Boolean)
+    .filter((meta) => ratingAllowed(meta.contentRating));
   // An empty row is NOT drawn. A shelf that says "Emby" over six grey rectangles
   // reads as broken; no shelf reads as "not today".
   if (!metas.length) return;
@@ -1651,6 +1689,23 @@ function loadEmbyRows() {
   appendEmbyRow('Emby · Latest Shows', 'series', () => window.BlazingEmby.latest('series', 12));
   appendEmbyRow('Emby · Live TV', 'tv', () => window.BlazingEmby.livetv(12));
 }
+
+/**
+ * Switching profile must change what is on screen.
+ *
+ * The rows already drawn were filtered against the OLD cap, so they are thrown
+ * away and refetched rather than left standing. Dropping them first also means a
+ * shelf that empties under a stricter cap disappears instead of sitting there as
+ * a title over nothing — appendEmbyRow refuses to draw an empty row.
+ */
+document.addEventListener('blazing-profile-selected', (event) => {
+  const detail = (event && event.detail) || {};
+  const next = detail.maxRating || null;
+  if (next === state.profileCap) return;
+  state.profileCap = next;
+  for (const section of document.querySelectorAll('[data-emby-row="true"]')) section.remove();
+  loadEmbyRows();
+});
 
 /* ---- Comics ------------------------------------------------------------- */
 
