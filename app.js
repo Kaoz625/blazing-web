@@ -963,9 +963,41 @@ async function retryViaProxy(session, originalUrl) {
   if (play && typeof play.catch === 'function') play.catch(() => {});
 }
 
+
+const Platform = {
+  isRoku:    !!window.Roku,
+  isTizen:   !!window.tizen,
+  isAndroid: !!window.AndroidBridge,
+  isAppleTV: !!window.webkit?.messageHandlers?.avplayer,
+  isWeb:     true
+};
+
 function openPlayer(title, rawUrl) {
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
+  
+  if (Platform.isAppleTV) {
+    window.webkit.messageHandlers.avplayer.postMessage({ url });
+    return;
+  }
+  if (Platform.isAndroid) {
+    window.AndroidBridge.postMessage(JSON.stringify({ cmd: 'play', url, title }));
+    return;
+  }
+  if (Platform.isTizen) {
+    if (window.webapis && window.webapis.avplay) {
+      // Basic tizen setup
+      window.webapis.avplay.open(url);
+      window.webapis.avplay.play();
+    }
+    return;
+  }
+  if (Platform.isRoku) {
+    window.location = `blazeos://play?url=${encodeURIComponent(url)}`;
+    return;
+  }
+
+  // Fallback to web HTML5 video
   const session = (playSession += 1);
   playerTitle.textContent = title;
   player.hidden = false;
@@ -989,333 +1021,12 @@ function openPlayer(title, rawUrl) {
           b.onclick = () => { video.currentTime = d.position; b.hidden = true; };
           setTimeout(() => { b.hidden = true; }, 10000);
         }
-      }).catch(()=>{});
+      });
   }
 
-  // A rejected play() is usually only the autoplay policy; `loadedmetadata`
-  // still arrives for a good stream and clears the spinner. Do NOT claim
-  // 'playing' here -- that used to hide the spinner for streams that never
-  // loaded at all.
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => {});
 }
-
-function closePlayer() {
-  // Retire this session first: removing src below fires a stray `error`, and a
-  // live watchdog would otherwise report a failure for a player that is gone.
-  playSession += 1;
-  clearPlayerWatchdog();
-  stopSync();
-  if($('#resume-btn')) $('#resume-btn').hidden = true;
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
-  player.hidden = true;
-  setPlayerState('idle');
-  document.body.classList.remove('no-scroll');
-}
-
-async function catalogSearch(type, query) {
-  const data = await fetchJSON(`${CINEMETA}/catalog/${type}/top/search=${encodeURIComponent(query)}.json`);
-  return (Array.isArray(data.metas) ? data.metas : []).map(safeMeta).filter(Boolean);
-}
-
-async function mwpSearch(query) {
-  const data = await fetchJSON(`${API_BASE}/catalog/movie/mwp-search/search=${encodeURIComponent(query)}.json`);
-  return (Array.isArray(data.metas) ? data.metas : []).map(safeMeta).filter(Boolean);
-}
-
-function buildResultRow(title, metas) {
-  const section = el('section', 'result-row');
-  const heading = el('h2', 'row-title');
-  heading.textContent = title;
-  const grid = el('div', 'result-grid');
-  grid.append(...metas.map(buildCard));
-  section.append(heading, grid);
-  return section;
-}
-
-async function runSearch(event) {
-  event.preventDefault();
-  const query = plainText($('#search-input').value);
-  const status = $('#search-status');
-  const target = $('#search-results');
-  target.replaceChildren();
-  if (!query) {
-    status.textContent = 'Type a title first.';
-    return;
-  }
-  
-  if (aiSearchActive) {
-    status.textContent = 'Searching with AI...';
-    try {
-      const res = await fetch(`${API_BASE}/api/ai-search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
-      const data = await res.json();
-      const metas = (Array.isArray(data.results) ? data.results : []).map(safeMeta).filter(Boolean);
-      if (metas.length) {
-        target.appendChild(buildResultRow('AI Results', metas));
-        status.textContent = `Found ${metas.length} AI results.`;
-      } else {
-        status.textContent = 'No titles found via AI.';
-      }
-      telemetry('search', { query, results: metas.length, kind: 'ai' });
-    } catch {
-      status.textContent = 'AI search failed.';
-      // The deployed addon answers "Method is not allowed" to this route, so a
-      // zero here is a missing backend, not a content gap. Worth counting
-      // separately from a genuine empty result.
-      telemetry('error', { where: 'app.runSearch.ai', code: 'post_failed', message: 'ai-search unavailable' });
-    }
-    return;
-  }
-
-  status.textContent = 'Searching all sources…';
-  const [movies, shows, mwp] = await Promise.allSettled([
-    catalogSearch('movie', query),
-    catalogSearch('series', query),
-    mwpSearch(query),
-  ]);
-  const groups = [
-    ['Movies', movies.status === 'fulfilled' ? movies.value : []],
-    ['Shows', shows.status === 'fulfilled' ? shows.value : []],
-    ['MrWorldPremiere', mwp.status === 'fulfilled' ? mwp.value : []],
-  ];
-  const seen = new Set();
-  let count = 0;
-  for (const [title, sourceMetas] of groups) {
-    const metas = sourceMetas.filter((meta) => {
-      const key = `${meta.type}/${meta.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    if (!metas.length) continue;
-    count += metas.length;
-    target.appendChild(buildResultRow(title, metas));
-  }
-  status.textContent = count ? `${count} result${count === 1 ? '' : 's'} found.` : 'No titles found.';
-  // A query with results: 0 is a content gap — that is the whole point of
-  // v_searches. The query text itself is not a secret; the deny-list only
-  // strips props whose NAME looks like a credential.
-  telemetry('search', { query, results: count, kind: 'text' });
-}
-
-function renderLibrary() {
-  const target = $('#library-results');
-  target.replaceChildren();
-  if (!state.myList.length) {
-    const message = el('p', 'empty-copy');
-    message.textContent = 'Open a title and use My list to save it here.';
-    target.appendChild(message);
-    return;
-  }
-  target.appendChild(buildResultRow('Saved titles', state.myList));
-}
-
-function safeDiscoverMeta(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  return safeMeta({ ...raw, releaseInfo: raw.year || raw.releaseInfo });
-}
-
-async function openDiscover(kind, slug, label) {
-  if (!/^(filter|provider)$/.test(kind) || !/^[a-z0-9-]{1,48}$/.test(slug)) return;
-  const request = ++discoverRequest;
-  showRoute('discover');
-  discoverTitle.textContent = label;
-  discoverCopy.textContent = kind === 'provider'
-    ? `Titles available with ${label}.`
-    : `Browse ${label.toLowerCase()} titles.`;
-  discoverStatus.textContent = `Loading ${label}…`;
-  discoverResults.replaceChildren();
-  try {
-    const data = await fetchJSON(`${FLEET_BASE}/discover/${kind}/${encodeURIComponent(slug)}`);
-    if (request !== discoverRequest || state.route !== 'discover') return;
-    const metas = (Array.isArray(data.items) ? data.items : []).map(safeDiscoverMeta).filter(Boolean);
-    discoverTitle.textContent = plainText(data.name, label);
-    if (!metas.length) {
-      discoverStatus.textContent = `Nothing came back for ${plainText(data.name, label)}.`;
-      return;
-    }
-    discoverStatus.textContent = `${metas.length} titles`;
-    discoverResults.appendChild(buildResultRow(plainText(data.name, label), metas));
-  } catch {
-    if (request === discoverRequest && state.route === 'discover') {
-      discoverStatus.textContent = `Could not load ${label}. Try again.`;
-    }
-  }
-}
-
-$$('[data-view]').forEach((button) => {
-  button.addEventListener('click', () => showRoute(button.dataset.view || 'home'));
-});
-$$('[data-discover-kind]').forEach((button) => {
-  button.addEventListener('click', () => {
-    openDiscover(button.dataset.discoverKind || '', button.dataset.discoverSlug || '', button.textContent || 'Discover');
-  });
-});
-$('#menu-button').addEventListener('click', openDrawer);
-$('#drawer-backdrop').addEventListener('click', closeDrawer);
-$('#hero-open').addEventListener('click', () => state.featured && openDetail(state.featured));
-$('#hero-save').addEventListener('click', () => state.featured && toggleMyList(state.featured));
-$('#detail-close').addEventListener('click', closeDetail);
-$('#detail-play').addEventListener('click', playSelected);
-$('#detail-save').addEventListener('click', () => state.selected && toggleMyList(state.selected));
-$('#search-form').addEventListener('submit', runSearch);
-$('#player-close').addEventListener('click', closePlayer);
-detailDialog.addEventListener('click', (event) => {
-  if (event.target === detailDialog) closeDetail();
-});
-detailDialog.addEventListener('cancel', () => {
-  state.selected = null;
-});
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !player.hidden) closePlayer();
-  if (event.key === 'Escape' && !drawerLayer.hidden) closeDrawer();
-});
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
-}
-
-boot();
-
-detailUpscale.addEventListener('click', requestUpscale);
-
-async function loadStreams(meta) {
-  const container = $('#detail-streams');
-  container.innerHTML = '';
-  if (isMwp(meta)) return;
-  
-  detailStatus.textContent = 'Loading streams...';
-  try {
-    let streams = await resolveStreams(meta);
-    if (!streams.length) {
-      detailStatus.textContent = 'No compatible stream available.';
-      return;
-    }
-    
-    // Sort logic
-    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
-    const getPenalty = (s) => {
-      if (deadLinks.includes(s.url)) return 1000;
-      let p = 0;
-      const b = (s.name + ' ' + (s.title || '')).toLowerCase();
-      if (/rus|russian|ita|italian|latino|french/.test(b)) p += 100;
-      return p;
-    };
-    
-    streams.sort((a, b) => getPenalty(a) - getPenalty(b));
-
-    detailStatus.textContent = '';
-    // The dropdown is filled from the meta's streamsByQuality when the backend
-    // supplies one, and otherwise from the qualities actually present in this
-    // list. Deriving it is what makes the control work today: streamsByQuality
-    // is part of the undeployed addon commit and is absent from every response.
-    fillQualitySelect(meta, streams);
-    
-    streams.forEach(s => {
-      const row = document.createElement('div');
-      row.className = 'stream-row';
-      row.dataset.quality = qualityOf(s);
-      if (deadLinks.includes(s.url)) row.classList.add('dead');
-      
-      const q = s.name || 'SD';
-      const title = s.title || '';
-      
-      let qualityBadge = 'badge-sd';
-      if (/4k|2160/i.test(q)) qualityBadge = 'badge-4k';
-      else if (/1080/i.test(q)) qualityBadge = 'badge-1080';
-      else if (/720/i.test(q)) qualityBadge = 'badge-720';
-      
-      const sizeMatch = title.match(/(?:\b\d+(?:\.\d+)?\s*(?:GB|MB)\b)/i);
-      const seedMatch = title.match(/(?:👤|👥|S:|Seeders?:?)\s*(\d+)/i);
-      const size = sizeMatch ? sizeMatch[0] : '';
-      const seeders = seedMatch ? `👤 ${seedMatch[1]}` : '';
-      
-      row.innerHTML = `
-        <div class="stream-info">
-          <div class="stream-q"><span class="badge ${qualityBadge}">${q}</span></div>
-          <div class="stream-title">${title}</div>
-          <div class="stream-meta"><span>${size}</span><span>${seeders}</span></div>
-        </div>
-      `;
-      
-      row.onclick = () => {
-        // No URL here — rule 6. The host and the resolution are what make
-        // v_source_health useful; the link itself is exactly what must not go.
-        telemetry('play_start', {
-          id: meta.id, title: meta.name, type: meta.type,
-          source: String(s._from || '').replace(/^site:/, ''),
-          res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
-        });
-        closeDetail();
-        openPlayer(meta.name, s.url);
-      };
-      
-      row.oncontextmenu = (e) => {
-        e.preventDefault();
-        if (!deadLinks.includes(s.url)) deadLinks.push(s.url);
-        localStorage.setItem('dead_links', JSON.stringify(deadLinks));
-        row.classList.add('dead');
-        container.appendChild(row); // move to bottom
-      };
-      
-      container.appendChild(row);
-    });
-    
-  } catch (err) {
-    detailStatus.textContent = 'Failed to load streams.';
-    telemetry('error', { where: 'app.loadStreams', code: 'fetch', message: String(err && err.message || err).slice(0, 200) });
-  }
-}
-
-const aiToggle = $('#ai-search-toggle');
-if (aiToggle) {
-  aiToggle.addEventListener('click', () => {
-    aiSearchActive = !aiSearchActive;
-    aiToggle.style.background = aiSearchActive ? 'var(--accent)' : '';
-    $('#search-input').placeholder = aiSearchActive ? 'Describe a plot or storyline...' : 'Search movies and shows';
-  });
-}
-document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && document.activeElement !== $('#search-input')) {
-    e.preventDefault();
-    if (state.route !== 'search') showRoute('search');
-    else $('#search-input').focus();
-  }
-});
-
-async function loadContinueWatching() {
-  const profileId = localStorage.getItem('profileId');
-  if (!profileId) return;
-  try {
-    const res = await fetch(`${API_BASE}/api/sync/progress/recent?profileId=${profileId}`);
-    const data = await res.json();
-    if (data.items && data.items.length) {
-      const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
-      rowsWrap.prepend(section);
-      const track = $('.row-track', section);
-      const metas = data.items.map(safeDiscoverMeta).filter(Boolean);
-      track.replaceChildren(...metas.map(m => {
-        const c = buildCard(m);
-        if (m.progress) {
-          const bar = document.createElement('div');
-          bar.className = 'progress-bar';
-          bar.innerHTML = `<div class="progress-fill" style="width: ${Math.min(100, (m.progress.position / m.progress.duration) * 100)}%"></div>`;
-          c.appendChild(bar);
-        }
-        return c;
-      }));
-    }
-  } catch (e) {}
-}
-
-
-let syncInterval = null;
 function startSync(meta) {
   stopSync();
   syncInterval = setInterval(() => {
