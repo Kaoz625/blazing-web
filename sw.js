@@ -23,7 +23,11 @@
 // v11 — the network-first rule below only applies once THIS worker is in control,
 // and until then the old one keeps answering app.js from its cache. Measured
 // 2026-08-27: profile.js updated while app.js did not, on the same reload.
-const CACHE = 'blazing-shell-v16';
+// v17: the home screen came back (app.js) and the owner pad accepts the PIN the
+// owner actually types (profile.js). MUST be bumped: an installed PWA sitting on
+// v16 holds the app.js whose boot() is never called — it would keep serving an
+// EMPTY HOME, with no error, which is exactly the failure this release fixes.
+const CACHE = 'blazing-shell-v17';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
