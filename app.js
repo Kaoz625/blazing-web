@@ -503,8 +503,45 @@ function activeCatalogs(rawCatalogs) {
   });
 }
 
-async function boot() {
+
+async function loadSDUIRow(catalogInfo, section) {
+  const track = $('.row-track', section);
+  if (!catalogInfo.catalogSlug) {
+    if (catalogInfo.id === 'continue') return loadContinueWatchingRow(section);
+    section.remove();
+    return [];
+  }
   
+  const fetchUrl = `${API_BASE}/catalog/tv/${catalogInfo.catalogSlug}.json`;
+  
+  try {
+    const data = await fetchJSON(fetchUrl);
+    const rawMetas = Array.isArray(data.metas) ? data.metas : (Array.isArray(data) ? data : []);
+    
+    const metas = rawMetas
+      .map((item) => safeDiscoverMeta({ ...item, type: item.type || catalogInfo.type }))
+      .filter(Boolean);
+      
+    if (!metas.length) {
+      section.remove();
+      return [];
+    }
+    track.replaceChildren(...metas.map(buildCard));
+    return metas;
+  } catch {
+    section.remove();
+    return [];
+  }
+}
+
+async function loadContinueWatchingRow(section) {
+  // Use existing logic for continue watching
+  loadContinueWatching();
+  section.remove(); // The existing logic creates its own row at the top
+  return [];
+}
+
+async function boot() {
   const profileId = localStorage.getItem('profileId');
   if (!profileId) {
     try {
@@ -534,63 +571,47 @@ async function boot() {
   state.featured = null;
   hero.classList.add('hero-loading');
 
-  // These fleet shelves are current when the add-on manifest is stale or slow.
-  // They are added first and kept in fixed visual order. Existing add-on rows
-  // still load below them as the broad catalog fallback.
-  // Trending goes in before the fresh shelves so it lands directly under the
-  // Continue Watching row, which prepends itself when it resolves.
-  // Fire and forget: an Emby outage costs three hidden rows, never a slow or
-  // broken home screen. Each row appends itself when it arrives.
-  loadEmbyRows();
+  try {
+    const inviteCode = localStorage.getItem('validInviteCode');
+    const mode = inviteCode ? 'blazing' : 'safe';
+    const uiRes = await fetch(`${API_BASE}/api/ui/home-config?mode=${mode}`);
+    const uiConfig = await uiRes.json();
+    
+    // Apply UI config
+    document.title = uiConfig.appName;
+    const brandSpan = $('.brand-mark').nextElementSibling;
+    if (brandSpan) brandSpan.textContent = uiConfig.appName;
+    document.documentElement.style.setProperty('--accent', uiConfig.accentColor);
+    document.documentElement.setAttribute('data-theme', uiConfig.theme);
+    
+    // Build rows from SDUI config
+    const jobs = (uiConfig.homeRows || []).map((row) => {
+      const catalogInfo = {
+        id: row.id,
+        type: row.type === 'cinematic_hero' ? 'movie' : 'series', // Default fallback
+        name: row.label,
+        catalogSlug: row.catalogSlug
+      };
+      
+      const section = buildRowSkeleton(catalogInfo);
+      if (row.type === 'cinematic_hero') {
+        section.dataset.freshShelf = 'true';
+      }
+      rowsWrap.appendChild(section);
+      
+      return loadSDUIRow(catalogInfo, section);
+    });
+    
+    const rows = await Promise.all(jobs);
+    const first = rows.find((metas) => metas && metas.length)?.[0];
+    if (first && !state.featured) setHero(first);
+    else if (!state.featured) emptyHero('Nothing is available right now. Try again soon.');
 
-  const trendingJobs = TRENDING_ROWS.map((catalog) => {
-    const section = buildRowSkeleton(catalog);
-    section.dataset.softRow = 'true';
-    rowsWrap.appendChild(section);
-    return loadRow(catalog, section);
-  });
-
-  const freshJobs = FRESH_HOME_SHELVES.map((shelf) => {
-    const section = buildRowSkeleton({ id: shelf.id, name: shelf.title, type: shelf.type });
-    section.dataset.freshShelf = 'true';
-    rowsWrap.appendChild(section);
-    return loadFreshHomeRow(shelf, section);
-  });
-  const freshDone = Promise.all(freshJobs).then((rows) => {
-    const first = rows.find((metas) => metas.length)?.[0];
-    if (first) setHero(first);
-    return rows;
-  });
-
-  const catalogDone = fetchJSON(`${API_BASE}/manifest.json`)
-    .then((manifest) => {
-      state.catalogs = activeCatalogs(Array.isArray(manifest.catalogs) ? manifest.catalogs : []);
-      const jobs = state.catalogs.map((catalog) => {
-        const section = buildRowSkeleton(catalog);
-        rowsWrap.appendChild(section);
-        return loadRow(catalog, section);
-      });
-      return Promise.all(jobs);
-    })
-    .then((rows) => {
-      // Do not leave a usable catalog behind a slow fresh-feed request. A fresh
-      // result replaces this temporary hero as soon as it arrives.
-      const first = rows.find((metas) => metas.length)?.[0];
-      if (first && !state.featured) setHero(first);
-      return rows;
-    })
-    .catch(() => []);
-
-  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
-  const first = freshRows.find((metas) => metas.length)?.[0]
-    || catalogRows.find((metas) => metas.length)?.[0];
-  if (first) {
-    // `freshDone` normally sets this early. This covers the case where a cache
-    // or test stub resolves the two sources in a different order.
-    if (!state.featured) setHero(first);
-  } else {
-    emptyHero('Nothing is available right now. Try again soon.');
+  } catch (err) {
+    console.error('SDUI Boot Error', err);
+    emptyHero('Could not load Blazing configuration.');
   }
+
   applyRowFilter(state.route);
 }
 

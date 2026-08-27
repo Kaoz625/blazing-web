@@ -665,3 +665,23 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .comic-close:focus-visible { outline: 3px solid var(--accent, #f43f5e); }
 .comic-page { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
+
+/* 10-foot UI D-pad magnetic focus engine */
+@media (pointer: coarse), (hover: none) {
+  .card:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible, button:focus-visible {
+    transform: scale(1.08);
+    box-shadow: 0 0 15px var(--accent-glow);
+    outline: 3px solid var(--accent);
+    outline-offset: 4px;
+    z-index: 10;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+}
+
+[data-theme="kids_warm"] {
+  --bg: #1a1510;
+  --surface: #261f1a;
+  --text: #fffdfa;
+  --accent: #FFD700;
+  --accent-glow: rgba(255, 215, 0, 0.4);
+}
