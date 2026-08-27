@@ -27,7 +27,7 @@
 // owner actually types (profile.js). MUST be bumped: an installed PWA sitting on
 // v16 holds the app.js whose boot() is never called — it would keep serving an
 // EMPTY HOME, with no error, which is exactly the failure this release fixes.
-const CACHE = 'blazing-shell-v17';
+const CACHE = 'blazing-shell-v18';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -36,6 +36,7 @@ const SHELL = [
   './index.html',
   './styles.css',
   './app.js',
+  './hls.min.js',
   './telemetry.js',
   './profile.js',
   // emby.js was never in this list, although index.html has loaded it since the

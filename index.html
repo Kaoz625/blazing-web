@@ -346,6 +346,9 @@
   <script src="./tv-comics-reader.js" defer></script>
   <script src="./delight.js" defer></script>
   <script src="./brightminds.js" defer></script>
+  <!-- Vendored, not a CDN: sw.js precaches it, and Chrome/Edge/Firefox
+       cannot play an HLS manifest from a bare <video src> without it. -->
+  <script src="./hls.min.js"></script>
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>

@@ -1041,6 +1041,45 @@ function closeDetail() {
   $('#detail-streams').innerHTML = '';
 }
 
+const EDU_ID_PREFIX = 'yt:edu:';
+
+function isEduId(id) {
+  return typeof id === 'string' && id.indexOf(EDU_ID_PREFIX) === 0 &&
+    id.length > EDU_ID_PREFIX.length;
+}
+
+/**
+ * Resolve one education card to a playable URL AND its container.
+ *
+ * `&json=1` is the point. Without it the route answers 302 and the browser
+ * follows it into a signed manifest URL whose format has to be guessed — and
+ * YouTube no longer serves a combined progressive format, so the only playable
+ * link is an HLS manifest and the guess is wrong. Returns null on any failure;
+ * the caller shows the message.
+ */
+async function resolveEduStream(id) {
+  const videoId = id.slice(EDU_ID_PREFIX.length);
+  const controller = new AbortController();
+  // yt-dlp has to solve YouTube's player JS server-side, which is slow on a cold
+  // cache. RESOLVE_TIMEOUT is tuned for a redirect lookup and is far too short.
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(
+      `${API_BASE}/proxy/yt-resolve?id=${encodeURIComponent(videoId)}&json=1`,
+      { mode: 'cors', credentials: 'omit', signal: controller.signal }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const url = safeHttpsUrl(data && data.url);
+    if (!url) return null;
+    return { url, streamFormat: (data && data.streamFormat) || '' };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function resolveStreams(meta) {
   const data = await fetchJSON(
     `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`
@@ -1060,6 +1099,21 @@ async function playSelected() {
     const url = window.BlazingEmby.streamUrl(meta.embyId);
     openPlayer(meta.name, url);
     closeDetail();
+    return;
+  }
+  // Education cards carry a "yt:edu:<videoId>" id. There is no /stream route for
+  // them — the catalog's own stream entry is a youtube.com/watch PAGE, which no
+  // <video> element can open. One resolver call is the entire path.
+  if (isEduId(meta.id)) {
+    detailStatus.textContent = 'Getting the video…';
+    const edu = await resolveEduStream(meta.id);
+    if (!edu) {
+      detailStatus.textContent = 'This lesson could not be opened. The video ' +
+        'resolver on the server did not answer.';
+      return;
+    }
+    closeDetail();
+    openPlayer(meta.name, edu.url, { streamFormat: edu.streamFormat });
     return;
   }
   detailStatus.textContent = 'Checking direct streams…';
@@ -1188,6 +1242,9 @@ async function retryViaProxy(session, originalUrl) {
   }
   setPlayerState('loading');
   watchPlayerLoad(session, resolved, false);
+  // destroyHls() first: a live hls.js instance keeps writing into the same
+  // element through its MediaSource, so a bare src= assignment would fight it.
+  destroyHls();
   video.src = resolved;
   video.load();
   const play = video.play();
@@ -1203,16 +1260,129 @@ const Platform = {
   isWeb:     true
 };
 
-function openPlayer(title, rawUrl) {
+/* ---------------------------------------------------------------------------
+   HLS, and why this browser needs a library to do what every TV does natively.
+
+   The one playable YouTube URL is an HLS variant manifest. Safari and every
+   webOS/Tizen TV play `application/vnd.apple.mpegurl` from a plain <video src>.
+   Chrome, Edge and Firefox do NOT, and they fail the way that costs the most
+   time to diagnose: the `error` event fires with no message and the viewer sees
+   a black box. So hls.js is vendored (hls.min.js, self-hosted — no CDN, because
+   sw.js precaches it and a third-party script would break offline start).
+
+   Order is: hls.js FIRST wherever MSE exists, native only as the fallback.
+   That looks backwards — native decoding is cheaper and hardware-accelerated —
+   and the first version of this code did prefer native. It was wrong, and
+   edu-play.smoke.mjs caught it: canPlayType() CANNOT tell these browsers apart.
+
+       Chrome for Testing 1208, measured 27 Aug 2026:
+         canPlayType('application/vnd.apple.mpegurl')  ->  'maybe'
+         canPlayType('application/x-mpegURL')          ->  'maybe'
+         canPlayType('video/mp4')                      ->  'maybe'
+
+   'maybe' is truthy, so a truthiness check said "Chrome plays HLS natively",
+   the manifest went to a bare <video src>, and playback stopped at 0x0 with
+   readyState 0 and no error event. There is no return value that separates
+   Chrome from Safari, so the capability question has to be asked of something
+   that does not lie: Hls.isSupported(), which tests MediaSource for real.
+
+   Native is therefore the branch for browsers with NO MSE — iPhone Safari,
+   where hls.js cannot run and native HLS genuinely is the only path.
+--------------------------------------------------------------------------- */
+
+/** The live hls.js instance, or null. Exactly one at a time. */
+let hlsInstance = null;
+
+function destroyHls() {
+  if (!hlsInstance) return;
+  try { hlsInstance.destroy(); } catch (e) {}
+  hlsInstance = null;
+}
+
+/**
+ * Whether a bare <video src> is the ONLY way to play HLS here.
+ *
+ * Not "can this browser play HLS" — canPlayType cannot answer that (see above).
+ * This is the narrow question the fallback branch needs: the element claims some
+ * HLS support AND there is no MediaSource, so hls.js could not run even if it
+ * were loaded. True on iPhone Safari; false in every desktop browser.
+ */
+function nativeHlsOnly() {
+  if (!video || typeof video.canPlayType !== 'function') return false;
+  if (typeof window.MediaSource !== 'undefined') return false;
+  return !!(video.canPlayType('application/vnd.apple.mpegurl') ||
+            video.canPlayType('application/x-mpegURL'));
+}
+
+/**
+ * True when this URL should be treated as HLS.
+ *
+ * `declared` is what the SERVER said (`streamFormat` from ?json=1) and it wins.
+ * The path sniff is only a floor: signed googlevideo manifest URLs sometimes
+ * carry no recognisable extension, which is the whole reason the server was
+ * taught to declare the format in the first place.
+ */
+function looksLikeHls(url, declared) {
+  if (String(declared || '').toLowerCase() === 'hls') return true;
+  return /\.m3u8(\?|$)/i.test(url) || /manifest\.googlevideo\.com/i.test(url);
+}
+
+/**
+ * Point the <video> at one URL, choosing the right mechanism.
+ * Returns '' on success, or a viewer-facing reason it cannot play.
+ */
+function attachSource(url, declared) {
+  destroyHls();
+  if (!looksLikeHls(url, declared)) {
+    video.src = url;
+    video.load();
+    return '';
+  }
+  if (window.Hls && window.Hls.isSupported()) {
+    return attachViaHlsJs(url);
+  }
+  if (nativeHlsOnly()) {
+    video.src = url;
+    video.load();
+    return '';
+  }
+  // Say which piece is missing. "Cannot play" alone sent people hunting for a
+  // dead stream when the stream was fine and the script tag was the fault.
+  return 'This browser needs hls.min.js to play this video, and it did not load.';
+}
+
+/** The hls.js branch of [attachSource]. Returns '' — it cannot fail here. */
+function attachViaHlsJs(url) {
+  const hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+  hlsInstance = hls;
+  hls.on(window.Hls.Events.ERROR, (_evt, data) => {
+    // Only fatal errors are failures. hls.js reports recoverable segment gaps
+    // constantly on a live manifest, and treating those as death made playback
+    // give up seconds after it correctly started.
+    if (!data || !data.fatal) return;
+    if (hlsInstance !== hls) return;
+    video.dispatchEvent(new Event('error'));
+  });
+  hls.loadSource(url);
+  hls.attachMedia(video);
+  return '';
+}
+
+function openPlayer(title, rawUrl, opts) {
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
+  // What the server said the container is. Native shells get it forwarded so
+  // their own players can stop guessing too.
+  const declared = (opts && opts.streamFormat) || '';
   
   if (Platform.isAppleTV) {
-    window.webkit.messageHandlers.avplayer.postMessage({ url });
+    window.webkit.messageHandlers.avplayer.postMessage({ url, streamFormat: declared });
     return;
   }
   if (Platform.isAndroid) {
-    window.AndroidBridge.postMessage(JSON.stringify({ cmd: 'play', url, title }));
+    window.AndroidBridge.postMessage(JSON.stringify({
+      cmd: 'play', url, title, streamFormat: declared,
+    }));
     return;
   }
   if (Platform.isTizen) {
@@ -1224,7 +1394,8 @@ function openPlayer(title, rawUrl) {
     return;
   }
   if (Platform.isRoku) {
-    window.location = `blazeos://play?url=${encodeURIComponent(url)}`;
+    window.location = `blazeos://play?url=${encodeURIComponent(url)}` +
+      (declared ? `&format=${encodeURIComponent(declared)}` : '');
     return;
   }
 
@@ -1235,10 +1406,17 @@ function openPlayer(title, rawUrl) {
   document.body.classList.add('no-scroll');
 
   setPlayerState('loading');
-  watchPlayerLoad(session, url, true);
+  const isHls = looksLikeHls(url, declared);
+  // canRetry=false for HLS: retryViaProxy asks /proxy/resolve for a direct media
+  // file, and handing a manifest URL to that route cannot help — it would only
+  // replace a real error message with a slower one.
+  watchPlayerLoad(session, url, !isHls);
 
-  video.src = url;
-  video.load();
+  const attachError = attachSource(url, declared);
+  if (attachError) {
+    setPlayerState('error', attachError);
+    return;
+  }
   startSync({ id: state.selected?.id });
   const profileId = localStorage.getItem('profileId');
   if (profileId && state.selected?.id) {
