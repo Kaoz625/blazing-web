@@ -683,6 +683,25 @@ async function loadContinueWatchingRow(section) {
   return [];
 }
 
+/**
+ * The home screen.
+ *
+ * THIS WAS NOT CALLED. The BlazeOS Phase 1 patch replaced the body with an
+ * SDUI-only version and dropped the `boot();` call in the same change, so from
+ * 48f1be5 until now NOTHING built the home: no hero, no shelves, no Continue
+ * Watching. The only rows that ever appeared were the three Emby ones, drawn by
+ * the blazing-profile-selected listener at the bottom of this file — which is
+ * why the screen looked like it worked when a profile was picked, and why a
+ * check that looked at the Emby rows passed. TRENDING_ROWS, FRESH_HOME_SHELVES,
+ * loadRow, loadFreshHomeRow and activeCatalogs were all left defined, orphaned.
+ *
+ * AND THE SDUI PATH CANNOT WORK TODAY. /api/ui/home-config answers 404 on
+ * addon.lyreosai.com. The route exists in the blazing-addon repo (server.js) and
+ * the deployed addon does not have it — the same gap that leaves 13 of the edu
+ * catalogs dead. So SDUI is TRIED, and the real shelves are the answer when it
+ * is not there. Once the addon is deployed the layout it serves takes over with
+ * no client change; until then the home is the one that works.
+ */
 async function boot() {
   const profileId = localStorage.getItem('profileId');
   if (!profileId) {
@@ -692,7 +711,7 @@ async function boot() {
       if (pData.profiles && pData.profiles.length > 1) {
         const d = $('#profile-picker');
         const l = $('#profile-list');
-        pData.profiles.forEach(p => {
+        pData.profiles.forEach((p) => {
           const b = document.createElement('button');
           b.className = 'primary-button';
           b.textContent = p.name;
@@ -713,47 +732,117 @@ async function boot() {
   state.featured = null;
   hero.classList.add('hero-loading');
 
+  // Fire and forget: an Emby outage costs three hidden rows, never a slow or
+  // broken home screen. Each row appends itself when it arrives.
+  loadEmbyRows();
+
+  if (await bootFromSDUI()) return;
+  await bootFromShelves();
+}
+
+
+/**
+ * Returns true only when the server actually described a layout AND at least one
+ * of its rows had something in it. A 404, a throw, or a layout whose every row
+ * came back empty all return false, so the caller falls through to the shelves
+ * instead of leaving the viewer on an empty screen with a heading over it.
+ */
+async function bootFromSDUI() {
   try {
     const inviteCode = localStorage.getItem('validInviteCode');
     const mode = inviteCode ? 'blazing' : 'safe';
     const uiRes = await fetch(`${API_BASE}/api/ui/home-config?mode=${mode}`);
+    if (!uiRes.ok) return false;
     const uiConfig = await uiRes.json();
-    
-    // Apply UI config
-    document.title = uiConfig.appName;
-    const brandSpan = $('.brand-mark').nextElementSibling;
-    if (brandSpan) brandSpan.textContent = uiConfig.appName;
-    document.documentElement.style.setProperty('--accent', uiConfig.accentColor);
-    document.documentElement.setAttribute('data-theme', uiConfig.theme);
-    
-    // Build rows from SDUI config
-    const jobs = (uiConfig.homeRows || []).map((row) => {
+    if (!uiConfig || !Array.isArray(uiConfig.homeRows) || !uiConfig.homeRows.length) return false;
+
+    if (uiConfig.appName) {
+      document.title = uiConfig.appName;
+      const brandSpan = $('.brand-mark').nextElementSibling;
+      if (brandSpan) brandSpan.textContent = uiConfig.appName;
+    }
+    // Applied only when the server names one. Writing `undefined` into --accent
+    // is how a palette silently loses the one red every client agrees on.
+    if (uiConfig.accentColor) document.documentElement.style.setProperty('--accent', uiConfig.accentColor);
+    if (uiConfig.theme) document.documentElement.setAttribute('data-theme', uiConfig.theme);
+
+    const jobs = uiConfig.homeRows.map((row) => {
       const catalogInfo = {
         id: row.id,
-        type: row.type === 'cinematic_hero' ? 'movie' : 'series', // Default fallback
+        type: row.type === 'cinematic_hero' ? 'movie' : 'series',
         name: row.label,
-        catalogSlug: row.catalogSlug
+        catalogSlug: row.catalogSlug,
       };
-      
       const section = buildRowSkeleton(catalogInfo);
-      if (row.type === 'cinematic_hero') {
-        section.dataset.freshShelf = 'true';
-      }
+      if (row.type === 'cinematic_hero') section.dataset.freshShelf = 'true';
       rowsWrap.appendChild(section);
-      
       return loadSDUIRow(catalogInfo, section);
     });
-    
+
     const rows = await Promise.all(jobs);
     const first = rows.find((metas) => metas && metas.length)?.[0];
-    if (first && !state.featured) setHero(first);
-    else if (!state.featured) emptyHero('Nothing is available right now. Try again soon.');
-
+    if (!first) return false;            // described a layout, served nothing
+    if (!state.featured) setHero(first);
+    applyRowFilter(state.route);
+    return true;
   } catch (err) {
-    console.error('SDUI Boot Error', err);
-    emptyHero('Could not load Blazing configuration.');
+    console.warn('SDUI home-config unavailable — building the home from the shelves', err);
+    return false;
   }
+}
 
+
+/**
+ * The home that works today: trending, the fresh discover shelves, and every
+ * catalog the addon's own manifest advertises. Recovered from 48f1be5^ — all of
+ * these helpers were still in the file, just never called again.
+ */
+async function bootFromShelves() {
+  const trendingJobs = TRENDING_ROWS.map((catalog) => {
+    const section = buildRowSkeleton(catalog);
+    section.dataset.softRow = 'true';
+    rowsWrap.appendChild(section);
+    return loadRow(catalog, section);
+  });
+
+  const freshJobs = FRESH_HOME_SHELVES.map((shelf) => {
+    const section = buildRowSkeleton({ id: shelf.id, name: shelf.title, type: shelf.type });
+    section.dataset.freshShelf = 'true';
+    rowsWrap.appendChild(section);
+    return loadFreshHomeRow(shelf, section);
+  });
+  const freshDone = Promise.all(freshJobs).then((rows) => {
+    // Do not leave a usable catalog behind a slow fresh-feed request.
+    const first = rows.find((metas) => metas.length)?.[0];
+    if (first) setHero(first);
+    return rows;
+  });
+
+  const catalogDone = fetchJSON(`${API_BASE}/manifest.json`)
+    .then((manifest) => {
+      state.catalogs = activeCatalogs(Array.isArray(manifest.catalogs) ? manifest.catalogs : []);
+      const jobs = state.catalogs.map((catalog) => {
+        const section = buildRowSkeleton(catalog);
+        rowsWrap.appendChild(section);
+        return loadRow(catalog, section);
+      });
+      return Promise.all(jobs);
+    })
+    .then((rows) => {
+      const first = rows.find((metas) => metas.length)?.[0];
+      if (first && !state.featured) setHero(first);
+      return rows;
+    })
+    .catch(() => []);
+
+  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
+  const first = freshRows.find((metas) => metas.length)?.[0]
+    || catalogRows.find((metas) => metas.length)?.[0];
+  if (first) {
+    if (!state.featured) setHero(first);
+  } else {
+    emptyHero('Nothing is available right now. Try again soon.');
+  }
   applyRowFilter(state.route);
 }
 
@@ -1169,6 +1258,46 @@ function openPlayer(title, rawUrl) {
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => {});
 }
+/**
+ * RESTORED, both of these. The BlazeOS Phase 1 patch (48f1be5) deleted
+ * loadContinueWatching() outright while leaving five calls to it standing —
+ * every one inside boot(), so the moment boot() ran again it would have thrown
+ * "loadContinueWatching is not defined" and taken the home screen with it. The
+ * same patch removed `let syncInterval = null;`, which left startSync()
+ * assigning to an undeclared name: an implicit global that works only because
+ * this file is not in strict mode. Both recovered from 48f1be5^:app.js.
+ *
+ * loadContinueWatching PREPENDS its row, so it lands above whatever the shelves
+ * have already drawn, whichever finishes first.
+ */
+async function loadContinueWatching() {
+  const profileId = localStorage.getItem('profileId');
+  if (!profileId) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/sync/progress/recent?profileId=${profileId}`);
+    const data = await res.json();
+    if (data.items && data.items.length) {
+      const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
+      rowsWrap.prepend(section);
+      const track = $('.row-track', section);
+      const metas = data.items.map(safeDiscoverMeta).filter(Boolean);
+      track.replaceChildren(...metas.map((m) => {
+        const c = buildCard(m);
+        if (m.progress) {
+          const bar = document.createElement('div');
+          bar.className = 'progress-bar';
+          bar.innerHTML = `<div class="progress-fill" style="width: ${Math.min(100, (m.progress.position / m.progress.duration) * 100)}%"></div>`;
+          c.appendChild(bar);
+        }
+        return c;
+      }));
+    }
+  } catch (e) {}
+}
+
+
+let syncInterval = null;
+
 function startSync(meta) {
   stopSync();
   syncInterval = setInterval(() => {
@@ -1715,3 +1844,10 @@ function loadRequestsView() {
     results.replaceChildren(...found.map(seerrCard));
   });
 }
+
+/**
+ * The call the BlazeOS Phase 1 patch removed, and the whole reason the home
+ * screen has been empty. app.js is loaded with `defer`, so the DOM is parsed
+ * before this line runs and every $('#id') at the top of the file has resolved.
+ */
+boot();

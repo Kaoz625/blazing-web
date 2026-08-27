@@ -213,7 +213,7 @@
 
   function renderPin() {
     // The pad serves two jobs now: unlocking a profile, and proving ownership of
-    // this browser. `ownerMode` is the only difference, and the owner PIN is six
+    // this browser. `ownerMode` is the only difference, and the owner PIN is seven
     // digits rather than four — a hundred times the keyspace for the same effort,
     // which matters because this one is reachable from the open internet.
     const profile = state.pendingProfile;
@@ -271,12 +271,12 @@
     ui.profiles.hidden = true;
     ui.owner.hidden = true;
     ui.pin.hidden = false;
-    setStatus('Enter the six-digit owner PIN to approve this browser. Attempts are limited.', 'info');
+    setStatus('Enter the seven-digit owner PIN to approve this browser. Attempts are limited.', 'info');
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
   }
 
   async function verifyOwnerPin() {
-    if (state.busy || !state.ownerMode || state.pinDigits.length !== 6) return;
+    if (state.busy || !state.ownerMode || state.pinDigits.length !== OWNER_PIN_LENGTH) return;
     if (!state.credentials) {
       setStatus('This browser has no connection to approve. Select Refresh profiles first.', 'error');
       return;
@@ -350,7 +350,7 @@
     closePanel();
   }
 
-  const pinLength = () => (state.ownerMode ? 6 : 4);
+  const pinLength = () => (state.ownerMode ? OWNER_PIN_LENGTH : 4);
 
   function addDigit(digit) {
     if (state.busy || !/^\d$/.test(digit) || state.pinDigits.length >= pinLength()) return;
