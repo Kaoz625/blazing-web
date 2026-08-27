@@ -1,6 +1,12 @@
 /* ============================================================
    Blazing Design System
-   Background: #0A0A0A  |  Accent: #E50914  (Blazing red)
+   Background: #0A0A0A  |  Accent: #FF3D47  (Blazing red)
+
+   #FF3D47, not #E50914. Markus, 27 Aug: "the color scheme on the apple tv seems
+   so different and it shouldnt be like that." Apple TV was not the odd one —
+   Roku, Fire TV and Apple TV all carry #FF3D47, and Colors.kt says in as many
+   words that "the Roku is the reference". The WEB and the Samsung app were the
+   two left behind on the older Netflix-ish #E50914, so those are what moved.
    Transitions: 300ms ease throughout
    ============================================================ */
 
@@ -12,9 +18,9 @@
   --text: #f7f7f8;
   --muted: #a3a3aa;
   --quiet: #6d6d75;
-  --accent: #E50914;
-  --accent-strong: #b0060f;
-  --accent-glow: rgba(229, 9, 20, 0.35);
+  --accent: #FF3D47;
+  --accent-strong: #E11D2B;
+  --accent-glow: rgba(255,61,71, 0.35);
   --radius: 16px;
   --transition: 300ms ease;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -200,15 +206,15 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: filter var(--transition), background var(--transition), box-shadow var(--transition);
 }
 .primary-button { border: 1px solid var(--accent); color: #fff; background: linear-gradient(140deg, var(--accent), var(--accent-strong)); box-shadow: 0 8px 22px var(--accent-glow); }
-.primary-button:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(229,9,20,.45); }
+.primary-button:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(255,61,71,.45); }
 .primary-button:disabled { cursor: wait; opacity: .55; }
 .secondary-button { border: 1px solid rgba(255,255,255,.12); color: #fff; background: rgba(28,28,31,.9); }
 .secondary-button:hover { background: var(--surface-focus); }
 .text-link { display: inline-flex; align-items: center; color: #fff; background: transparent; }
 .text-link:hover { color: var(--accent); }
 /* "Already done" treatment */
-.secondary-button.is-spent { border-color: rgba(229,9,20,.5); background: rgba(229,9,20,.16); }
-.secondary-button.is-spent:hover { background: rgba(229,9,20,.16); }
+.secondary-button.is-spent { border-color: rgba(255,61,71,.5); background: rgba(255,61,71,.16); }
+.secondary-button.is-spent:hover { background: rgba(255,61,71,.16); }
 
 /* ── Rows / Cards ────────────────────────────────────────── */
 .rows { display: flex; flex-direction: column; gap: 29px; }
@@ -244,7 +250,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card:hover, .card:focus-visible {
   transform: translateY(-5px) scale(1.03);
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent), 0 20px 40px rgba(229,9,20,.28), 0 8px 22px rgba(0,0,0,.4);
+  box-shadow: 0 0 0 2px var(--accent), 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
   z-index: 2;
 }
 .card:active { transform: scale(.97); }
@@ -252,7 +258,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 42px; font-weight: 900; }
 .card.no-image .card-image { visibility: hidden; }
 .card-label { position: absolute; right: 0; bottom: 0; left: 0; padding: 32px 10px 9px; background: linear-gradient(0deg, rgba(0,0,0,.93), rgba(0,0,0,0)); font-size: 12px; font-weight: 750; line-height: 1.25; text-shadow: 0 1px 4px #000; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(229,9,20,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
+.card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
 .skeleton { background: linear-gradient(100deg, #151518 30%, #242429 50%, #151518 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
 
 /* ── Card-hover trailer embed ────────────────────────────── */
@@ -302,7 +308,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .search-form { display: flex; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0 20px; }
 .search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
 .search-form input::placeholder { color: var(--quiet); }
-.search-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229,9,20,.18); }
+.search-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); }
 .search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: 14px; }
 .search-results, .library-results { margin-top: 24px; }
 .result-row { margin-bottom: 29px; }
@@ -310,7 +316,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .empty-copy { margin: 20px; color: var(--muted); }
 .roadmap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 920px; margin: 0 auto; padding: 0 20px; }
 .roadmap-grid article { min-height: 190px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
-.roadmap-grid article:hover { border-color: rgba(229,9,20,.3); box-shadow: 0 8px 24px rgba(229,9,20,.1); }
+.roadmap-grid article:hover { border-color: rgba(255,61,71,.3); box-shadow: 0 8px 24px rgba(255,61,71,.1); }
 .roadmap-grid span { color: var(--accent); font-size: 13px; font-weight: 900; letter-spacing: .12em; }
 .roadmap-grid h2 { margin: 25px 0 8px; font-size: 20px; letter-spacing: -.03em; }
 .roadmap-grid p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
@@ -383,11 +389,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .detail-art { opacity: .72; background-position: right center; }
 .detail-card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.68) 45%, rgba(0,0,0,.3) 100%); }
 .detail-close { position: absolute; top: 14px; right: 14px; z-index: 3; color: #fff; background: rgba(10,10,10,.78); transition: background var(--transition); }
-.detail-close:hover { background: rgba(229,9,20,.3); }
+.detail-close:hover { background: rgba(255,61,71,.3); }
 .detail-body { position: relative; z-index: 0; width: min(550px, 100%); padding: 60px 28px 30px; }
 .detail-body h2 { margin: 0; font-size: clamp(27px, 5vw, 43px); line-height: 1.04; letter-spacing: -.05em; }
 .detail-copy { margin: 14px 0 0; color: #dddde0; font-size: 15px; line-height: 1.55; }
-.source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(229,9,20,.5); border-radius: 999px; padding: 5px 9px; color: #fff; background: rgba(229,9,20,.16); font-size: 11px; font-weight: 800; }
+.source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(255,61,71,.5); border-radius: 999px; padding: 5px 9px; color: #fff; background: rgba(255,61,71,.16); font-size: 11px; font-weight: 800; }
 .detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
 
 /* ── Trailer embed in detail art ─────────────────────────── */
@@ -427,7 +433,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: background var(--transition), border-color var(--transition);
   backdrop-filter: blur(8px);
 }
-.detail-mute-btn:hover { background: rgba(229,9,20,.4); border-color: var(--accent); }
+.detail-mute-btn:hover { background: rgba(255,61,71,.4); border-color: var(--accent); }
 
 /* ── Quality selector ────────────────────────────────────── */
 .quality-select {
@@ -449,14 +455,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   padding-right: 32px;
   transition: border-color var(--transition), box-shadow var(--transition);
 }
-.quality-select:hover, .quality-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229,9,20,.18); outline: none; }
+.quality-select:hover, .quality-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); outline: none; }
 .quality-select option { background: #1c1c1f; color: #fff; }
 
 /* ── Player ──────────────────────────────────────────────── */
 .player { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #000; }
 .player-bar { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-top)) 16px 26px; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.8), transparent); }
 .player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: 14px; font-weight: 800; transition: background var(--transition); }
-.player-close:hover { background: rgba(229,9,20,.3); }
+.player-close:hover { background: rgba(255,61,71,.3); }
 .player-title { overflow: hidden; color: #fff; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
 .player-stage { position: relative; display: grid; flex: 1; place-items: center; }
 .video { width: 100%; height: 100%; background: #000; opacity: 0; transition: opacity .2s; }
@@ -500,7 +506,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   text-align: center;
   animation: toast-in .18s ease-out;
 }
-.toast-error { border-color: rgba(229,9,20,.5); background: rgba(229,9,20,.18); }
+.toast-error { border-color: rgba(255,61,71,.5); background: rgba(255,61,71,.18); }
 .toast-out { opacity: 0; transform: translateY(8px); transition: opacity .2s ease-in, transform .2s ease-in; }
 
 /* ── Streams list ────────────────────────────────────────── */
@@ -526,8 +532,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .stream-row:hover {
   border-color: var(--accent);
-  background: rgba(229,9,20,.08);
-  box-shadow: 0 4px 16px rgba(229,9,20,.15);
+  background: rgba(255,61,71,.08);
+  box-shadow: 0 4px 16px rgba(255,61,71,.15);
 }
 .stream-row.dead { opacity: 0.4; }
 .stream-info { display: flex; flex-direction: column; gap: 0.25rem; }
@@ -614,7 +620,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-size: 12px; font-weight: 700; letter-spacing: .02em;
 }
 .detail-chip-cert { border: 1px solid rgba(255,255,255,.45); background: transparent; color: #fff; }
-.detail-chip-star { background: rgba(229,9,20,.22); color: #fff; }
+.detail-chip-star { background: rgba(255,61,71,.22); color: #fff; }
 
 /* ── Seerr request desk ────────────────────────────────────────────────────
    A request card is deliberately NOT a catalog card: it is not something you
@@ -824,7 +830,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 .bm-profile-header { display: flex; gap: 24px; align-items: center; margin-bottom: 32px; }
 .bm-profile-avatar-large { width: 96px; height: 96px; border-radius: 48px; background: var(--surface); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
-.bm-transmute-wrap { margin-top: 32px; padding: 24px; background: rgba(229, 9, 20, 0.05); border: 1px solid var(--accent-glow); border-radius: 16px; }
+.bm-transmute-wrap { margin-top: 32px; padding: 24px; background: rgba(255,61,71, 0.05); border: 1px solid var(--accent-glow); border-radius: 16px; }
 .bm-transmute-result { margin-top: 16px; line-height: 1.6; font-style: italic; }
 
 

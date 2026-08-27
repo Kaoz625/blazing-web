@@ -23,7 +23,7 @@
 // v11 — the network-first rule below only applies once THIS worker is in control,
 // and until then the old one keeps answering app.js from its cache. Measured
 // 2026-08-27: profile.js updated while app.js did not, on the same reload.
-const CACHE = 'blazing-shell-v15';
+const CACHE = 'blazing-shell-v16';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
