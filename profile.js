@@ -92,9 +92,44 @@
       .bp-connect { flex: 0 0 auto; min-height: 42px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
       .bp-connect:hover { background: var(--surface-focus, #1c1c1f); }
       .bp-connect[data-connected="true"] { border-color: rgba(255,61,71,.42); }
-      .bp-layer { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; }
-      .bp-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
-      .bp-panel { position: relative; width: min(520px, 100%); max-height: min(720px, calc(100vh - 32px)); overflow: auto; border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 24px; color: var(--text, #f7f7f8); background: var(--surface, #141416); box-shadow: 0 30px 100px rgba(0,0,0,.7); }
+      /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
+         else is drawn." Two things kept deliberately different, not missed:
+         (1) no per-profile art — the reference swaps a whole poster behind
+         each profile, which needs a "this profile's featured title" concept
+         this app has no data for yet, so the background is a tinted gradient
+         instead of a lie about having art it doesn't; (2) the rating/PIN
+         meta line stays on each row — the reference shows only a name, but
+         "which profile needs a PIN" and "what's this one capped at" are real
+         answers Markus's household needs, not decoration to cut for parity.
+         Everything else here is CSS only — no line in this file's actual
+         gate logic (verifyPin, rate limits, unlock expiry) changed, on
+         purpose: this is the parental-control surface, and a redesign
+         session is not where that logic should move too. */
+      .bp-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        display: flex;
+        align-items: stretch;
+        background: radial-gradient(120% 100% at 0% 0%, rgba(255,61,71,.16), transparent 55%), #08080a;
+      }
+      .bp-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: transparent; }
+      .bp-panel {
+        position: relative;
+        width: min(420px, 100%);
+        max-height: 100vh;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border: 0;
+        border-right: 1px solid rgba(255,255,255,.06);
+        border-radius: 0;
+        padding: 40px clamp(24px, 5vw, 56px);
+        color: var(--text, #f7f7f8);
+        background: linear-gradient(180deg, rgba(20,20,22,.4), rgba(10,10,11,.85));
+        box-shadow: none;
+      }
       .bp-close { position: absolute; top: 13px; right: 13px; min-width: 42px; min-height: 42px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }
       .bp-close:hover { background: rgba(255,255,255,.12); }
       .bp-kicker { margin: 0 48px 7px 0; color: var(--accent, #ff3d47); font-size: 12px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
@@ -104,9 +139,12 @@
       .bp-status[data-state="error"] { color: #ff9aa1; }
       .bp-status[data-state="pending"] { color: #ffd289; }
       .bp-profiles { display: grid; gap: 10px; margin-top: 20px; }
-      .bp-profile { display: flex; align-items: center; gap: 13px; width: 100%; min-height: 72px; border: 1px solid rgba(255,255,255,.1); border-radius: 17px; padding: 12px; color: inherit; background: rgba(255,255,255,.035); text-align: left; }
-      .bp-profile:hover, .bp-profile:focus-visible, .bp-profile[data-active="true"] { border-color: rgba(255,61,71,.78); background: rgba(255,61,71,.09); }
-      .bp-avatar { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 auto; border-radius: 14px; color: #fff; background: linear-gradient(145deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 16px; font-weight: 900; }
+      .bp-profile { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 72px; border: 1px solid transparent; border-radius: 17px; padding: 10px 12px; color: inherit; background: transparent; text-align: left; transition: background .15s, border-color .15s; }
+      .bp-profile:hover, .bp-profile:focus-visible, .bp-profile[data-active="true"] { border-color: rgba(255,255,255,.5); background: rgba(255,255,255,.045); }
+      /* Rounded-square, not a circle — the reference's "cartoon avatar" tile
+         shape — and bigger: a left-rail avatar column is the ONLY chrome on
+         that screen, so it can afford the size a card-row layout couldn't. */
+      .bp-avatar { display: grid; place-items: center; width: 54px; height: 54px; flex: 0 0 auto; border-radius: 16px; color: #fff; background: linear-gradient(145deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 20px; font-weight: 900; box-shadow: 0 8px 20px rgba(255,61,71,.25); }
       .bp-profile-copy { min-width: 0; flex: 1; }
       .bp-profile-name { display: block; overflow: hidden; font-size: 16px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
       .bp-profile-meta { display: block; margin-top: 3px; color: var(--muted, #a3a3aa); font-size: 12px; }
