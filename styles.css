@@ -261,6 +261,89 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
 .skeleton { background: linear-gradient(100deg, #151518 30%, #242429 50%, #151518 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
 
+/* ── Hero-inside-the-row (DebridStream reference) ───────────
+   One band does both jobs: no separate hero banner. The first row with
+   content (claimHeroRow, app.js) carries .row-hero; every card already has
+   the backdrop/title/meta/synopsis markup (buildCard, app.js) but it stays
+   invisible and the card stays plain-poster width everywhere else — only a
+   .row-hero ancestor turns the expand-on-focus behaviour on. At rest a
+   row-hero row is indistinguishable from any other row, which is the point:
+   neighbours stay ordinary portrait posters right up until one is focused. */
+.card-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--transition);
+  pointer-events: none;
+}
+.card-hero-content {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  padding: 16px 18px 14px;
+  background: linear-gradient(0deg, rgba(0,0,0,.95) 10%, rgba(0,0,0,.55) 60%, transparent);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--transition), transform var(--transition);
+  pointer-events: none;
+}
+.card-hero-title { margin: 0; font-size: 17px; font-weight: 850; letter-spacing: -.02em; line-height: 1.15; }
+.card-meta-line { margin: 6px 0 0; color: #d0d0d4; font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+.card-synopsis {
+  margin: 8px 0 0;
+  color: #d0d0d4;
+  font-size: 12.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.card-cta { display: inline-block; margin-top: 10px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+
+.row-hero .row-track { align-items: flex-start; }
+.row-hero .card {
+  transition: width var(--transition), aspect-ratio var(--transition), transform var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.row-hero .card:hover,
+.row-hero .card:focus-visible {
+  /* The base .card aspect-ratio is 2/3 (portrait) — left alone, widening
+     ALONE grows a 432px-wide card to 648px tall, pushing card-hero-content
+     off the bottom of the screen entirely. Switching to a landscape ratio
+     here is what actually makes this "hero-inside-the-row" instead of just
+     "one portrait poster, bigger." */
+  width: clamp(280px, 30vw, 440px);
+  aspect-ratio: 16 / 10;
+  transform: none;
+  z-index: 5;
+}
+.row-hero .card:hover .card-backdrop,
+.row-hero .card:focus-visible .card-backdrop,
+.row-hero .card:hover .card-hero-content,
+.row-hero .card:focus-visible .card-hero-content {
+  opacity: 1;
+  transform: none;
+}
+.row-hero .card:hover .card-image,
+.row-hero .card:focus-visible .card-image,
+.row-hero .card:hover .card-label,
+.row-hero .card:focus-visible .card-label {
+  opacity: 0;
+}
+
+@media (max-width: 640px) {
+  /* No hover on touch, and the row is already narrow — the expand-on-focus
+     treatment needs pointer precision a phone doesn't have here. Falls back
+     to the same plain poster row every other row already is. */
+  .row-hero .card:hover, .row-hero .card:focus-visible { width: 118px; }
+}
+
 /* ── Card-hover trailer embed ────────────────────────────── */
 /* The trailer preview replaces the poster image on hover.    */
 .card-trailer-wrap {

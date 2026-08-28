@@ -195,7 +195,6 @@ function readList() {
 
 const state = {
   catalogs: [],
-  featured: null,
   selected: null,
   route: 'home',
   myList: readList(),
@@ -218,12 +217,25 @@ const adminView = $('#admin-view');
 const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
 const rowsWrap = $('#rows');
-const hero = $('#hero');
-const heroArt = $('#hero-art');
-const heroTitle = $('#hero-title');
-const heroCopy = $('#hero-copy');
-const heroOpen = $('#hero-open');
-const heroSave = $('#hero-save');
+// No standalone hero — the first row with content claims .row-hero on its own
+// <section> (claimHeroRow, below) and every card already carries the markup
+// that reveals on a row-hero ancestor. See the comment in index.html.
+//
+// "First with content" is not enough on its own: measured live, a Live TV
+// channel-logo row (no background, no description — nothing for buildCard()
+// to build a hero out of) sometimes wins that race, and a hero row with
+// nothing to show on hover is worse than not having one. Requiring the
+// FIRST card to carry a background image is what keeps a channel-logo grid
+// from ever claiming it, without hardcoding which catalog names are "real"
+// rows — a live-only manifest wouldn't otherwise get a hero at all if this
+// checked description too, since live channels have never carried one.
+let heroRowClaimed = false;
+function claimHeroRow(section, metas) {
+  if (heroRowClaimed) return;
+  if (!metas?.[0]?.background) return;
+  heroRowClaimed = true;
+  section.classList.add('row-hero');
+}
 const drawerLayer = $('#drawer-layer');
 const menuButton = $('#menu-button');
 const detailDialog = $('#detail-dialog');
@@ -269,7 +281,6 @@ function toggleMyList(meta) {
 function updateSaveLabels() {
   const saved = state.selected && listHas(state.selected);
   $('#detail-save').textContent = saved ? 'Remove from list' : 'My list';
-  heroSave.textContent = state.featured && listHas(state.featured) ? 'Saved' : 'My list';
 }
 
 function openDrawer() {
@@ -607,7 +618,6 @@ function applyRowFilter(route) {
     if (route === 'anime') visible = /anime/i.test(name);
     row.hidden = !visible;
   });
-  hero.hidden = route !== 'home';
 }
 
 function showRoute(route) {
@@ -731,6 +741,21 @@ function attachHoverTrailer(card, meta) {
   card.addEventListener('focusout', stop);
 }
 
+/**
+ * Every card carries the hero-expansion markup, always — buildCard() never
+ * branches on which row it's headed for. A .row-hero ancestor is what makes
+ * .card-hero-content visible on hover/focus (see styles.css); everywhere
+ * else it just sits there, unreachable, at zero cost until then. This is
+ * what let claimHeroRow() (app.js, near rowsWrap) stay a one-line CSS-class
+ * decision made independently of card construction, instead of two parallel
+ * card-building code paths that would drift from each other.
+ *
+ * The backdrop image is the one thing NOT built eagerly: 200 cards on a
+ * home screen would mean 200 unwatched background-image downloads if it had
+ * a real src from the start. It carries the URL in a data attribute instead,
+ * and hydrates on the card's first hover/focus — which in practice is only
+ * ever a row-hero card, since that is the only place the image is visible.
+ */
 function buildCard(meta) {
   const card = el('button', 'card');
   card.type = 'button';
@@ -754,28 +779,60 @@ function buildCard(meta) {
     card.appendChild(badge);
   }
   card.append(image, label);
+
+  const backdropUrl = safeHttpsUrl(meta.background) || safeHttpsUrl(meta.poster);
+  if (backdropUrl) {
+    const backdrop = el('img', 'card-backdrop');
+    backdrop.dataset.src = backdropUrl;
+    backdrop.alt = '';
+    backdrop.loading = 'lazy';
+    card.appendChild(backdrop);
+
+    const content = el('div', 'card-hero-content');
+    // A logo-art still is what the reference actually burns into the
+    // backdrop; there is no logo asset in this data, so the title stays as
+    // real text instead of vanishing along with it.
+    const heroTitleEl = el('p', 'card-hero-title');
+    heroTitleEl.textContent = meta.name;
+    content.appendChild(heroTitleEl);
+    const metaLine = [
+      meta.imdbRating ? `★ ${meta.imdbRating}` : '',
+      (meta.releaseInfo || '').match(/\d{4}/)?.[0] || '',
+      (meta.genres || [])[0] || '',
+      meta.certification || '',
+      meta.runtime || '',
+    ].filter(Boolean).join(' · ');
+    if (metaLine) {
+      const metaEl = el('p', 'card-meta-line');
+      metaEl.textContent = metaLine;
+      content.appendChild(metaEl);
+    }
+    if (meta.description) {
+      const synopsis = el('p', 'card-synopsis');
+      synopsis.textContent = meta.description;
+      content.appendChild(synopsis);
+    }
+    const cta = el('span', 'card-cta');
+    cta.textContent = 'View Details';
+    content.appendChild(cta);
+    card.appendChild(content);
+
+    // Runs on every card, but the .row-hero check means it only ever loads
+    // an image for the one row where that image can be seen.
+    card.addEventListener('mouseenter', hydrateCardBackdrop, { once: true });
+    card.addEventListener('focus', hydrateCardBackdrop, { once: true });
+  }
+
   attachHoverTrailer(card, meta);
   card.addEventListener('click', () => openDetail(meta));
   return card;
 }
 
-function setHero(meta) {
-  state.featured = meta;
-  hero.classList.remove('hero-loading');
-  setBackground(heroArt, meta.background || meta.poster);
-  heroTitle.textContent = meta.name;
-  heroCopy.textContent = meta.description || meta.releaseInfo || 'Open the details to see available sources.';
-  heroOpen.disabled = false;
-  heroSave.disabled = false;
-  updateSaveLabels();
-}
-
-function emptyHero(message) {
-  hero.classList.remove('hero-loading');
-  heroTitle.textContent = 'Your library is ready';
-  heroCopy.textContent = message;
-  heroOpen.disabled = true;
-  heroSave.disabled = true;
+function hydrateCardBackdrop(event) {
+  const card = event.currentTarget;
+  if (!card.closest('.row-hero')) return;
+  const backdrop = $('.card-backdrop', card);
+  if (backdrop && backdrop.dataset.src) backdrop.src = backdrop.dataset.src;
 }
 
 async function loadRow(catalog, section) {
@@ -790,6 +847,7 @@ async function loadRow(catalog, section) {
       return [];
     }
     track.replaceChildren(...metas.map(buildCard));
+    claimHeroRow(section, metas);
     return metas;
   } catch {
     section.remove();
@@ -809,6 +867,7 @@ async function loadFreshHomeRow(shelf, section) {
       return [];
     }
     track.replaceChildren(...metas.map(buildCard));
+    claimHeroRow(section, metas);
     return metas;
   } catch {
     section.remove();
@@ -849,6 +908,7 @@ async function loadSDUIRow(catalogInfo, section) {
       return [];
     }
     track.replaceChildren(...metas.map(buildCard));
+    claimHeroRow(section, metas);
     return metas;
   } catch {
     section.remove();
@@ -909,8 +969,7 @@ async function boot() {
   }
 
   rowsWrap.replaceChildren();
-  state.featured = null;
-  hero.classList.add('hero-loading');
+  heroRowClaimed = false;
 
   // Fire and forget: an Emby outage costs three hidden rows, never a slow or
   // broken home screen. Each row appends itself when it arrives.
@@ -962,7 +1021,6 @@ async function bootFromSDUI() {
     const rows = await Promise.all(jobs);
     const first = rows.find((metas) => metas && metas.length)?.[0];
     if (!first) return false;            // described a layout, served nothing
-    if (!state.featured) setHero(first);
     applyRowFilter(state.route);
     return true;
   } catch (err) {
@@ -991,12 +1049,7 @@ async function bootFromShelves() {
     rowsWrap.appendChild(section);
     return loadFreshHomeRow(shelf, section);
   });
-  const freshDone = Promise.all(freshJobs).then((rows) => {
-    // Do not leave a usable catalog behind a slow fresh-feed request.
-    const first = rows.find((metas) => metas.length)?.[0];
-    if (first) setHero(first);
-    return rows;
-  });
+  const freshDone = Promise.all(freshJobs);
 
   const catalogDone = fetchJSON(`${API_BASE}/manifest.json`)
     .then((manifest) => {
@@ -1008,20 +1061,18 @@ async function bootFromShelves() {
       });
       return Promise.all(jobs);
     })
-    .then((rows) => {
-      const first = rows.find((metas) => metas.length)?.[0];
-      if (first && !state.featured) setHero(first);
-      return rows;
-    })
     .catch(() => []);
 
   const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
-  const first = freshRows.find((metas) => metas.length)?.[0]
-    || catalogRows.find((metas) => metas.length)?.[0];
-  if (first) {
-    if (!state.featured) setHero(first);
-  } else {
-    emptyHero('Nothing is available right now. Try again soon.');
+  const gotAnything = freshRows.some((metas) => metas.length) || catalogRows.some((metas) => metas.length);
+  // Every row loader removes its own empty section, so a totally quiet home
+  // reaches here with #rows literally empty — no separate hero to fall back
+  // on to say so. One honest line beats a blank screen with nothing wrong
+  // visibly reported.
+  if (!gotAnything && !rowsWrap.children.length) {
+    const message = el('p', 'empty-copy');
+    message.textContent = 'Nothing is available right now. Try again soon.';
+    rowsWrap.appendChild(message);
   }
   applyRowFilter(state.route);
 }
@@ -2358,8 +2409,6 @@ $$('[data-view]').forEach((button) => {
 });
 $('#menu-button').addEventListener('click', openDrawer);
 $('#drawer-backdrop').addEventListener('click', closeDrawer);
-$('#hero-open').addEventListener('click', () => state.featured && openDetail(state.featured));
-$('#hero-save').addEventListener('click', () => state.featured && toggleMyList(state.featured));
 $('#detail-close').addEventListener('click', closeDetail);
 $('#detail-play').addEventListener('click', playSelected);
 $('#detail-save').addEventListener('click', () => state.selected && toggleMyList(state.selected));

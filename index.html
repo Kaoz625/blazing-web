@@ -129,18 +129,12 @@
   <main id="app-main">
 
     <section id="home-view" class="view">
-      <section id="hero" class="hero hero-loading" aria-live="polite">
-        <div id="hero-art" class="hero-art" aria-hidden="true"></div>
-        <div class="hero-content">
-          <p class="eyebrow">Featured now</p>
-          <h1 id="hero-title">Loading your library</h1>
-          <p id="hero-copy">Getting fresh rows from Blazing.</p>
-          <div class="hero-actions">
-            <button id="hero-open" class="primary-button" type="button" disabled>View title</button>
-            <button id="hero-save" class="secondary-button" type="button" disabled>My list</button>
-          </div>
-        </div>
-      </section>
+      <!-- No standalone hero banner. DebridStream reference: "one band does both
+           jobs" — the first row with content IS the hero, via row-hero on its
+           <section> (see claimHeroRow in app.js) and the .row-hero CSS in
+           styles.css. Every card already carries the backdrop/metadata/synopsis
+           markup needed to expand on focus; only a row-hero ancestor makes that
+           visible, so buildCard() itself needed no per-row branching. -->
       <div id="rows" class="rows"></div>
     </section>
 
