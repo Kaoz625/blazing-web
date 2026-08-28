@@ -319,7 +319,12 @@ function updateNavigation(route) {
 const DISCOVER_MENU_PATH = '/discover/menu';
 
 async function loadDiscoverMenu() {
-  const filters = $('#drawer nav[aria-label="More"]');
+  // NOT nav[aria-label="More"] — that nav also holds the static view buttons
+  // (Emby Library, Education, Comics, Trailers, Requests, Admin), and this
+  // function's replaceChildren() used to wipe out that entire nav, taking
+  // the static buttons with it, the moment /discover/menu answered. See the
+  // comment on the [data-discover-filters] wrapper in index.html.
+  const filters = $('#drawer [data-discover-filters]');
   const providers = $('#drawer nav[aria-label="Channels and apps"]');
   if (!filters && !providers) return;
   let menu;
@@ -402,6 +407,25 @@ async function openDiscover(kind, slug, label) {
   }
   discoverStatus.textContent = '';
   discoverResults.replaceChildren(...cards.map(buildCard));
+}
+
+/**
+ * Deleted in d18e9ca ("BlazeOS Phase 2") along with the functions the same
+ * commit removed while leaving their callers standing (see the boot()
+ * comment above and the Home-screen-empty-since-48f1be5 fix). loadFreshHomeRow
+ * and loadSDUIRow both called this and neither one threw visibly — both wrap
+ * the call in a try/catch, so a ReferenceError just made the row silently
+ * remove itself, indistinguishable from "the catalog was empty." That's how
+ * New Movies/New Shows/Top Rated and every purely-SDUI-only row (the ones
+ * with no TRENDING_ROWS/manifest equivalent) went dark with nothing to see in
+ * the console.
+ *
+ * safeMeta already carries contentRating; the fresh-shelf/SDUI response shape
+ * just names the year differently (`year`, not `releaseInfo`).
+ */
+function safeDiscoverMeta(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  return safeMeta({ ...raw, releaseInfo: raw.year || raw.releaseInfo });
 }
 
 /**
@@ -754,10 +778,12 @@ function showRoute(route) {
   const educationView = $('#education-view');
   const comicsView = $('#comics-view');
   const requestsView = $('#requests-view');
+  const embyView = $('#emby-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
   if (requestsView) requestsView.hidden = route !== 'requests';
+  if (embyView) embyView.hidden = route !== 'emby';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
   // were the only callers of window.mountStorybook / mountPodcastStudio /
@@ -774,6 +800,7 @@ function showRoute(route) {
   if (route === 'education') loadEducationView();
   if (route === 'comics') loadComicsView();
   if (route === 'requests') loadRequestsView();
+  if (route === 'emby') loadEmbyView();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -959,7 +986,12 @@ async function loadRow(catalog, section) {
     const data = await fetchJSON(
       `${API_BASE}/catalog/${encodeURIComponent(catalog.type)}/${encodeURIComponent(catalog.id)}.json`
     );
-    const metas = (Array.isArray(data.metas) ? data.metas : []).map(safeMeta).filter(Boolean);
+    // The same cap Emby's rows already respect (appendEmbyRow). This is the
+    // ordinary catalog path — Trending Now/Trending Shows and every manifest
+    // catalog go through here — and it had NO rating check at all: a Kids
+    // profile saw whatever the catalog carried, unrated and mature included.
+    const metas = (Array.isArray(data.metas) ? data.metas : [])
+      .map(safeMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
     if (!metas.length) {
       section.remove();
       return [];
@@ -979,7 +1011,7 @@ async function loadFreshHomeRow(shelf, section) {
     const data = await fetchJSON(`${FLEET_BASE}${shelf.path}`);
     const metas = (Array.isArray(data.items) ? data.items : [])
       .map((item) => safeDiscoverMeta({ ...item, type: item.type || shelf.type }))
-      .filter(Boolean);
+      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
     if (!metas.length) {
       section.remove();
       return [];
@@ -1019,8 +1051,8 @@ async function loadSDUIRow(catalogInfo, section) {
     
     const metas = rawMetas
       .map((item) => safeDiscoverMeta({ ...item, type: item.type || catalogInfo.type }))
-      .filter(Boolean);
-      
+      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+
     if (!metas.length) {
       section.remove();
       return [];
@@ -2352,6 +2384,77 @@ function loadEmbyRows() {
   appendEmbyRow('Emby · Latest Shows', 'series', () => window.BlazingEmby.latest('series', 12));
   appendEmbyRow('Emby · Live TV', 'tv', () => window.BlazingEmby.livetv(12));
 }
+
+/**
+ * The rest of the Emby server — Home's three rows above are a "what's new"
+ * teaser (12 items, no paging). This is the real library: 1,139 movies and
+ * 693 series measured live against Killah.TV, reachable nowhere else in this
+ * client until tonight.
+ */
+const embyBrowseState = { type: 'movie', sort: 'added', skip: 0, total: 0, loading: false };
+
+async function loadEmbyPage(reset) {
+  if (!window.BlazingEmby || embyBrowseState.loading) return;
+  const results = $('#emby-results');
+  const status = $('#emby-status');
+  const loadMore = $('#emby-load-more');
+  if (reset) {
+    embyBrowseState.skip = 0;
+    results.replaceChildren();
+  }
+  embyBrowseState.loading = true;
+  loadMore.hidden = true;
+  status.textContent = reset ? 'Loading…' : status.textContent;
+  const { metas, total, hasMore } = await window.BlazingEmby.browse(embyBrowseState.type, {
+    skip: embyBrowseState.skip, limit: 48, sort: embyBrowseState.sort,
+  });
+  embyBrowseState.loading = false;
+  embyBrowseState.total = total;
+  // SAME filter appendEmbyRow applies to the Home teaser rows — this is still
+  // Emby content, and a Kids profile must not see more of it just because it
+  // came from a paged library view instead of a Home row.
+  const cards = metas.map(embyMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+  results.append(...cards.map(buildCard));
+  embyBrowseState.skip += metas.length;
+  if (!results.children.length) {
+    status.textContent = window.BlazingEmby.base
+      ? 'Nothing here — Emby may be unreachable, or this library is empty.'
+      : 'Emby is not configured.';
+  } else {
+    status.textContent = `${embyBrowseState.skip} of ${total}`;
+  }
+  loadMore.hidden = !hasMore;
+}
+
+function loadEmbyView() {
+  if ($('#emby-view').dataset.loaded === 'true') return;
+  $('#emby-view').dataset.loaded = 'true';
+  document.querySelectorAll('.emby-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (tab.dataset.embyType === embyBrowseState.type) return;
+      document.querySelectorAll('.emby-tab').forEach((t) => t.setAttribute('aria-selected', 'false'));
+      tab.setAttribute('aria-selected', 'true');
+      embyBrowseState.type = tab.dataset.embyType;
+      loadEmbyPage(true);
+    });
+  });
+  $('#emby-sort').addEventListener('change', (event) => {
+    embyBrowseState.sort = event.target.value;
+    loadEmbyPage(true);
+  });
+  $('#emby-load-more').addEventListener('click', () => loadEmbyPage(false));
+  loadEmbyPage(true);
+}
+
+// A profile switch changes the rating cap — the same reason Emby's Home rows
+// reload on 'blazing-profile-selected' (see the listener near loadEmbyRows).
+// Re-fetches from the top rather than trying to re-filter what's on screen:
+// simpler, and this is a library browse, not a scroll position worth
+// preserving across a profile change.
+document.addEventListener('blazing-profile-selected', () => {
+  if ($('#emby-view').dataset.loaded !== 'true') return;
+  loadEmbyPage(true);
+});
 
 /**
  * Switching profile must change what is on screen.

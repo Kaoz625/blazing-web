@@ -96,15 +96,25 @@
            were already here. All nine reach a view or a Discover filter; none of
            them earns a place in a seven-item bar. -->
       <nav class="drawer-nav" aria-label="More">
+        <button type="button" data-view="emby">🗄️ Emby Library</button>
         <button type="button" data-view="education">📚 Education</button>
         <button type="button" data-view="comics">📖 Comics</button>
         <button type="button" data-view="trailers">🎬 Trailers</button>
         <button type="button" data-view="requests">🚀 Requests</button>
         <button type="button" data-view="admin">Admin</button>
-        <button type="button" data-discover-kind="filter" data-discover-slug="in-theaters">In Theaters</button>
-        <button type="button" data-discover-kind="filter" data-discover-slug="coming-soon">Coming Soon</button>
-        <button type="button" data-discover-kind="filter" data-discover-slug="new-seasons">New Seasons</button>
-        <button type="button" data-discover-kind="filter" data-discover-slug="top-rated">Top Rated</button>
+        <!-- loadDiscoverMenu() (app.js) replaceChildren()s ONLY this wrapper,
+             not the nav above — it used to target the whole nav, which wiped
+             every static view button (Emby/Education/Comics/Trailers/Requests/
+             Admin) the instant /discover/menu answered. `display: contents` on
+             this span (styles.css) keeps it invisible to the nav's own grid
+             layout, so these buttons still lay out as if they were direct
+             children of `.drawer-nav`. -->
+        <span data-discover-filters>
+          <button type="button" data-discover-kind="filter" data-discover-slug="in-theaters">In Theaters</button>
+          <button type="button" data-discover-kind="filter" data-discover-slug="coming-soon">Coming Soon</button>
+          <button type="button" data-discover-kind="filter" data-discover-slug="new-seasons">New Seasons</button>
+          <button type="button" data-discover-kind="filter" data-discover-slug="top-rated">Top Rated</button>
+        </span>
       </nav>
       <p class="drawer-section">Channels &amp; Apps</p>
       <nav class="drawer-nav" aria-label="Channels and apps">
@@ -168,6 +178,29 @@
         <p>Titles saved on this device.</p>
       </div>
       <div id="library-results" class="library-results"></div>
+    </section>
+
+    <section id="emby-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Emby</p>
+        <h1>Library</h1>
+        <p>Everything on the Emby server — not just what's new.</p>
+      </div>
+      <div class="emby-controls">
+        <div class="emby-tabs" role="tablist">
+          <button type="button" class="emby-tab" data-emby-type="movie" aria-selected="true">Movies</button>
+          <button type="button" class="emby-tab" data-emby-type="series" aria-selected="false">Shows</button>
+        </div>
+        <select id="emby-sort" aria-label="Sort">
+          <option value="added">Recently added</option>
+          <option value="name">Name</option>
+          <option value="rating">Rating</option>
+          <option value="year">Year</option>
+        </select>
+      </div>
+      <p id="emby-status" class="search-status" role="status"></p>
+      <div id="emby-results" class="search-results"></div>
+      <button type="button" id="emby-load-more" class="primary-button" hidden>Load more</button>
     </section>
 
     <section id="discover-view" class="view" hidden>

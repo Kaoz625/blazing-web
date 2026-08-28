@@ -168,6 +168,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .drawer-heading { display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 850; letter-spacing: -.03em; }
 .drawer-copy { margin: 13px 0 24px; color: var(--muted); font-size: 14px; }
 .drawer-nav { display: grid; gap: 6px; }
+.drawer-nav [data-discover-filters] { display: contents; }
 .drawer-nav button { padding: 13px 14px; text-align: left; font-size: 15px; }
 .drawer-nav button.active, .drawer-nav button:hover { background: var(--surface-focus); color: #fff; }
 .drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: 11px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
@@ -395,6 +396,30 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: 14px; }
 .search-results, .library-results { margin-top: 24px; }
 .result-row { margin-bottom: 29px; }
+
+/* ── Emby library browse ─────────────────────────────────── */
+.emby-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 760px; margin: 0 auto; padding: 0 20px; flex-wrap: wrap; }
+.emby-tabs { display: flex; gap: 8px; }
+.emby-tab {
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  padding: 8px 18px;
+  color: var(--muted);
+  background: rgba(255,255,255,.06);
+  font-size: 14px;
+  font-weight: 700;
+}
+.emby-tab:hover { background: rgba(255,255,255,.11); }
+.emby-tab[aria-selected="true"] { color: var(--text); background: var(--accent); border-color: var(--accent); }
+#emby-sort {
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 14px;
+}
+#emby-load-more { display: block; margin: 28px auto 40px; }
 
 /* ── Search (DebridStream reference: "the search context is visually its
    own place") ───────────────────────────────────────────── */

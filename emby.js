@@ -47,6 +47,23 @@
     latest: (type, limit = 12) =>
       metasOf(`/emby/latest/${type === 'series' ? 'series' : 'movie'}?limit=${Number(limit) || 12}`),
     livetv: (limit = 12) => metasOf(`/emby/livetv?limit=${Number(limit) || 12}`),
+    // Unlike latest()/livetv() above, this needs total/hasMore for paging, so
+    // it can't go through metasOf (which throws away everything but .metas).
+    browse: async (type, { skip = 0, limit = 48, sort = 'added' } = {}) => {
+      try {
+        const data = await getJson(
+          `/emby/browse/${type === 'series' ? 'series' : 'movie'}` +
+          `?skip=${Number(skip) || 0}&limit=${Number(limit) || 48}&sort=${encodeURIComponent(sort)}`);
+        return {
+          metas: Array.isArray(data && data.metas) ? data.metas : [],
+          total: Number(data && data.total) || 0,
+          hasMore: Boolean(data && data.hasMore),
+        };
+      } catch (e) {
+        console.warn('[emby] browse', e && e.message);
+        return { metas: [], total: 0, hasMore: false };
+      }
+    },
     search: (q, type) =>
       metasOf(`/emby/search?q=${encodeURIComponent(q)}${type ? `&type=${encodeURIComponent(type)}` : ''}`),
     // The ONLY URL a player is ever given. The fleet forwards Range, so seeking works.
