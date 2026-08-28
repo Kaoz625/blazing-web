@@ -138,20 +138,27 @@
       <div id="rows" class="rows"></div>
     </section>
 
-    <section id="search-view" class="view" hidden>
-      <div class="page-heading">
-        <p class="eyebrow">Search</p>
-        <h1>Find a title</h1>
-        <p>Search the main catalog and MrWorldPremiere together.</p>
-      </div>
+    <!-- A different ground colour from Home on purpose (DebridStream reference:
+         "the search context is visually its own place") — see .search-view in
+         styles.css. No page-heading here either: the field itself is the
+         first thing on the screen, not a title introducing it. -->
+    <section id="search-view" class="view search-view" hidden>
       <form id="search-form" class="search-form" role="search">
-        <button type="button" id="ai-search-toggle" class="secondary-button" style="width: auto;">🤖 AI</button>
+        <button type="button" id="search-mic" class="search-mic" aria-label="Search by voice" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+        </button>
         <label class="sr-only" for="search-input">Search titles</label>
-        <input id="search-input" name="q" type="search" autocomplete="off" maxlength="160" placeholder="Search movies and shows" />
+        <input id="search-input" name="q" type="search" autocomplete="off" maxlength="160" placeholder="Search movies & TV" />
         <button class="primary-button" type="submit">Search</button>
       </form>
+      <div id="search-chip-row" class="search-chip-row" hidden>
+        <button type="button" id="search-chip" class="search-chip"></button>
+      </div>
       <p id="search-status" class="search-status" role="status"></p>
-      <div id="search-results" class="search-results"></div>
+      <div class="search-body">
+        <nav id="search-facets" class="search-facets" aria-label="Filter by genre" hidden></nav>
+        <div id="search-results" class="search-results"></div>
+      </div>
     </section>
 
     <section id="library-view" class="view" hidden>

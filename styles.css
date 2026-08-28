@@ -395,6 +395,82 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: 14px; }
 .search-results, .library-results { margin-top: 24px; }
 .result-row { margin-bottom: 29px; }
+
+/* ── Search (DebridStream reference: "the search context is visually its
+   own place") ───────────────────────────────────────────── */
+/* A second surface, not a second brand color — the deliberate exception
+   DESIGN.md calls out. Tinted teal-blue, not the near-black --bg every
+   other screen uses; --accent stays red here too, same as everywhere. */
+.search-view { min-height: calc(100vh - 64px); margin: 0 -20px; padding: 28px 20px 40px; background: #0a1620; }
+.search-view .search-form { max-width: 640px; margin: 0 auto; align-items: center; }
+.search-mic {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 50%;
+  color: var(--text);
+  background: rgba(255,255,255,.05);
+  transition: background var(--transition), border-color var(--transition);
+}
+.search-mic svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.search-mic:hover { background: rgba(255,255,255,.1); }
+.search-mic.listening { border-color: var(--accent); color: var(--accent); background: rgba(255,61,71,.14); animation: pulse 1.1s ease-in-out infinite alternate; }
+.search-chip-row { max-width: 640px; margin: 12px auto 0; padding: 0 20px; }
+.search-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  padding: 7px 14px;
+  color: var(--text);
+  background: rgba(255,255,255,.06);
+  font-size: 13px;
+  font-weight: 700;
+}
+.search-chip:hover { background: rgba(255,255,255,.11); }
+.search-view .search-status { max-width: 640px; }
+
+.search-body { display: flex; gap: 28px; max-width: 1200px; margin: 20px auto 0; padding: 0 20px; align-items: flex-start; }
+.search-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 190px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.search-facet {
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+}
+.search-facet:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.search-facet.active { color: #fff; background: rgba(255,61,71,.18); }
+.search-view .search-results { flex: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 0; }
+/* .card is a fixed 132-158px everywhere else (a horizontally-scrolling row
+   doesn't care), but a grid TRACK here is usually wider than that — left
+   alone the card just sits stranded at the left of its cell instead of
+   filling the "5 across" grid the reference shows. */
+.search-view .search-results .card { width: 100%; }
+
+@media (max-width: 900px) {
+  .search-body { flex-direction: column; }
+  .search-facets { flex-direction: row; flex-wrap: wrap; max-height: none; width: 100%; }
+  .search-view .search-results { grid-template-columns: repeat(3, 1fr); width: 100%; }
+}
+@media (max-width: 520px) {
+  .search-view .search-results { grid-template-columns: repeat(2, 1fr); }
+}
 .result-grid { flex-wrap: wrap; overflow: visible; padding-bottom: 0; }
 .empty-copy { margin: 20px; color: var(--muted); }
 .roadmap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 920px; margin: 0 auto; padding: 0 20px; }

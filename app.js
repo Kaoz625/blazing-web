@@ -207,7 +207,6 @@ const state = {
 
 const homeView = $('#home-view');
 const searchView = $('#search-view');
-let aiSearchActive = false;
 const libraryView = $('#library-view');
 // showRoute() has read this on every navigation since 67776fb, but nothing ever
 // declared it. Under 'use strict' that threw ReferenceError before
@@ -450,6 +449,12 @@ document.addEventListener('click', (event) => {
  * is the fastest thing this app can put in front of somebody. Movies next, then
  * series.
  */
+// The full result set behind whatever the facet rail is currently narrowing.
+// Facet clicks filter and re-render from THIS, never re-fetch — the network
+// round trip already happened once for this query.
+let searchAllCards = [];
+let searchActiveGenre = null;
+
 function bindSearch() {
   const form = $('#search-form');
   // Same guard loadRequestsView() uses, for the same reason: showRoute() calls
@@ -458,6 +463,112 @@ function bindSearch() {
   if (!form || form.dataset.bound === 'true') return;
   form.dataset.bound = 'true';
   form.addEventListener('submit', runSearch);
+
+  $('#search-chip').addEventListener('click', () => {
+    $('#search-input').value = '';
+    clearSearchResults();
+    $('#search-input').focus();
+  });
+
+  bindSearchMic();
+}
+
+/**
+ * Voice search (DebridStream reference: a mic button leads the field).
+ * SpeechRecognition has no Promise API and no feature-detect that isn't
+ * "does the constructor exist" — Safari/Firefox on desktop still don't ship
+ * it as of this session. The button stays hidden (index.html's default)
+ * rather than existing to apologise for not working; a mic icon that sits
+ * there doing nothing on an unsupported browser is exactly the kind of
+ * button this whole redesign exists to get rid of.
+ */
+function bindSearchMic() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const mic = $('#search-mic');
+  if (!Recognition || !mic) return;
+  mic.hidden = false;
+  const recognition = new Recognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  let listening = false;
+
+  recognition.addEventListener('result', (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript;
+    if (!transcript) return;
+    $('#search-input').value = transcript;
+    runSearch();
+  });
+  const stop = () => { listening = false; mic.classList.remove('listening'); };
+  recognition.addEventListener('end', stop);
+  recognition.addEventListener('error', stop);
+
+  mic.addEventListener('click', () => {
+    if (listening) { recognition.stop(); return; }
+    listening = true;
+    mic.classList.add('listening');
+    try { recognition.start(); } catch { stop(); }
+  });
+}
+
+function clearSearchResults() {
+  searchAllCards = [];
+  searchActiveGenre = null;
+  $('#search-chip-row').hidden = true;
+  $('#search-facets').hidden = true;
+  $('#search-facets').replaceChildren();
+  $('#search-status').textContent = '';
+  $('#search-results').replaceChildren();
+}
+
+// Emby and the TMDB/Cinemeta-backed catalog spell some genres differently —
+// measured live, "Sci-Fi" and "Science Fiction" both showed up as separate
+// facets for the same movies. Canonicalized here, in the one place both the
+// facet LIST and the facet FILTER read from, rather than fixed on one side
+// and silently reappearing on the other.
+const GENRE_ALIASES = { 'science fiction': 'Sci-Fi', 'sci fi': 'Sci-Fi' };
+const canonicalGenre = (g) => GENRE_ALIASES[String(g).trim().toLowerCase()] || g;
+
+/** The genre rail: built from what THIS result set actually contains, not a
+ *  fixed taxonomy — a facet for a genre with zero matches is a dead end
+ *  dressed up as a choice. */
+function renderSearchFacets() {
+  const facets = $('#search-facets');
+  const genres = [...new Set(searchAllCards.flatMap((c) => (c.genres || []).map(canonicalGenre)))].sort();
+  if (!genres.length) {
+    facets.hidden = true;
+    facets.replaceChildren();
+    return;
+  }
+  facets.hidden = false;
+  const makeButton = (label, genre) => {
+    const button = el('button', 'search-facet');
+    button.type = 'button';
+    button.textContent = label;
+    button.setAttribute('aria-pressed', String(searchActiveGenre === genre));
+    if (searchActiveGenre === genre) button.classList.add('active');
+    button.addEventListener('click', () => {
+      searchActiveGenre = searchActiveGenre === genre ? null : genre;
+      renderSearchFacets();
+      renderSearchCards();
+    });
+    return button;
+  };
+  facets.replaceChildren(makeButton('All', null), ...genres.map((g) => makeButton(g, g)));
+}
+
+function renderSearchCards() {
+  const cards = searchActiveGenre
+    ? searchAllCards.filter((c) => (c.genres || []).map(canonicalGenre).includes(searchActiveGenre))
+    : searchAllCards;
+  const status = $('#search-status');
+  status.textContent = searchActiveGenre
+    ? `${cards.length} result${cards.length === 1 ? '' : 's'} in ${searchActiveGenre}.`
+    : `${cards.length} result${cards.length === 1 ? '' : 's'}.`;
+  // buildCard, the same builder #discover-results uses, and the cards land in
+  // #search-results in merge order. dpad.js walks real focusable elements in DOM
+  // order, so that order is what the remote follows on a television.
+  $('#search-results').replaceChildren(...cards.map(buildCard));
 }
 
 /**
@@ -504,14 +615,23 @@ async function runSearch(event) {
   const results = $('#search-results');
   if (!query) {
     status.textContent = 'Type a title first.';
-    results.replaceChildren();
+    clearSearchResults();
     return;
   }
+  // The chip mirrors the field rather than replacing it (DebridStream keeps
+  // the field AND shows the live query as a removable chip beneath it, not
+  // one or the other) — clicking it clears via the same path an empty submit
+  // already takes.
+  const chip = $('#search-chip');
+  chip.textContent = `${query} ✕`;
+  $('#search-chip-row').hidden = false;
   // A newer query must never be overwritten by an older one finishing late —
   // the same rule openDiscover() follows.
   const request = ++searchRequest;
+  searchActiveGenre = null;
   status.textContent = `Searching for “${query}”…`;
   results.replaceChildren(el('div', 'spinner big'));
+  $('#search-facets').hidden = true;
   telemetry('nav_action', { action: 'search', from: state.route || 'search' });
 
   const fleetSearch = (type) =>
@@ -571,11 +691,9 @@ async function runSearch(event) {
       : 'Could not reach search. Try again in a moment.';
     return;
   }
-  status.textContent = `${cards.length} result${cards.length === 1 ? '' : 's'}.`;
-  // buildCard, the same builder #discover-results uses, and the cards land in
-  // #search-results in merge order. dpad.js walks real focusable elements in DOM
-  // order, so that order is what the remote follows on a television.
-  results.replaceChildren(...cards.map(buildCard));
+  searchAllCards = cards;
+  renderSearchFacets();
+  renderSearchCards();
 }
 
 /**
