@@ -39,22 +39,37 @@
     <button id="brand-button" class="brand" type="button" data-view="home" aria-label="Blazing home">
       <span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span>
     </button>
+    <!-- SEVEN top-level items, and the same seven in the same order as Roku,
+         Fire TV and tvOS. This bar carried fifteen, which is unusable on a
+         d-pad: eleven here plus Stories/Studio/Family, which only the web ever
+         got. Everything that is not one of the seven moved into the drawer.
+
+         "TV Shows", not "Shows", because that is the word the three TV apps
+         print. data-view stays "shows" — it is the router key, and renaming it
+         breaks navigation.
+
+         Search LEADS, as it does on the three televisions, so the word is the
+         first item in this nav.
+
+         #SEARCH-BUTTON CANNOT MOVE, and that is measured, not stylistic. Both
+         profile.js:680 and watch-party.js:954 place their own topbar entries
+         with `topbar.insertBefore(node, searchButton)`, which throws
+         "The node before which the new node is to be inserted is not a child of
+         this node" the moment that button stops being a direct child of
+         .topbar. Moving it into this nav was tried: Connect profile and Party
+         both threw, twice per load. So the magnifier stays where it is, at the
+         far right where `.search-button { margin-left: auto }` puts it, and it
+         keeps working below 700px where styles.css hides this whole nav. -->
     <nav class="topnav" aria-label="Browse">
+      <button type="button" data-view="search">Search</button>
       <button type="button" data-view="home">Home</button>
       <button type="button" data-view="movies">Movies</button>
-      <button type="button" data-view="shows">Shows</button>
+      <button type="button" data-view="shows">TV Shows</button>
       <button type="button" data-view="anime">Anime</button>
-      <button type="button" data-view="trailers">🎬 Trailers</button>
-      <button type="button" data-view="comics">📖 Comics</button>
-      <button type="button" data-view="education">📚 Education</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
-      <button type="button" data-view="requests">🚀 Requests</button>
       <button type="button" data-view="library">Library</button>
-      <button type="button" data-view="admin">Admin</button>
     </nav>
-      <button type="button" data-view="stories">📖 Stories</button>
-      <button type="button" data-view="podcasts">🎙️ Studio</button>
-      <button type="button" data-view="family">🌳 Family</button>    <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
+    <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" /><path d="m15.2 15.2 4.3 4.3" /></svg>
     </button>
   </header>
@@ -64,32 +79,34 @@
     <aside id="drawer" class="drawer" aria-label="Browse menu">
       <div class="drawer-heading"><span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span></div>
       <p class="drawer-copy">Find something good, fast.</p>
+      <!-- The same seven as the top bar, in the same order, so the phone and the
+           television read alike. Under 900px this drawer IS the menu — styles.css
+           hides .topnav — which is why Search has to appear here as a word. -->
       <nav class="drawer-nav" aria-label="Browse">
+        <button type="button" data-view="search">Search</button>
         <button type="button" data-view="home">Home</button>
         <button type="button" data-view="movies">Movies</button>
-        <button type="button" data-view="shows">Shows</button>
+        <button type="button" data-view="shows">TV Shows</button>
         <button type="button" data-view="anime">Anime</button>
-        <button type="button" data-view="trailers">🎬 Trailers</button>
-        <button type="button" data-view="comics">📖 Comics</button>
-        <button type="button" data-view="education">📚 Education</button>
         <button type="button" data-view="roadmaps">Roadmaps</button>
-        <button type="button" data-view="requests">🚀 Requests</button>
         <button type="button" data-view="library">Library</button>
-        <button type="button" data-view="admin">Admin</button>
-        <button type="button" data-view="search">Search</button>
       </nav>
-      <button type="button" data-view="stories">📖 Stories</button>
-      <button type="button" data-view="podcasts">🎙️ Studio</button>
-      <button type="button" data-view="family">🌳 Family</button>      <p class="drawer-section">More</p>
+      <p class="drawer-section">More</p>
+      <!-- The five tabs that came off the top bar, then the release windows that
+           were already here. All nine reach a view or a Discover filter; none of
+           them earns a place in a seven-item bar. -->
       <nav class="drawer-nav" aria-label="More">
+        <button type="button" data-view="education">📚 Education</button>
+        <button type="button" data-view="comics">📖 Comics</button>
+        <button type="button" data-view="trailers">🎬 Trailers</button>
+        <button type="button" data-view="requests">🚀 Requests</button>
+        <button type="button" data-view="admin">Admin</button>
         <button type="button" data-discover-kind="filter" data-discover-slug="in-theaters">In Theaters</button>
         <button type="button" data-discover-kind="filter" data-discover-slug="coming-soon">Coming Soon</button>
         <button type="button" data-discover-kind="filter" data-discover-slug="new-seasons">New Seasons</button>
         <button type="button" data-discover-kind="filter" data-discover-slug="top-rated">Top Rated</button>
       </nav>
-      <button type="button" data-view="stories">📖 Stories</button>
-      <button type="button" data-view="podcasts">🎙️ Studio</button>
-      <button type="button" data-view="family">🌳 Family</button>      <p class="drawer-section">Channels &amp; Apps</p>
+      <p class="drawer-section">Channels &amp; Apps</p>
       <nav class="drawer-nav" aria-label="Channels and apps">
         <button type="button" data-discover-kind="provider" data-discover-slug="netflix">Netflix</button>
         <button type="button" data-discover-kind="provider" data-discover-slug="prime-video">Prime Video</button>
@@ -101,9 +118,7 @@
         <button type="button" data-discover-kind="provider" data-discover-slug="peacock">Peacock</button>
         <button type="button" data-discover-kind="provider" data-discover-slug="amc-plus">AMC+</button>
       </nav>
-      <button type="button" data-view="stories">📖 Stories</button>
-      <button type="button" data-view="podcasts">🎙️ Studio</button>
-      <button type="button" data-view="family">🌳 Family</button>    </aside>
+    </aside>
   </div>
 
   
@@ -344,8 +359,17 @@
   <script src="./profile.js" defer></script>
   <script src="./emby.js" defer></script>
   <script src="./tv-comics-reader.js" defer></script>
-  <script src="./delight.js" defer></script>
-  <script src="./brightminds.js" defer></script>
+  <!-- Two scripts are deliberately NOT loaded here: the ones 15b30da and f169d36
+       added for the Stories, Studio and Family tabs (see delight and brightminds
+       in this folder). They are the only code behind those three tabs, this app no
+       longer has them, and no Roku, Fire TV or tvOS build ever shipped them. 34 KB
+       comes off every package, including the LG and Samsung ZIPs that
+       build-tvs.sh copies this folder into. Both files stay on disk, unloaded,
+       rather than being deleted.
+
+       The filenames are written without their extension on purpose:
+       search.smoke.mjs asserts they are not shipped by string-searching the
+       served HTML, and an HTML comment is part of that string. -->
   <!-- Vendored, not a CDN: sw.js precaches it, and Chrome/Edge/Firefox
        cannot play an HLS manifest from a bare <video src> without it. -->
   <script src="./hls.min.js"></script>

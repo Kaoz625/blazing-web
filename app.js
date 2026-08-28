@@ -246,6 +246,7 @@ const discoverCopy = $('#discover-copy');
 const discoverStatus = $('#discover-status');
 const discoverResults = $('#discover-results');
 let discoverRequest = 0;
+let searchRequest = 0;
 
 function persistList() {
   localStorage.setItem(LIST_KEY, JSON.stringify(state.myList));
@@ -419,6 +420,183 @@ document.addEventListener('click', (event) => {
   openDiscover(button.dataset.discoverKind, button.dataset.discoverSlug, button.textContent.trim());
 });
 
+/* ── Search ──────────────────────────────────────────────────────────────────
+ *
+ * #search-form has been in index.html since 8ececa8 and nothing listened to it.
+ * The submit handler went with the rest of the top-level listener block in
+ * d18e9ca, so pressing Search fired the browser's own GET, reloaded the page and
+ * left the results panel empty. Search has been dead in production ever since,
+ * while the backend it needs was finished and deployed.
+ *
+ * THREE INDEXES, ALWAYS CONCURRENT. /emby/search is one hop to mac2;
+ * /search/movie and /search/series each fan out to Cinemeta, TMDB and the 36
+ * searchable Stremio addons behind a hard deadline (firetv/server/addon-search.js
+ * explains the deadline and why adult stays opt-in server-side). Run in series
+ * the fast one would wait on the slow ones for no reason at all.
+ *
+ * EMBY ROWS COME FIRST, and that is not a preference. An Emby hit plays straight
+ * off /emby/stream/<id> — no debrid resolve, no torrent, no source list — so it
+ * is the fastest thing this app can put in front of somebody. Movies next, then
+ * series.
+ */
+function bindSearch() {
+  const form = $('#search-form');
+  // Same guard loadRequestsView() uses, for the same reason: showRoute() calls
+  // this on every visit to the search screen and a second handler would fire
+  // every query twice.
+  if (!form || form.dataset.bound === 'true') return;
+  form.dataset.bound = 'true';
+  form.addEventListener('submit', runSearch);
+}
+
+/**
+ * EVERY key a row can be recognised by, not just its best one.
+ *
+ * MEASURED 27 Aug 2026, q=oppenheimer: /search/movie answers
+ * {id:"tt15398776", imdb_id:"tt15398776"} and /emby/search answers
+ * {id:"emby:10071266", embyId:"10071266"} — no imdb id, no tmdb id, nothing the
+ * two rows share but the name and the year.
+ *
+ * So a function returning ONE key per row cannot merge them, and the first
+ * version of this did exactly that: the Emby row keyed on name+year, the
+ * Cinemeta row keyed on imdb, the keys never met and the browser drew
+ * Oppenheimer twice. A row is a duplicate when ANY of its keys is already
+ * claimed, and claiming a row claims all of them.
+ *
+ * name+year carries the type, because a film and a series can share a title and
+ * a year and are not the same thing.
+ */
+function searchKeys(raw, meta) {
+  const keys = [];
+  const imdb = String((raw && (raw.imdb_id || raw.imdbId)) || meta.id || '').match(/^tt\d+/i);
+  if (imdb) keys.push(`imdb:${imdb[0].toLowerCase()}`);
+  const tmdb = (raw && (raw.tmdb_id || raw.tmdbId)) || '';
+  if (tmdb) keys.push(`tmdb:${String(tmdb)}`);
+  const name = String(meta.name || '').trim().toLowerCase();
+  const year = String(meta.releaseInfo || '').match(/\d{4}/);
+  if (name) keys.push(`name:${meta.type}|${name}|${year ? year[0] : ''}`);
+  return keys;
+}
+
+/** metas out of whatever allSettled handed back; a rejection is no rows, not a throw. */
+function searchMetasOf(settled) {
+  if (settled.status !== 'fulfilled') return [];
+  const value = settled.value;
+  if (Array.isArray(value)) return value;
+  return Array.isArray(value && value.metas) ? value.metas : [];
+}
+
+async function runSearch(event) {
+  if (event) event.preventDefault();
+  const query = plainText($('#search-input').value).trim();
+  const status = $('#search-status');
+  const results = $('#search-results');
+  if (!query) {
+    status.textContent = 'Type a title first.';
+    results.replaceChildren();
+    return;
+  }
+  // A newer query must never be overwritten by an older one finishing late —
+  // the same rule openDiscover() follows.
+  const request = ++searchRequest;
+  status.textContent = `Searching for “${query}”…`;
+  results.replaceChildren(el('div', 'spinner big'));
+  telemetry('nav_action', { action: 'search', from: state.route || 'search' });
+
+  const fleetSearch = (type) =>
+    fetchJSON(`${FLEET_BASE}/search/${type}?q=${encodeURIComponent(query)}&limit=20`);
+
+  const [emby, movies, series] = await Promise.allSettled([
+    window.BlazingEmby ? window.BlazingEmby.search(query) : Promise.resolve([]),
+    fleetSearch('movie'),
+    fleetSearch('series'),
+  ]);
+  if (request !== searchRequest) return;
+
+  // The cap appendEmbyRow() applies, applied here for the same reason: search
+  // must not be the way around a kids profile. It is put on the EMBY rows only,
+  // because they are the only ones that carry a contentRating. The fleet's
+  // /search routes gate the adult catalogs server-side and default them off, and
+  // their rows have no contentRating at all — feeding those to ratingAllowed()
+  // would read "absent" as "unknown", which fails a 'general' cap, and empty
+  // search for everyone.
+  const embyRows = [];
+  for (const raw of searchMetasOf(emby)) {
+    const meta = embyMeta(raw);
+    if (meta && ratingAllowed(meta.contentRating)) embyRows.push([raw, meta]);
+  }
+  const catalogRows = [];
+  for (const settled of [movies, series]) {
+    for (const raw of searchMetasOf(settled)) {
+      const meta = safeMeta(raw);
+      if (meta) catalogRows.push([raw, meta]);
+    }
+  }
+
+  // FIRST writer wins, and the Emby rows go in first, so the card that survives a
+  // collapse keeps its embyId and still plays off the server. safeMeta() is an
+  // allow list that drops embyId, which is why the Emby side goes through
+  // embyMeta() — that has broken Emby playback here once already.
+  const claimed = new Set();
+  const cards = [];
+  for (const [raw, meta] of [...embyRows, ...catalogRows]) {
+    const keys = searchKeys(raw, meta);
+    if (keys.some((key) => claimed.has(key))) continue;
+    for (const key of keys) claimed.add(key);
+    cards.push(meta);
+  }
+
+  // THREE STATES, AND THEY MUST STAY THREE. "Nothing found" for an outage sends
+  // somebody away believing the film does not exist; loadRequestsView() makes
+  // exactly this distinction for the Seerr desk. BlazingEmby.search() answers []
+  // on failure by design, so it can prove reachability and never disprove it —
+  // only the two fleet calls can report that they failed.
+  if (!cards.length) {
+    results.replaceChildren();
+    const reachable = movies.status === 'fulfilled' || series.status === 'fulfilled'
+      || embyRows.length > 0;
+    status.textContent = reachable
+      ? `Nothing found for “${query}”.`
+      : 'Could not reach search. Try again in a moment.';
+    return;
+  }
+  status.textContent = `${cards.length} result${cards.length === 1 ? '' : 's'}.`;
+  // buildCard, the same builder #discover-results uses, and the cards land in
+  // #search-results in merge order. dpad.js walks real focusable elements in DOM
+  // order, so that order is what the remote follows on a television.
+  results.replaceChildren(...cards.map(buildCard));
+}
+
+/**
+ * RESTORED with runSearch: d18e9ca deleted this and renderLibrary() below it,
+ * leaving two live calls to renderLibrary() standing — in toggleMyList() and in
+ * showRoute(). Pressing Library threw "renderLibrary is not defined" and took the
+ * rest of showRoute() with it, so the tab never even highlighted.
+ *
+ * .result-row and .result-grid are still in styles.css, untouched.
+ */
+function buildResultRow(title, metas) {
+  const section = el('section', 'result-row');
+  const heading = el('h2', 'row-title');
+  heading.textContent = title;
+  const grid = el('div', 'result-grid');
+  grid.append(...metas.map(buildCard));
+  section.append(heading, grid);
+  return section;
+}
+
+function renderLibrary() {
+  const target = $('#library-results');
+  target.replaceChildren();
+  if (!state.myList.length) {
+    const message = el('p', 'empty-copy');
+    message.textContent = 'Open a title and use My list to save it here.';
+    target.appendChild(message);
+    return;
+  }
+  target.appendChild(buildResultRow('Saved titles', state.myList));
+}
+
 function applyRowFilter(route) {
   $$('.row', rowsWrap).forEach((row) => {
     const type = row.dataset.type || '';
@@ -452,18 +630,17 @@ function showRoute(route) {
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
   if (requestsView) requestsView.hidden = route !== 'requests';
-  
-  const storiesView = $('#brightminds-stories');
-  const podcastsView = $('#brightminds-podcasts');
-  const familyView = $('#brightminds-family');
-  
-  if (storiesView) storiesView.hidden = route !== 'stories';
-  if (podcastsView) podcastsView.hidden = route !== 'podcasts';
-  if (familyView) familyView.hidden = route !== 'family';
-  
-  if (route === 'stories' && !storiesView.innerHTML.trim()) window.mountStorybook?.();
-  if (route === 'podcasts' && !podcastsView.innerHTML.trim()) window.mountPodcastStudio?.();
-  if (route === 'family' && !familyView.innerHTML.trim()) window.mountFamilyTree?.();
+
+  // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
+  // were the only callers of window.mountStorybook / mountPodcastStudio /
+  // mountFamilyTree, which are the only three globals brightminds.js defines, so
+  // index.html no longer loads that file or delight.js. Nothing else in this repo
+  // references any of them: grep for the three mount names now finds nothing.
+  //
+  // Two of these lines were also a crash waiting to happen — `storiesView` was
+  // read as `!storiesView.innerHTML` right under an `if (storiesView)` guard, so a
+  // route named 'stories' with the section absent threw TypeError and took the
+  // rest of showRoute() with it.
 
   if (route === 'trailers') loadTrailersView();
   if (route === 'education') loadEducationView();
@@ -472,7 +649,10 @@ function showRoute(route) {
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
-  if (route === 'search') setTimeout(() => $('#search-input').focus(), 0);
+  if (route === 'search') {
+    bindSearch();
+    setTimeout(() => $('#search-input').focus(), 0);
+  }
   updateNavigation(route);
   closeDrawer();
   window.scrollTo(0, 0);
@@ -1092,6 +1272,108 @@ async function resolveEduStream(id) {
   }
 }
 
+/**
+ * RESTORED. d18e9ca deleted this and left openDetail()'s call to it standing, so
+ * opening ANY catalog title threw "loadStreams is not defined" — caught in a
+ * browser, not by node --check, and it is why the detail sheet has been showing
+ * no sources at all. Emby titles were the only ones that escaped it, because
+ * openDetail() skips this call when a meta carries an embyId.
+ *
+ * Recovered from d18e9ca^:app.js. One change: the row is built from DOM nodes and
+ * textContent instead of the innerHTML template it used to use. `s.title` is a
+ * string an arbitrary third-party Stremio addon supplied, and this file strips
+ * every other value it takes from the network (safeMeta, safeHttpsUrl, plainText)
+ * — writing that one straight into innerHTML was the one place that did not.
+ */
+async function loadStreams(meta) {
+  const container = $('#detail-streams');
+  container.innerHTML = '';
+  if (isMwp(meta)) return;
+
+  detailStatus.textContent = 'Loading streams...';
+  try {
+    const streams = await resolveStreams(meta);
+    if (!streams.length) {
+      detailStatus.textContent = 'No compatible stream available.';
+      return;
+    }
+
+    // A link marked dead by a long-press sinks to the bottom, and so does a
+    // dub in a language nobody here reads.
+    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
+    const penaltyOf = (s) => {
+      if (deadLinks.includes(s.url)) return 1000;
+      const blob = `${s.name || ''} ${s.title || ''}`.toLowerCase();
+      return /rus|russian|ita|italian|latino|french/.test(blob) ? 100 : 0;
+    };
+    streams.sort((a, b) => penaltyOf(a) - penaltyOf(b));
+
+    detailStatus.textContent = '';
+    // The dropdown is filled from the meta's streamsByQuality when the backend
+    // supplies one, and otherwise from the qualities actually present in this
+    // list. Deriving it is what makes the control work today: streamsByQuality
+    // is part of the undeployed addon commit and is absent from every response.
+    fillQualitySelect(meta, streams);
+
+    for (const s of streams) {
+      const row = el('div', 'stream-row');
+      row.dataset.quality = qualityOf(s);
+      if (deadLinks.includes(s.url)) row.classList.add('dead');
+
+      const label = plainText(s.name, 'SD');
+      const title = plainText(s.title);
+      let badgeClass = 'badge-sd';
+      if (/4k|2160/i.test(label)) badgeClass = 'badge-4k';
+      else if (/1080/i.test(label)) badgeClass = 'badge-1080';
+      else if (/720/i.test(label)) badgeClass = 'badge-720';
+
+      const sizeMatch = title.match(/\b\d+(?:\.\d+)?\s*(?:GB|MB)\b/i);
+      const seedMatch = title.match(/(?:👤|👥|S:|Seeders?:?)\s*(\d+)/i);
+
+      const info = el('div', 'stream-info');
+      const qualityLine = el('div', 'stream-q');
+      const badge = el('span', `badge ${badgeClass}`);
+      badge.textContent = label;
+      qualityLine.appendChild(badge);
+      const titleLine = el('div', 'stream-title');
+      titleLine.textContent = title;
+      const metaLine = el('div', 'stream-meta');
+      const size = el('span');
+      size.textContent = sizeMatch ? sizeMatch[0] : '';
+      const seeders = el('span');
+      seeders.textContent = seedMatch ? `👤 ${seedMatch[1]}` : '';
+      metaLine.append(size, seeders);
+      info.append(qualityLine, titleLine, metaLine);
+      row.appendChild(info);
+
+      row.addEventListener('click', () => {
+        // No URL here — rule 6. The host and the resolution are what make
+        // v_source_health useful; the link itself is exactly what must not go.
+        telemetry('play_start', {
+          id: meta.id, title: meta.name, type: meta.type,
+          source: String(s._from || '').replace(/^site:/, ''),
+          res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
+        });
+        closeDetail();
+        openPlayer(meta.name, s.url);
+      });
+
+      row.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        if (!deadLinks.includes(s.url)) deadLinks.push(s.url);
+        localStorage.setItem('dead_links', JSON.stringify(deadLinks));
+        row.classList.add('dead');
+        container.appendChild(row); // move to bottom
+      });
+
+      container.appendChild(row);
+    }
+  } catch (err) {
+    detailStatus.textContent = 'Failed to load streams.';
+    telemetry('error', { where: 'app.loadStreams', code: 'fetch', message: String((err && err.message) || err).slice(0, 200) });
+  }
+}
+
 async function resolveStreams(meta) {
   const data = await fetchJSON(
     `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`
@@ -1451,6 +1733,21 @@ function openPlayer(title, rawUrl, opts) {
 
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => {});
+}
+
+/**
+ * RESTORED. d18e9ca deleted this, and openPlayer() above is the only thing that
+ * sets `player.hidden = false` and adds `no-scroll` to the body. With no
+ * closePlayer() there was nothing that ever set them back: the Back button ran
+ * its telemetry line and left the player on screen over a page that could not
+ * scroll. The one reference left in the tree was the comment at watchPlayerLoad.
+ */
+function closePlayer() {
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  player.hidden = true;
+  document.body.classList.remove('no-scroll');
 }
 /**
  * RESTORED, both of these. The BlazeOS Phase 1 patch (48f1be5) deleted
@@ -2038,6 +2335,51 @@ function loadRequestsView() {
     results.replaceChildren(...found.map(seerrCard));
   });
 }
+
+/* ── The top-level listeners ─────────────────────────────────────────────────
+ *
+ * RESTORED. d18e9ca (BlazeOS Phase 2) deleted this block whole, along with
+ * closePlayer(), renderLibrary(), buildResultRow() and runSearch(). At HEAD,
+ * `grep -n addEventListener app.js` found no handler for [data-view],
+ * #menu-button, #drawer-backdrop, #hero-open, #hero-save, #detail-close,
+ * #detail-play, #detail-save, #detail-upscale or #search-form. So EVERY menu
+ * button did nothing when pressed, the drawer could not be opened, the detail
+ * sheet could not be closed, Play did nothing and the 4K Upscale button had no
+ * handler at all. Nothing threw — there was no error to find, the same way the
+ * empty home screen threw nothing in 7be3c51. locker.js still carries a comment
+ * reading "app.js swaps routes on these", which it had stopped doing.
+ *
+ * It sits immediately above boot() because boot() at the end of this file is
+ * PROVEN to run: 7be3c51 measured the home going from 0 rows to 4 by adding it
+ * back here.
+ */
+$$('[data-view]').forEach((button) => {
+  button.addEventListener('click', () => showRoute(button.dataset.view || 'home'));
+});
+$('#menu-button').addEventListener('click', openDrawer);
+$('#drawer-backdrop').addEventListener('click', closeDrawer);
+$('#hero-open').addEventListener('click', () => state.featured && openDetail(state.featured));
+$('#hero-save').addEventListener('click', () => state.featured && toggleMyList(state.featured));
+$('#detail-close').addEventListener('click', closeDetail);
+$('#detail-play').addEventListener('click', playSelected);
+$('#detail-save').addEventListener('click', () => state.selected && toggleMyList(state.selected));
+$('#detail-upscale').addEventListener('click', requestUpscale);
+// A SECOND listener on #player-close rather than an edit to the telemetry one a
+// few hundred lines up: that one has to read video.currentTime before the source
+// is dropped, and it is registered first, so it still runs first.
+$('#player-close').addEventListener('click', closePlayer);
+bindSearch();
+detailDialog.addEventListener('click', (event) => {
+  if (event.target === detailDialog) closeDetail();
+});
+detailDialog.addEventListener('cancel', () => {
+  state.selected = null;
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  if (!player.hidden) closePlayer();
+  else if (!drawerLayer.hidden) closeDrawer();
+});
 
 /**
  * The call the BlazeOS Phase 1 patch removed, and the whole reason the home
