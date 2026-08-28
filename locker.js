@@ -39,6 +39,10 @@
     fetching: false,
     resolving: false,
     hidden: false, // set once the server says no; nothing is retried after that.
+    // Nobody is watching yet until profile.js says so, and "nobody" must not
+    // default to "safe to show" — see isKidsProfile() below for why unknown
+    // starts closed rather than open.
+    isKids: true,
   };
 
   function element(tag, className, text) {
@@ -234,7 +238,7 @@
   }
 
   async function refresh(force = false) {
-    if (state.hidden || state.fetching || !state.credentials) return;
+    if (state.hidden || state.isKids || state.fetching || !state.credentials) return;
     const now = Date.now();
     if (!force && now - state.lastFetch < REFRESH_MIN_GAP_MS) return;
     state.fetching = true;
@@ -270,11 +274,33 @@
     }
   }
 
+  // This is Markus's own personal locker — his uploads, no content rating on
+  // any of them — surfaced as a shelf next to everyone else's catalog rows.
+  // It had NO profile awareness at all: gated on "is this device approved",
+  // never on "which profile is watching," so anything he'd uploaded (a movie
+  // rip, whatever) was one profile-switch away from a Kids profile. profile.js
+  // already fires 'blazing-profile-selected' with isKids on every switch —
+  // app.js's Emby rows already react to it; this shelf never had a listener.
+  function onProfileSelected(event) {
+    const detail = (event && event.detail) || {};
+    state.isKids = detail.isKids === true;
+    if (state.isKids) {
+      removeSection();
+    } else {
+      refresh(true);
+    }
+  }
+
   function start() {
     state.credentials = readCredentials();
     if (!state.credentials) return; // No approved browser here: no locker, no trace of one.
     addStyle();
-    refresh(true);
+    // Nothing is fetched here. state.isKids starts true (see state above), so
+    // the first real fetch waits for profile.js to say who is actually
+    // watching — a profile picked before this listener attaches still fires
+    // the event synchronously from selectProfile()/verifyPin(), so there is
+    // no missed-event window.
+    document.addEventListener('blazing-profile-selected', onProfileSelected);
     // Self-refreshing without a polling loop: a file uploaded elsewhere appears
     // the next time this tab is looked at again.
     document.addEventListener('visibilitychange', () => {
