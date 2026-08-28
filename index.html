@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Blazing</title>
-  <meta name="description" content="Blazing — one clear place for your library." />
+  <meta name="description" content="Blazing: one clear place for your library." />
   <meta name="theme-color" content="#0A0A0A" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -96,11 +96,16 @@
            were already here. All nine reach a view or a Discover filter; none of
            them earns a place in a seven-item bar. -->
       <nav class="drawer-nav" aria-label="More">
-        <button type="button" data-view="emby">🗄️ Emby Library</button>
-        <button type="button" data-view="education">📚 Education</button>
-        <button type="button" data-view="comics">📖 Comics</button>
-        <button type="button" data-view="trailers">🎬 Trailers</button>
-        <button type="button" data-view="requests">🚀 Requests</button>
+        <!-- No emoji on these. The seven in the nav above have none, Admin
+             right here has none, and the Channels list below has none, so five
+             buttons wearing 🗄️📚📖🎬🚀 were the only place in the app using
+             emoji as an icon set. Same destinations, same order: only the
+             decoration is gone. -->
+        <button type="button" data-view="emby">Emby Library</button>
+        <button type="button" data-view="education">Education</button>
+        <button type="button" data-view="comics">Comics</button>
+        <button type="button" data-view="trailers">Trailers</button>
+        <button type="button" data-view="requests">Requests</button>
         <button type="button" data-view="admin">Admin</button>
         <!-- loadDiscoverMenu() (app.js) replaceChildren()s ONLY this wrapper,
              not the nav above — it used to target the whole nav, which wiped
@@ -184,7 +189,7 @@
       <div class="page-heading">
         <p class="eyebrow">Emby</p>
         <h1>Library</h1>
-        <p>Everything on the Emby server — not just what's new.</p>
+        <p>Everything on the Emby server, not just what's new.</p>
       </div>
       <div class="emby-controls">
         <div class="emby-tabs" role="tablist">
@@ -316,7 +321,7 @@
       <div class="page-heading">
         <p class="eyebrow">Trailers</p>
         <h1>🎬 What to Watch</h1>
-        <p>New in theaters and coming soon — click any title to preview the trailer.</p>
+        <p>New in theaters and coming soon. Click any title to preview the trailer.</p>
       </div>
       <div id="trailers-rows" class="rows"></div>
     </section>
@@ -326,7 +331,7 @@
       <div class="page-heading">
         <p class="eyebrow">Education</p>
         <h1>📚 Learn Something</h1>
-        <p>Documentaries, courses, and educational content — organized by topic.</p>
+        <p>Documentaries, courses, and educational content, organized by topic.</p>
       </div>
       <div class="edu-tabs" role="tablist" aria-label="Education categories">
         <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">🔬 Science</button>

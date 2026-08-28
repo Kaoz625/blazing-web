@@ -89,7 +89,7 @@
   function addStyle() {
     const style = element('style');
     style.textContent = `
-      .bp-connect { flex: 0 0 auto; min-height: 42px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
+      .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
       .bp-connect:hover { background: var(--surface-focus, #1c1c1f); }
       .bp-connect[data-connected="true"] { border-color: rgba(255,61,71,.42); }
       /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
@@ -118,6 +118,7 @@
         position: relative;
         width: min(420px, 100%);
         max-height: 100vh;
+        max-height: 100dvh;
         overflow: auto;
         display: flex;
         flex-direction: column;
@@ -130,7 +131,7 @@
         background: linear-gradient(180deg, rgba(20,20,22,.4), rgba(10,10,11,.85));
         box-shadow: none;
       }
-      .bp-close { position: absolute; top: 13px; right: 13px; min-width: 42px; min-height: 42px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }
+      .bp-close { position: absolute; top: 13px; right: 13px; min-width: 44px; min-height: 44px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }
       .bp-close:hover { background: rgba(255,255,255,.12); }
       .bp-kicker { margin: 0 48px 7px 0; color: var(--accent, #ff3d47); font-size: 12px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
       .bp-heading { margin: 0; font-size: clamp(27px, 6vw, 40px); line-height: 1.02; letter-spacing: -.05em; }
@@ -143,8 +144,16 @@
       .bp-profile:hover, .bp-profile:focus-visible, .bp-profile[data-active="true"] { border-color: rgba(255,255,255,.5); background: rgba(255,255,255,.045); }
       /* Rounded-square, not a circle — the reference's "cartoon avatar" tile
          shape — and bigger: a left-rail avatar column is the ONLY chrome on
-         that screen, so it can afford the size a card-row layout couldn't. */
-      .bp-avatar { display: grid; place-items: center; width: 54px; height: 54px; flex: 0 0 auto; border-radius: 16px; color: #fff; background: linear-gradient(145deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 20px; font-weight: 900; box-shadow: 0 8px 20px rgba(255,61,71,.25); }
+         that screen, so it can afford the size a card-row layout couldn't.
+
+         Neutral, not the accent gradient it used to be. Three profiles all
+         wearing the same red gradient and the same red glow told you nothing
+         about which was which, and spent the brand colour on decoration for
+         rows that are all equally inactive. The accent now arrives only on the
+         row you are actually on (below), which is the one thing on this screen
+         worth colouring. */
+      .bp-avatar { display: grid; place-items: center; width: 54px; height: 54px; flex: 0 0 auto; border-radius: 16px; color: var(--text, #f7f7f8); background: rgba(255,255,255,.07); font-size: 20px; font-weight: 900; transition: background .15s, color .15s; }
+      .bp-profile:hover .bp-avatar, .bp-profile:focus-visible .bp-avatar, .bp-profile[data-active="true"] .bp-avatar { color: #fff; background: linear-gradient(145deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); }
       .bp-profile-copy { min-width: 0; flex: 1; }
       .bp-profile-name { display: block; overflow: hidden; font-size: 16px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
       .bp-profile-meta { display: block; margin-top: 3px; color: var(--muted, #a3a3aa); font-size: 12px; }
@@ -152,7 +161,7 @@
       .bp-pin { margin-top: 22px; }
       .bp-pin[hidden] { display: none; }
       .bp-pin-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .bp-back { min-height: 40px; border: 0; border-radius: 999px; padding: 8px 12px; color: inherit; background: rgba(255,255,255,.08); font-weight: 800; }
+      .bp-back { min-height: 44px; border: 0; border-radius: 999px; padding: 8px 12px; color: inherit; background: rgba(255,255,255,.08); font-weight: 800; }
       .bp-back:hover { background: rgba(255,255,255,.14); }
       .bp-dots { display: flex; justify-content: center; gap: 12px; margin: 24px 0; }
       .bp-dot { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.45); border-radius: 50%; }
@@ -163,10 +172,60 @@
       .bp-action { font-size: 13px; }
       .bp-pad-spacer { min-height: 58px; }
       .bp-pin-actions, .bp-footer { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
-      .bp-verify, .bp-refresh { min-height: 43px; border: 1px solid var(--accent, #ff3d47); border-radius: 999px; padding: 10px 16px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 14px; font-weight: 850; }
-      .bp-secondary { min-height: 43px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 10px 16px; color: inherit; background: rgba(255,255,255,.055); font-size: 14px; font-weight: 800; }
+      .bp-verify, .bp-refresh { min-height: 44px; border: 1px solid var(--accent, #ff3d47); border-radius: 999px; padding: 10px 16px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 14px; font-weight: 850; }
+      .bp-secondary { min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 10px 16px; color: inherit; background: rgba(255,255,255,.055); font-size: 14px; font-weight: 800; }
       .bp-verify:disabled, .bp-refresh:disabled, .bp-profile:disabled, .bp-digit:disabled, .bp-action:disabled, .bp-back:disabled { cursor: wait; opacity: .52; }
-      @media (max-width: 720px) { .bp-connect { width: 42px; padding: 0; font-size: 0; } .bp-connect::before { content: "Profile"; font-size: 11px; } .bp-panel { padding: 22px 18px 18px; } }
+      /* A LEFT RAIL IS A DESKTOP SHAPE. It only reads as a rail when there is
+         something beside it; the reference has full-bleed art there and this
+         app deliberately does not (see the note above). Measured on the real
+         thing before this block existed:
+
+           390x844 phone   panel 390x844, content 198px from the top,
+                           list ends at 591 -> 198 above + 253 below = 451px
+                           of empty screen wrapped around three rows
+           768x1024 tablet panel 420x1024, 280px above the content, and 348px
+                           of the window to the right of the panel with
+                           nothing in it at all
+
+         "justify-content: center" is what put it in the middle: correct for a
+         420px rail on a 900px-tall desktop window, and the reason a phone
+         renders a header that starts halfway down the screen. Under 900px the
+         panel stops being a rail and becomes what it actually is on that
+         screen — the whole screen — anchored at the top like every other view
+         in the app, so the eye starts where the content starts. */
+      @media (max-width: 900px) {
+        .bp-panel {
+          width: 100%;
+          justify-content: flex-start;
+          border-right: 0;
+          padding: calc(28px + env(safe-area-inset-top, 0px)) 20px calc(32px + env(safe-area-inset-bottom, 0px));
+        }
+        /* Capped, not full-bleed. On a 768px tablet an uncapped row put the
+           name hard left and the PIN badge 700px away hard right, with the
+           reader's eye crossing an empty middle to connect them. */
+        .bp-kicker, .bp-heading, .bp-copy, .bp-status, .bp-profiles, .bp-pin, .bp-footer { width: 100%; max-width: 560px; }
+        .bp-profiles { margin-top: 16px; }
+      }
+      /* The topbar button used to be squeezed to a 42px box with "font-size: 0"
+         and the word "Profile" pushed back in through ::before at 11px. Two
+         things wrong with that: 11px of text does not fit in 42px, so it hung
+         out of its own pill on every phone screenshot, and it threw away the
+         profile NAME the button is otherwise set to (line 215) to say the
+         generic word instead. "Kids" is both shorter and the useful answer. */
+      @media (max-width: 720px) {
+        .bp-connect { max-width: 88px; min-width: 44px; overflow: hidden; padding: 8px 10px; text-overflow: ellipsis; }
+        .bp-panel { padding-left: 18px; padding-right: 18px; }
+      }
+      /* styles.css scales any focused button by 1.08 on coarse pointers (the
+         d-pad "magnetic focus" rule, which matches on a plain "button:
+         focus-visible"). That was harmless while a profile row was 380px in a
+         420px rail. Now that the row is the full width of a phone or tablet,
+         1.08 of 728px measured 786px and hung 9px off BOTH edges at 768. A
+         row this wide does not need to grow to show it is focused: it already
+         gets a border, a lit background and a coloured avatar tile. */
+      @media (pointer: coarse), (hover: none) {
+        .bp-profile:focus-visible { transform: none; }
+      }
       @media (prefers-reduced-motion: reduce) { .bp-profile, .bp-digit, .bp-action { transition: none; } }
     `;
     document.head.appendChild(style);

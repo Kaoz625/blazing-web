@@ -2173,7 +2173,7 @@ async function loadTrailersView() {
     // el() takes (tag, className) only — a third argument is silently dropped,
     // which is how this shipped as an empty <p> the first time.
     const note = el('p', 'search-status');
-    note.textContent = 'No trailers yet — this needs the trailer pipeline on the server, which is built but not deployed.';
+    note.textContent = 'No trailers yet. This needs the trailer pipeline on the server, which is built but not deployed.';
     wrap.appendChild(note);
   }
 }
@@ -2220,7 +2220,7 @@ function renderEducation(metas, slug) {
   if (status) {
     status.textContent = metas.length
       ? `${metas.length} in ${slug}`
-      : 'Nothing here yet — the education catalogs are built on the server but not deployed.';
+      : 'Nothing here yet. The education catalogs are built on the server but not deployed.';
   }
 }
 
@@ -2418,7 +2418,7 @@ async function loadEmbyPage(reset) {
   embyBrowseState.skip += metas.length;
   if (!results.children.length) {
     status.textContent = window.BlazingEmby.base
-      ? 'Nothing here — Emby may be unreachable, or this library is empty.'
+      ? 'Nothing here. Emby may be unreachable, or this library is empty.'
       : 'Emby is not configured.';
   } else {
     status.textContent = `${embyBrowseState.skip} of ${total}`;
