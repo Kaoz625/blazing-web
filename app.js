@@ -1138,8 +1138,20 @@ async function boot() {
  */
 async function bootFromSDUI() {
   try {
-    const inviteCode = localStorage.getItem('validInviteCode');
-    const mode = inviteCode ? 'blazing' : 'safe';
+    // BrightMinds Kids ('safe') is the real, intentional public face of this
+    // domain — not a bug, not a placeholder. The bug was HOW a device left
+    // that mode: this checked 'validInviteCode' in localStorage, and nothing
+    // in this codebase has ever written that key (grepped: this line is the
+    // only reference to it, anywhere). So every browser, this one included on
+    // its very first visit, was permanently stuck on the public BrightMinds
+    // shell with no path out — Markus's own approved household devices were
+    // seeing the wrong brand's gold theme and edu-only catalog forever, which
+    // is most of what read as "this looks wrong" tonight. See
+    // switchToBlazingMode() below for how a device actually earns 'blazing'
+    // now: once it is an approved household member (proven by picking a real
+    // profile — a pending/public device never reaches that point), not by a
+    // flag nobody ever sets.
+    const mode = localStorage.getItem('blazing-household-approved') ? 'blazing' : 'safe';
     const uiRes = await fetch(`${API_BASE}/api/ui/home-config?mode=${mode}`);
     if (!uiRes.ok) return false;
     const uiConfig = await uiRes.json();
@@ -1155,18 +1167,33 @@ async function bootFromSDUI() {
     if (uiConfig.accentColor) document.documentElement.style.setProperty('--accent', uiConfig.accentColor);
     if (uiConfig.theme) document.documentElement.setAttribute('data-theme', uiConfig.theme);
 
-    const jobs = uiConfig.homeRows.map((row) => {
-      const catalogInfo = {
-        id: row.id,
-        type: row.type === 'cinematic_hero' ? 'movie' : 'series',
-        name: row.label,
-        catalogSlug: row.catalogSlug,
-      };
-      const section = buildRowSkeleton(catalogInfo);
-      if (row.type === 'cinematic_hero') section.dataset.freshShelf = 'true';
-      rowsWrap.appendChild(section);
-      return loadSDUIRow(catalogInfo, section);
+    // Never reachable before tonight — 'blazing' mode required
+    // localStorage.validInviteCode, which nothing ever set (see the comment on
+    // the mode line above), so this .map() has been mapping only 'safe' mode's
+    // rows in practice. 'blazing' mode's payload names "hero" (cinematic_hero)
+    // and "trending_m" with the SAME catalogSlug (blazing-trending-movies) —
+    // measured live the moment this path first actually ran — so without this
+    // filter the very first blazing-mode Home draws that shelf twice. Roku,
+    // Fire TV and Samsung all got this same filter earlier tonight for the
+    // same reason; this client just never got to find out it needed it too.
+    const seenSlugs = new Set();
+    const rowsToLoad = uiConfig.homeRows.filter((row) => {
+      if (row.type === 'cinematic_hero') return false;
+      if (row.catalogSlug && seenSlugs.has(row.catalogSlug)) return false;
+      if (row.catalogSlug) seenSlugs.add(row.catalogSlug);
+      return true;
     });
+    const jobs = rowsToLoad.map((row) => {
+        const catalogInfo = {
+          id: row.id,
+          type: row.type === 'cinematic_hero' ? 'movie' : 'series',
+          name: row.label,
+          catalogSlug: row.catalogSlug,
+        };
+        const section = buildRowSkeleton(catalogInfo);
+        rowsWrap.appendChild(section);
+        return loadSDUIRow(catalogInfo, section);
+      });
 
     const rows = await Promise.all(jobs);
     const first = rows.find((metas) => metas && metas.length)?.[0];
@@ -2471,6 +2498,34 @@ document.addEventListener('blazing-profile-selected', (event) => {
   state.profileCap = next;
   for (const section of document.querySelectorAll('[data-emby-row="true"]')) section.remove();
   loadEmbyRows();
+});
+
+/**
+ * Picking a real profile is only reachable once profile.js's own gate has
+ * confirmed this device is approved — a pending or public device never gets
+ * past "waiting for approval" to a profile list at all. So the moment this
+ * fires, the device has earned 'blazing' mode: the household's own Blazing
+ * Stream, not the public BrightMinds shell. Persisted, so a RETURNING
+ * approved device renders 'blazing' from the very first paint next time
+ * instead of flashing BrightMinds first.
+ */
+document.addEventListener('blazing-profile-selected', () => {
+  if (localStorage.getItem('blazing-household-approved')) return;
+  localStorage.setItem('blazing-household-approved', '1');
+  // Only the catalog/SDUI rows (buildRowSkeleton's plain <section class="row">,
+  // built by loadRow/loadFreshHomeRow/loadSDUIRow) — NOT [data-emby-row="true"]
+  // sections, which are the OTHER 'blazing-profile-selected' listener's job
+  // (see loadEmbyRows() above). Both listeners fire for the same event; a
+  // blanket rowsWrap.replaceChildren() here raced that listener's own
+  // clear-then-refetch and duplicated every Emby row (appendEmbyRow's fetch is
+  // async, so "clear" and "the row lands" are never in the same tick).
+  for (const section of rowsWrap.querySelectorAll('section:not([data-emby-row="true"])')) {
+    section.remove();
+  }
+  heroRowClaimed = false;
+  (async () => {
+    if (!(await bootFromSDUI())) await bootFromShelves();
+  })();
 });
 
 /* ---- Comics ------------------------------------------------------------- */
