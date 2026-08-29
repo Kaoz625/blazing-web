@@ -435,7 +435,8 @@ async function openDiscover(kind, slug, label) {
   const items = (data && (data.items || data.metas)) || [];
   if (data && data.name) discoverTitle.textContent = data.name;
   if (data && data.subtitle) discoverCopy.textContent = data.subtitle;
-  const cards = items.map(embyMetaSafe).filter(Boolean);
+  const cards = items.map(embyMetaSafe).filter(Boolean)
+    .filter((meta) => ratingAllowed(meta.contentRating));
   if (!cards.length) {
     discoverResults.replaceChildren();
     discoverStatus.textContent = 'Nothing is listed here today.';
