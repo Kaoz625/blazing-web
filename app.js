@@ -815,11 +815,20 @@ function showRoute(route) {
   const comicsView = $('#comics-view');
   const requestsView = $('#requests-view');
   const embyView = $('#emby-view');
+  // Games and Manga (FLT-2): both live entirely in games.js/manga.js, the
+  // same self-contained-module shape as locker.js/watch-party.js. This
+  // router only flips visibility and calls mount() — each module guards its
+  // own first-load work and, for Manga, re-checks the profile gate on every
+  // mount so switching into the tab always reflects the current profile.
+  const mangaView = $('#manga-view');
+  const gamesView = $('#games-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
   if (requestsView) requestsView.hidden = route !== 'requests';
   if (embyView) embyView.hidden = route !== 'emby';
+  if (mangaView) mangaView.hidden = route !== 'manga';
+  if (gamesView) gamesView.hidden = route !== 'games';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
   // were the only callers of window.mountStorybook / mountPodcastStudio /
@@ -837,6 +846,8 @@ function showRoute(route) {
   if (route === 'comics') loadComicsView();
   if (route === 'requests') loadRequestsView();
   if (route === 'emby') loadEmbyView();
+  if (route === 'manga') window.BlazingManga && window.BlazingManga.mount();
+  if (route === 'games') window.BlazingGames && window.BlazingGames.mount();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();

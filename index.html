@@ -104,6 +104,8 @@
         <button type="button" data-view="emby">Emby Library</button>
         <button type="button" data-view="education">Education</button>
         <button type="button" data-view="comics">Comics</button>
+        <button type="button" data-view="manga">Manga</button>
+        <button type="button" data-view="games">Games</button>
         <button type="button" data-view="trailers">Trailers</button>
         <button type="button" data-view="requests">Requests</button>
         <button type="button" data-view="admin">Admin</button>
@@ -302,6 +304,93 @@
       <img class="comic-page" alt="" />
     </div>
 
+    <!-- ── Manga View ──
+         Built against roku channels/source/lib/Manga.brs and
+         MangaChaptersScreen.brs (see manga.js). Mature section: Kids/Guest/
+         Teen profiles are refused, same as Roku's mangaAllowedNow(). -->
+    <section id="manga-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Manga</p>
+        <h1>📚 Manga</h1>
+        <p>Pick a cover to see its chapters. Mature and Adult profiles only.</p>
+      </div>
+      <form id="manga-search-form" class="search-form" role="search">
+        <input id="manga-search-input" name="mq" type="search" autocomplete="off" placeholder="Search for a manga title" />
+        <button class="primary-button" type="submit">Search</button>
+      </form>
+      <p id="manga-status" class="search-status" role="status"></p>
+      <div id="manga-rows" class="rows"></div>
+    </section>
+
+    <!-- ── Manga chapters dialog ── -->
+    <dialog id="manga-chapters-dialog" class="detail-dialog" aria-labelledby="manga-chapters-title">
+      <article class="detail-card">
+        <button id="manga-chapters-close" class="detail-close icon-button" type="button" aria-label="Close chapters">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+        <div id="manga-chapters-art" class="detail-art" aria-hidden="true"></div>
+        <div class="detail-body">
+          <h2 id="manga-chapters-title"></h2>
+          <p id="manga-chapters-meta" class="detail-copy"></p>
+          <p id="manga-chapters-desc" class="detail-copy"></p>
+          <p id="manga-chapters-status" class="detail-status" role="status"></p>
+          <div id="manga-chapters-list" class="detail-streams"></div>
+        </div>
+      </article>
+    </dialog>
+
+    <!-- ── Manga reader overlay — same markup/CSS as #comic-reader on purpose ── -->
+    <div id="manga-reader" class="comic-reader" hidden>
+      <div class="comic-bar">
+        <span class="comic-label"></span>
+        <span class="comic-counter"></span>
+        <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
+      </div>
+      <img class="comic-page" alt="" />
+    </div>
+
+    <!-- ── Games View ──
+         Built against roku channels/source/lib/Games.brs and
+         GameDetailScreen.brs (see games.js). Discovery only: there is no
+         game to stream, same as every other client in this fleet. -->
+    <section id="games-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">RAWG Catalogue</p>
+        <h1>🎮 Games</h1>
+        <p>Browse and search. Info only — there is no game to stream here.</p>
+      </div>
+      <form id="games-search-form" class="search-form" role="search">
+        <input id="games-search-input" name="gq" type="search" autocomplete="off" placeholder="Search for a game" />
+        <button class="primary-button" type="submit">Search</button>
+      </form>
+      <p id="games-status" class="search-status" role="status"></p>
+      <div id="games-results" class="search-results"></div>
+      <button type="button" id="games-load-more" class="primary-button" hidden>Load more</button>
+    </section>
+
+    <!-- ── Game detail dialog ── -->
+    <dialog id="game-detail-dialog" class="detail-dialog" aria-labelledby="game-detail-title">
+      <article class="detail-card">
+        <button id="game-detail-close" class="detail-close icon-button" type="button" aria-label="Close details">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+        <div id="game-detail-art" class="detail-art" aria-hidden="true">
+          <div id="game-detail-trailer" class="detail-trailer" aria-hidden="true"></div>
+        </div>
+        <div class="detail-body">
+          <h2 id="game-detail-title"></h2>
+          <p id="game-detail-meta" class="detail-copy"></p>
+          <p id="game-detail-desc" class="detail-copy"></p>
+          <p id="game-detail-platforms" class="detail-copy"></p>
+          <div id="game-detail-shots" class="game-shots"></div>
+          <div class="detail-actions">
+            <button id="game-detail-trailer-btn" class="primary-button" type="button" hidden>Play trailer</button>
+          </div>
+          <p id="game-detail-status" class="detail-status" role="status"></p>
+        </div>
+      </article>
+    </dialog>
+
     <!-- ── Requests View ── -->
     <section id="requests-view" class="view" hidden>
       <div class="page-heading">
@@ -415,5 +504,7 @@
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>
+  <script src="./manga.js" defer></script>
+  <script src="./games.js" defer></script>
 </body>
 </html>

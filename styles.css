@@ -923,6 +923,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .comic-close:focus-visible { outline: 3px solid var(--accent, #f43f5e); }
 .comic-page { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
 
+/* ── Game screenshots (Games / FLT-2) ────────────────────── */
+.game-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.game-shots img { width: 150px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); }
+
 /* 10-foot UI D-pad magnetic focus engine */
 @media (pointer: coarse), (hover: none) {
   .card:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible, button:focus-visible {
