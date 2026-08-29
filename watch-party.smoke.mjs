@@ -88,6 +88,15 @@ async function joinedPage({ ice, killIce = false, peer }) {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
+  // profile.js's own gate overlay (.bp-layer[data-gate="required"]) sits over
+  // the whole page until a profile is picked, and Playwright correctly refuses
+  // to click through it — same root cause as the locker/upscale fixes above.
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+      detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false },
+    }));
+    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
+  });
   await page.waitForSelector('#watch-party-launch-button');
   await page.click('#watch-party-launch-button');
   await page.fill('#watch-party-join-input', 'ABC123');

@@ -108,7 +108,17 @@ async function openApp({ statusReply, requestReply, resolveReply, streams } = {}
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('.row-track .card', { timeout: 10000 });
+  // ratingAllowed() defaults state.profileCap to 'general' until a profile is
+  // actually picked, and refuses this fixture's unrated META — same gate
+  // rowhero/home/locker already hit. Without it the card stays a permanent
+  // <div class="card skeleton">, never visible, so the click below times out.
+  await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+      detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false },
+    }));
+    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
+  });
+  await page.waitForSelector('.row-track .card:not(.skeleton)', { timeout: 10000 });
   await page.click('.row-track .card');
   await page.waitForSelector('#detail-dialog[open]', { timeout: 5000 });
   return { ctx, page, seen };
