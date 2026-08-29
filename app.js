@@ -141,6 +141,27 @@ function safeQualityMap(raw) {
  * asks for IMDb/TMDB age and star ratings on the detail page, and they cannot
  * be shown if they are stripped on arrival.
  */
+/**
+ * The YouTube id of a title's trailer, or ''.
+ *
+ * Stremio's meta shape gives a bare video id, not a URL:
+ *     trailers:       [{ source: 'Y1IgAEejvqM', type: 'Trailer' }, ...]
+ *     trailerStreams: [{ ytId:   'Y1IgAEejvqM', title: '...' }, ...]
+ * An id is 11 characters of [A-Za-z0-9_-] and nothing else is accepted here,
+ * because this value is interpolated straight into an embed URL.
+ */
+function youtubeTrailerId(raw) {
+  if (!raw || typeof raw !== 'object') return '';
+  const candidates = []
+    .concat(Array.isArray(raw.trailers) ? raw.trailers : [])
+    .concat(Array.isArray(raw.trailerStreams) ? raw.trailerStreams : []);
+  for (const t of candidates) {
+    const id = String((t && (t.source || t.ytId)) || '');
+    if (/^[A-Za-z0-9_-]{11}$/.test(id)) return id;
+  }
+  return '';
+}
+
 function safeMeta(raw) {
   if (!raw || typeof raw !== 'object' || !raw.id) return null;
   return {
@@ -153,6 +174,14 @@ function safeMeta(raw) {
     releaseInfo: plainText(raw.releaseInfo),
     website: safeHttpsUrl(raw.website),
     trailerUrl: safeHttpsUrl(raw.trailerUrl),
+    // NOTHING EVER SENDS trailerUrl. Measured 29 Aug 2026 against the live
+    // addon: 0 of 300 catalog metas carry it, and /meta/ does not carry it
+    // either. What the meta route DOES carry is `trailers: [{source: "<11-char
+    // YouTube id>", type: "Trailer"}]` and `trailerStreams`. So every trailer
+    // in this app has been dead since it was written - the card preview and
+    // startDetailTrailer both return on their `!meta.trailerUrl` guard, every
+    // time, for every title. This is the field that revives them.
+    trailerYt: youtubeTrailerId(raw),
     streamsByQuality: safeQualityMap(raw.streamsByQuality),
     imdbRating: plainText(raw.imdbRating || raw.rating).slice(0, 5),
     certification: plainText(raw.certification || raw.ageRating).slice(0, 12),
@@ -850,45 +879,164 @@ const TRAILER_ROWS = Object.freeze([
 
 const EDU_SLUGS = Object.freeze(['science', 'history', 'stem', 'kids', 'languages']);
 
-const HOVER_TRAILER_MS = 1000;
 
 /**
- * Fade a card's poster into its muted trailer after a dwell.
+ * On dwell, fill the expanded card in: the synopsis, the meta line, the trailer.
  *
- * On dwell, not on hover: a mouse crossing a row would otherwise start and
- * cancel a video load per card, which on a slow connection queues a dozen
- * requests for something nobody asked to see.
+ * WHY THIS HAS TO FETCH. Markus, 2026-08-29: "wheres the descriptions and the
+ * movie trailers playing with the pop out?" The markup was always built - see
+ * buildCard - and it was always mostly empty, because a CATALOG meta does not
+ * carry the fields it needs. Measured against the live addon, over the 300
+ * metas of blazing-movies:
+ *
+ *     description     129 / 300
+ *     imdbRating       39 / 300
+ *     runtime           0 / 300
+ *     certification     0 / 300
+ *     trailerUrl        0 / 300      <- and /meta/ has no such field either
+ *
+ * /meta/<type>/<id>.json has every one of them, plus `trailers`. So the panel
+ * is not broken, it was never given anything to show. One fetch per card, only
+ * on dwell, only inside a .row-hero where the panel can actually be seen, and
+ * cached - a mouse crossing a row of 20 must not pull 20 payloads.
  */
-function attachHoverTrailer(card, meta) {
-  if (!meta || !meta.trailerUrl) return;
-  let timer = null;
-  let video = null;
-  const stop = () => {
-    clearTimeout(timer);
-    timer = null;
-    if (video) {
-      video.remove();
-      video = null;
-      card.classList.remove('card-previewing');
+const DWELL_MS = 550;                 // fill the text in early
+const HOVER_TRAILER_MS = 1400;        // the video comes later, after real intent
+const fullMetaCache = new Map();
+
+async function fetchFullMeta(meta) {
+  const key = `${meta.type}:${meta.id}`;
+  if (fullMetaCache.has(key)) return fullMetaCache.get(key);
+  // Emby titles are not in the addon catalog, so /meta/ is a guaranteed 404 for
+  // them - the same reason openDetail skips /stream/ for an embyId.
+  if (meta.embyId || !/^tt\d+$/.test(String(meta.id))) {
+    fullMetaCache.set(key, null);
+    return null;
+  }
+  const job = fetchJSON(`${API_BASE}/meta/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`)
+    .then((data) => safeMeta({ ...(data && data.meta), type: meta.type }) || null)
+    .catch(() => null);
+  fullMetaCache.set(key, job);
+  return job;
+}
+
+/** Fold anything the catalog was missing into the meta the card already holds. */
+function mergeFullMeta(meta, full) {
+  if (!full) return meta;
+  for (const k of ['description', 'imdbRating', 'runtime', 'certification', 'background', 'trailerYt', 'trailerUrl']) {
+    if (!meta[k] && full[k]) meta[k] = full[k];
+  }
+  if ((!meta.genres || !meta.genres.length) && full.genres && full.genres.length) meta.genres = full.genres;
+  return meta;
+}
+
+/** The hero panel's text, rebuilt from whatever the meta knows right now. */
+function fillCardHeroContent(card, meta) {
+  const content = card.querySelector('.card-hero-content');
+  if (!content) return;
+  const metaLine = [
+    meta.imdbRating ? `★ ${meta.imdbRating}` : '',
+    (meta.releaseInfo || '').match(/\d{4}/)?.[0] || '',
+    (meta.genres || [])[0] || '',
+    meta.certification || '',
+    meta.runtime || '',
+  ].filter(Boolean).join(' · ');
+
+  let metaEl = content.querySelector('.card-meta-line');
+  if (metaLine) {
+    if (!metaEl) {
+      metaEl = el('p', 'card-meta-line');
+      content.insertBefore(metaEl, content.querySelector('.card-synopsis') || content.querySelector('.card-cta'));
     }
+    metaEl.textContent = metaLine;
+  }
+
+  let synopsis = content.querySelector('.card-synopsis');
+  if (meta.description) {
+    if (!synopsis) {
+      synopsis = el('p', 'card-synopsis');
+      content.insertBefore(synopsis, content.querySelector('.card-cta'));
+    }
+    synopsis.textContent = meta.description;
+  }
+}
+
+/**
+ * A muted trailer node, or null.
+ *
+ * A YouTube id CANNOT go in a <video> - that is the trap that would make this
+ * look implemented and play nothing. It needs an iframe embed. A direct file
+ * URL still gets a <video>, which is what trailerUrl was written for even
+ * though nothing has ever sent one.
+ */
+function makeTrailerNode(meta) {
+  if (meta.trailerYt) {
+    const frame = el('iframe');
+    const id = encodeURIComponent(meta.trailerYt);
+    // loop needs `playlist` set to the same id; a single video will not loop
+    // without it. mute=1 is not a preference - an unmuted autoplay is refused
+    // by every browser and leaves a dead black box.
+    frame.src = `https://www.youtube-nocookie.com/embed/${id}`
+      + `?autoplay=1&mute=1&controls=0&loop=1&playlist=${id}`
+      + '&modestbranding=1&rel=0&playsinline=1&iv_load_policy=3&disablekb=1';
+    frame.allow = 'autoplay; encrypted-media';
+    frame.setAttribute('frameborder', '0');
+    frame.setAttribute('tabindex', '-1');
+    frame.setAttribute('aria-hidden', 'true');
+    return frame;
+  }
+  const url = safeHttpsUrl(meta.trailerUrl);
+  if (!url) return null;
+  const video = el('video');
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.src = url;
+  return video;
+}
+
+function attachHoverTrailer(card, meta) {
+  let textTimer = null;
+  let videoTimer = null;
+  let wrap = null;
+
+  const stop = () => {
+    clearTimeout(textTimer); clearTimeout(videoTimer);
+    textTimer = null; videoTimer = null;
+    if (wrap) { wrap.remove(); wrap = null; }
+    card.classList.remove('card-previewing');
   };
-  card.addEventListener('mouseenter', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      const url = safeHttpsUrl(meta.trailerUrl);
-      if (!url) return;
-      video = el('video', 'card-video');
-      video.muted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.src = url;
-      video.addEventListener('error', stop, { once: true });
-      card.appendChild(video);
+
+  const begin = () => {
+    // Only where the panel is visible. Outside a .row-hero this would fetch a
+    // payload and start a video behind a poster nobody can see through.
+    if (!card.closest('.row-hero')) return;
+    clearTimeout(textTimer); clearTimeout(videoTimer);
+
+    textTimer = setTimeout(async () => {
+      const full = await fetchFullMeta(meta);
+      mergeFullMeta(meta, full);
+      fillCardHeroContent(card, meta);
+    }, DWELL_MS);
+
+    videoTimer = setTimeout(async () => {
+      const full = await fetchFullMeta(meta);
+      mergeFullMeta(meta, full);
+      // The pointer may have left while that was in flight.
+      if (!videoTimer || !card.matches(':hover, :focus-within')) return;
+      const node = makeTrailerNode(meta);
+      if (!node) return;
+      wrap = el('div', 'card-trailer-wrap');
+      wrap.appendChild(node);
+      card.appendChild(wrap);
       card.classList.add('card-previewing');
-      const played = video.play();
-      if (played && played.catch) played.catch(() => {});
+      requestAnimationFrame(() => wrap && wrap.classList.add('visible'));
+      if (node.play) { const p = node.play(); if (p && p.catch) p.catch(() => {}); }
     }, HOVER_TRAILER_MS);
-  });
+  };
+
+  card.addEventListener('mouseenter', begin);
+  card.addEventListener('focus', begin);
   card.addEventListener('mouseleave', stop);
   card.addEventListener('focusout', stop);
 }
@@ -1432,6 +1580,20 @@ function openDetail(meta) {
   else detailDialog.setAttribute('open', '');
 
   startDetailTrailer(meta);
+  // A CATALOG META IS NOT ENOUGH TO FILL THIS PANEL. Only 129 of 300 carry a
+  // description and none carries a trailer, so a title opened straight from a
+  // poster - without dwelling on it first - showed "Open this title to check
+  // available streams." and no trailer. Same cached fetch the card uses; if the
+  // dialog moved on in the meantime the result is dropped.
+  fetchFullMeta(meta).then((full) => {
+    if (!full || state.selected !== meta) return;
+    const hadTrailer = Boolean(meta.trailerYt || meta.trailerUrl);
+    mergeFullMeta(meta, full);
+    if (meta.description) detailCopy.textContent = meta.description;
+    setBackground(detailArt, meta.background || meta.poster);
+    renderRatingChips(meta);
+    if (!hadTrailer) startDetailTrailer(meta);
+  });
   telemetry('nav_action', { action: 'open_detail', from: state.route || 'home' });
 
   // An Emby title is not in the addon catalog, so /stream/<type>/emby:<id>.json
@@ -2138,26 +2300,30 @@ let detailTrailerVideo = null;
 function startDetailTrailer(meta) {
   stopDetailTrailer();
   const host = $('#detail-trailer');
-  if (!host || !meta || !meta.trailerUrl) return;
-  const url = safeHttpsUrl(meta.trailerUrl);
-  if (!url) return;
-
-  const video = el('video');
-  video.muted = true;
-  video.loop = true;
-  video.playsInline = true;
-  video.src = url;
+  if (!host || !meta) return;
+  // Was `!meta.trailerUrl`, which nothing has ever set, so this returned on
+  // every title ever opened and the detail trailer has never once played.
+  const video = makeTrailerNode(meta);
+  if (!video) return;
 
   const toggle = el('button', 'detail-mute-btn');
   toggle.type = 'button';
   toggle.textContent = '🔇';
   toggle.setAttribute('aria-label', 'Unmute trailer');
+  let muted = true;
   toggle.addEventListener('click', (event) => {
     event.stopPropagation();
-    video.muted = !video.muted;
-    toggle.textContent = video.muted ? '🔇' : '🔊';
-    toggle.setAttribute('aria-label', video.muted ? 'Unmute trailer' : 'Mute trailer');
-    telemetry('nav_action', { action: video.muted ? 'trailer_mute' : 'trailer_unmute', from: 'detail' });
+    muted = !muted;
+    if (video.tagName === 'IFRAME') {
+      // An iframe has no .muted. Reloading the embed with the flag flipped is
+      // the only way to change it without pulling in the YouTube IFrame API.
+      video.src = video.src.replace(/([?&])mute=[01]/, `$1mute=${muted ? 1 : 0}`);
+    } else {
+      video.muted = muted;
+    }
+    toggle.textContent = muted ? '🔇' : '🔊';
+    toggle.setAttribute('aria-label', muted ? 'Unmute trailer' : 'Mute trailer');
+    telemetry('nav_action', { action: muted ? 'trailer_mute' : 'trailer_unmute', from: 'detail' });
   });
 
   video.addEventListener('error', stopDetailTrailer, { once: true });

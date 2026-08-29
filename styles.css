@@ -291,10 +291,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .card-hero-content {
   position: absolute;
+  /* Above the trailer, which is now z-index 2 - the title and synopsis have to
+     stay readable over moving video. */
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 2;
+  z-index: 3;
   padding: 16px 18px 14px;
   background: linear-gradient(0deg, rgba(0,0,0,.95) 10%, rgba(0,0,0,.55) 60%, transparent);
   opacity: 0;
@@ -374,7 +376,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card-trailer-wrap {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  /* ABOVE .card-backdrop (z-index 1), BELOW .card-hero-content. At z-index 1 it
+     tied with the backdrop and the backdrop won on paint order, so the trailer
+     played underneath a still image. */
+  z-index: 2;
   opacity: 0;
   transition: opacity 400ms ease;
   pointer-events: none;
@@ -848,6 +853,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 @keyframes card-preview-in { to { opacity: 1; } }
 .card-previewing { transform: scale(1.04); z-index: 3; }
+/* NOT INSIDE AN EXPANDING ROW. The card is already at its hover width there, so
+   an extra 4% on top pushes it past the row's height and the page starts moving
+   again - exactly what the width cap was set to prevent. */
+.row-hero .card-previewing { transform: none; }
 .card-previewing .card-label { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .card-video { animation: none; opacity: 1; }

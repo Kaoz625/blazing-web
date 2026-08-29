@@ -52,8 +52,12 @@ const ART = 'https://img.invalid/backdrop.jpg';
 // WITH a background — these rows are the ones that may expand.
 const META = (n, pre) => ({
   metas: Array.from({ length: n }, (_, i) => ({
-    id: `tt${pre}${i}`, name: `${pre} title ${i + 1}`, type: 'movie',
-    poster: PIX, background: ART, description: 'a synopsis', releaseInfo: '2026',
+    id: `tt900${i}0`, name: `${pre} title ${i + 1}`, type: 'movie',
+    poster: PIX, background: ART, releaseInfo: '2026',
+    // NO description ON PURPOSE. 171 of the live catalog's 300 metas have none,
+    // and that is the case that has to work: the panel fills itself from
+    // /meta/ on dwell. A card that already has one keeps it - mergeFullMeta
+    // only fills what is empty - so seeding one here would test nothing.
   })),
 });
 // WITHOUT a background — the channel-logo shape that must stay a plain poster.
@@ -89,6 +93,17 @@ await ctx.route('https://addon.lyreosai.com/**', (route) => {
       { id: 'blazing-kids-movies', type: 'movie', name: 'Kids Movies' },
       { id: 'blazing-livetv', type: 'tv', name: 'Live TV' },
     ] }) });
+  // /meta/ carries what a CATALOG meta does not: the synopsis, the runtime and
+  // the trailer. Measured on the live addon - 0 of 300 catalog metas carry a
+  // trailer of any kind, so the pop-out had nothing to play and, for 171 of
+  // them, nothing to say either.
+  if (u.includes('/meta/')) return route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ meta: {
+      id: 'tt900000', name: 'Full title', type: 'movie', poster: PIX, background: ART,
+      description: 'The synopsis that only the meta route carries.',
+      imdbRating: '7.8', runtime: '118 min', genres: ['Drama'],
+      trailers: [{ source: 'Y1IgAEejvqM', type: 'Trailer' }],
+    } }) });
   if (u.includes('/api/profiles')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ profiles: [{ id: 'p1', name: 'Mark' }] }) });
   if (u.includes('/api/sync/progress/recent')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
   // KEYED ON THE SLUG, NOT THE PATH TYPE, and that distinction is the whole
@@ -217,6 +232,35 @@ if (!measured) {
   ok(after.cardH <= before.row + 1, 'the expanded card still fits inside the row',
     `(${after.cardH.toFixed(1)}px in a ${before.row.toFixed(1)}px row)`);
 }
+
+// THE POP-OUT MUST SAY SOMETHING AND PLAY SOMETHING. Markus: "wheres the
+// descriptions and the movie trailers playing with the pop out?" The markup was
+// always built and always mostly empty, because a catalog meta carries neither.
+const filled = await (async () => {
+  const rows = await page.$$('#rows .row.row-hero');
+  const card = rows.length ? await rows[0].$('.card') : null;
+  if (!card) return null;
+  await card.hover();
+  await page.waitForTimeout(2600);   // past DWELL_MS (550) and HOVER_TRAILER_MS (1400)
+  return page.evaluate((c) => ({
+    synopsis: (c.querySelector('.card-synopsis') || {}).textContent || '',
+    metaLine: (c.querySelector('.card-meta-line') || {}).textContent || '',
+    frameSrc: (c.querySelector('.card-trailer-wrap iframe') || {}).src || '',
+    wrapVisible: !!c.querySelector('.card-trailer-wrap.visible'),
+  }), card);
+})();
+
+if (!filled) {
+  ok(false, 'could not hover a card to fill it');
+} else {
+  ok(/only the meta route carries/.test(filled.synopsis), 'the pop-out shows a description', `("${filled.synopsis.slice(0, 40)}...")`);
+  ok(/7\.8/.test(filled.metaLine) && /118 min/.test(filled.metaLine), 'and the rating and runtime line', `("${filled.metaLine}")`);
+  ok(/youtube-nocookie\.com\/embed\/Y1IgAEejvqM/.test(filled.frameSrc), 'and a trailer really is playing in it');
+  ok(/[?&]mute=1/.test(filled.frameSrc), 'muted, because no browser autoplays otherwise');
+  ok(filled.wrapVisible, 'and it is faded in, not left at opacity 0');
+}
+await page.mouse.move(5, 5);
+await page.waitForTimeout(400);
 
 // AND ON A PHONE. "this should also be on all devices" — the <=640px rule used
 // to pin the expanded width back to the resting 118px, switching the treatment
