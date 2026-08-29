@@ -228,11 +228,18 @@ const rowsWrap = $('#rows');
 // from ever claiming it, without hardcoding which catalog names are "real"
 // rows — a live-only manifest wouldn't otherwise get a hero at all if this
 // checked description too, since live channels have never carried one.
-let heroRowClaimed = false;
+// EVERY ROW THAT CAN DO THIS, DOES. Markus, 2026-08-29: "only the first row
+// pops out, all rows should do this". It used to stop at the first qualifying
+// row (`heroRowClaimed`), which made the behaviour read as a one-off banner
+// rather than as how this app shows a card.
+//
+// The background check below STAYS, and it is the whole reason this is not
+// simply `classList.add` on everything: a Live TV channel-logo row has no
+// backdrop and no description, so expanding one of its cards reveals an empty
+// black panel. A row with nothing to show on hover is worse than a row that
+// stays a plain poster.
 function claimHeroRow(section, metas) {
-  if (heroRowClaimed) return;
   if (!metas?.[0]?.background) return;
-  heroRowClaimed = true;
   section.classList.add('row-hero');
 }
 const drawerLayer = $('#drawer-layer');
@@ -1119,7 +1126,6 @@ async function boot() {
   }
 
   rowsWrap.replaceChildren();
-  heroRowClaimed = false;
 
   // Fire and forget: an Emby outage costs three hidden rows, never a slow or
   // broken home screen. Each row appends itself when it arrives.
@@ -2396,6 +2402,11 @@ async function appendEmbyRow(title, type, load) {
   const section = buildRowSkeleton({ id: `emby-${type}`, type, name: title });
   section.dataset.embyRow = 'true';
   $('.row-track', section).replaceChildren(...metas.map(buildCard));
+  // The Emby shelves never called this, so they could not expand on hover no
+  // matter what the rest of the home did — and on a browser that is still
+  // waiting for fleet approval they are the ONLY rows on screen, which is
+  // exactly the "only one row pops out" Markus was looking at.
+  claimHeroRow(section, metas);
   rowsWrap.appendChild(section);
   applyRowFilter(state.route);
 }
@@ -2522,7 +2533,6 @@ document.addEventListener('blazing-profile-selected', () => {
   for (const section of rowsWrap.querySelectorAll('section:not([data-emby-row="true"])')) {
     section.remove();
   }
-  heroRowClaimed = false;
   (async () => {
     if (!(await bootFromSDUI())) await bootFromShelves();
   })();

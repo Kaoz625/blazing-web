@@ -327,7 +327,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
      off the bottom of the screen entirely. Switching to a landscape ratio
      here is what actually makes this "hero-inside-the-row" instead of just
      "one portrait poster, bigger." */
-  width: clamp(280px, 30vw, 440px);
+  /* THE EXPANDED CARD MUST NOT BE TALLER THAN THE RESTING ONE. A resting card
+     is 132px wide at 2/3, so 198px tall, and the row is only as tall as its
+     cards. While one row did this it did not matter much — the top row grew and
+     the page nudged. Now that EVERY row does it, a taller hover state would
+     shove every row below it down the page each time the pointer crossed a
+     card, and back up when it left.
+     At 16/10 the height is width / 1.6, so 316px is the widest that still fits
+     inside 198px. The row height is therefore constant and nothing moves except
+     the card under the pointer. */
+  width: clamp(240px, 24vw, 316px);
   aspect-ratio: 16 / 10;
   transform: none;
   z-index: 5;

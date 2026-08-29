@@ -14,10 +14,22 @@
 // rows are drawn by the blazing-profile-selected listener, not by boot(), so a
 // check that looked at the Emby rows passed while the rest of the home was gone.
 //
-// /api/ui/home-config is stubbed 404 here BECAUSE IT IS 404 IN PRODUCTION — the
-// route is in the blazing-addon repo and not in the deployed image. So this also
-// pins the rule that SDUI being absent must fall back to the real shelves rather
-// than leave an empty page.
+// /api/ui/home-config is stubbed 404 here. That WAS production on 27 Aug 2026;
+// it is not any more — the route ships in the deployed addon image today and
+// answers 200. The stub stays anyway, because what it pins is still worth
+// pinning: SDUI being absent must fall back to the real shelves rather than
+// leave an empty page. Read it as "the SDUI route is down", not as a claim
+// about what production does. (Closes DEP-9.)
+//
+// A PROFILE MUST BE CHOSEN BEFORE ANY ROW CAN BE DRAWN, and this test spent
+// 29 Aug 2026 failing because it never chose one. ratingAllowed() defaults
+// state.profileCap to 'general' and refuses an UNRATED title under a kids cap,
+// so with nobody watching, every meta in the fixtures below — none of which
+// carry a contentRating — was refused, every row emptied, and each loader
+// removed its own section. The screen said "Nothing is available right now."
+// and no error was thrown. That is the parental gate working exactly as
+// written, not a broken home, so the fix belongs here: pick a profile, the way
+// a person does, before counting rows.
 //
 //   node home.smoke.mjs                 the working tree
 //   BW_DIR=/path/to/checkout node home.smoke.mjs    any other checkout
@@ -86,7 +98,18 @@ page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console.error: ' + m.text().slice(0, 160)); });
 
 await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(7000);
+await page.waitForTimeout(2500);
+
+// Choose a profile. profile.js fires this after a person taps a face, and
+// app.js listens for it to set the cap and rebuild the home. Dispatching it
+// directly keeps this test off the gate's own markup, which is profile.js's
+// job to cover, while still exercising the real listener.
+await page.evaluate(() => {
+  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+    detail: { id: 'p1', name: 'Mark', maxRating: 'adult' },
+  }));
+});
+await page.waitForTimeout(6000);
 
 const rows = await page.$$eval('#rows .row', (n) => n.length).catch(() => -1);
 const cards = await page.$$eval('#rows .row-track > *', (n) => n.length).catch(() => -1);
