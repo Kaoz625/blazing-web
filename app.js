@@ -3033,8 +3033,17 @@ detailDialog.addEventListener('cancel', () => {
   state.selected = null;
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
-  if (!player.hidden) closePlayer();
+  // A desktop keyboard sends Escape. A webOS TV remote's physical Back button
+  // does not — it is keyCode 461 (key is 'Back' on most firmwares, sometimes
+  // reported as 'GoBack'). The native <dialog> auto-closes detail-dialog on a
+  // real Escape (browser default for showModal()), which is why this looked
+  // like it worked in every desktop test; measured with a real webOS-shaped
+  // key event, nothing closed it, and nothing closed the player or drawer
+  // either. Without this, a remote user who opens a title has no way back.
+  const isBack = event.key === 'Escape' || event.key === 'Back' || event.key === 'GoBack' || event.keyCode === 461;
+  if (!isBack) return;
+  if (detailDialog.open) closeDetail();
+  else if (!player.hidden) closePlayer();
   else if (!drawerLayer.hidden) closeDrawer();
 });
 
