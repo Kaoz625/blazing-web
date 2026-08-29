@@ -962,47 +962,92 @@ function fillCardHeroContent(card, meta) {
 }
 
 /**
- * A muted trailer node, or null.
+ * Resolve a trailer to a URL WE serve, and return a <video> playing it.
  *
- * A YouTube id CANNOT go in a <video> - that is the trap that would make this
- * look implemented and play nothing. It needs an iframe embed. A direct file
- * URL still gets a <video>, which is what trailerUrl was written for even
- * though nothing has ever sent one.
+ * NOT A YOUTUBE IFRAME. Markus, 2026-08-29: "you do not need to make youtube api
+ * calls when we have real debrid and torbox apis ... it should work on roku
+ * apple tv and firestick and lg tv and samsung tv and vegaOS". An iframe cannot
+ * run on any of those six. Whatever the browser does here has to be something a
+ * television can do too, and a television plays a video URL.
+ *
+ * WHAT WAS ACTUALLY CHECKED, rather than assumed, on 29 Aug 2026:
+ *   - Real-Debrid  youtube.com is `status: down, supported: 0`, and an
+ *                  unrestrict call answers {"error":"hoster_unavailable"}.
+ *   - TorBox       lists YouTube as up, accepts the job, and then fails it:
+ *                  "unable to download video data: HTTP Error 403: Forbidden".
+ *   - OUR OWN FLEET works. /proxy/yt-resolve has been in the addon all along,
+ *                  serving the education player. It runs yt-dlp server-side and
+ *                  hands back an HLS manifest.
+ *
+ * So the trailer comes from our own backend on our own domain. No client ever
+ * talks to YouTube, and no API key is involved.
+ *
+ *   &via=proxy   for a BROWSER. Google serves the signed manifest with no
+ *                Access-Control-Allow-Origin, so a page cannot fetch it at all.
+ *                The addon re-serves it and its segments with a CORS header.
+ *                Televisions omit this flag - they are not browsers, and the
+ *                direct URL is faster. Same rule as resolveEduStream().
  */
-function makeTrailerNode(meta) {
-  if (meta.trailerYt) {
-    const frame = el('iframe');
-    const id = encodeURIComponent(meta.trailerYt);
-    // loop needs `playlist` set to the same id; a single video will not loop
-    // without it. mute=1 is not a preference - an unmuted autoplay is refused
-    // by every browser and leaves a dead black box.
-    frame.src = `https://www.youtube-nocookie.com/embed/${id}`
-      + `?autoplay=1&mute=1&controls=0&loop=1&playlist=${id}`
-      + '&modestbranding=1&rel=0&playsinline=1&iv_load_policy=3&disablekb=1';
-    frame.allow = 'autoplay; encrypted-media';
-    frame.setAttribute('frameborder', '0');
-    frame.setAttribute('tabindex', '-1');
-    frame.setAttribute('aria-hidden', 'true');
-    return frame;
+async function resolveTrailerUrl(meta) {
+  if (safeHttpsUrl(meta.trailerUrl)) return safeHttpsUrl(meta.trailerUrl);
+  if (!meta.trailerYt) return '';
+  try {
+    const res = await fetch(
+      `${API_BASE}/proxy/yt-resolve?id=${encodeURIComponent(meta.trailerYt)}&json=1&via=proxy`,
+      { mode: 'cors', credentials: 'omit' }
+    );
+    if (!res.ok) return '';
+    const data = await res.json();
+    const raw = data && data.url;
+    // The proxied form comes back as a PATH, so the addon need not know which
+    // hostname it is being served under.
+    return (typeof raw === 'string' && raw.startsWith('/')) ? `${API_BASE}${raw}` : safeHttpsUrl(raw);
+  } catch {
+    return '';
   }
-  const url = safeHttpsUrl(meta.trailerUrl);
-  if (!url) return null;
+}
+
+/**
+ * A muted <video> for one trailer URL, plus the teardown it needs.
+ *
+ * Its own hls.js instance, NOT the shared one attachSource() drives - that is
+ * bound to the single full-screen player element, and pointing it at a card
+ * would tear down whatever the viewer was watching.
+ */
+function makeTrailerVideo(url) {
   const video = el('video');
   video.muted = true;
   video.loop = true;
   video.playsInline = true;
-  video.src = url;
-  return video;
+  video.setAttribute('tabindex', '-1');
+  video.setAttribute('aria-hidden', 'true');
+
+  let hls = null;
+  if (looksLikeHls(url, '') && window.Hls && window.Hls.isSupported()) {
+    hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+    hls.on(window.Hls.Events.ERROR, (_evt, data) => { if (data && data.fatal) video.dispatchEvent(new Event('error')); });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+  } else {
+    // Safari and every television play HLS natively; nothing to load.
+    video.src = url;
+    video.load();
+  }
+  return { video, destroy: () => { if (hls) { try { hls.destroy(); } catch {} hls = null; } } };
 }
 
 function attachHoverTrailer(card, meta) {
   let textTimer = null;
   let videoTimer = null;
   let wrap = null;
+  let player = null;
 
   const stop = () => {
     clearTimeout(textTimer); clearTimeout(videoTimer);
     textTimer = null; videoTimer = null;
+    // Destroy the hls.js instance, not just the element. A detached one keeps
+    // fetching segments for ever, and a row of 20 cards would leave 20 running.
+    if (player) { player.destroy(); player = null; }
     if (wrap) { wrap.remove(); wrap = null; }
     card.classList.remove('card-previewing');
   };
@@ -1022,16 +1067,19 @@ function attachHoverTrailer(card, meta) {
     videoTimer = setTimeout(async () => {
       const full = await fetchFullMeta(meta);
       mergeFullMeta(meta, full);
-      // The pointer may have left while that was in flight.
-      if (!videoTimer || !card.matches(':hover, :focus-within')) return;
-      const node = makeTrailerNode(meta);
-      if (!node) return;
+      const url = await resolveTrailerUrl(meta);
+      // The pointer may have left while that was in flight - resolving runs
+      // yt-dlp server-side and is not instant on a cold cache.
+      if (!url || !videoTimer || !card.matches(':hover, :focus-within')) return;
+      const made = makeTrailerVideo(url);
+      player = made;
       wrap = el('div', 'card-trailer-wrap');
-      wrap.appendChild(node);
+      wrap.appendChild(made.video);
       card.appendChild(wrap);
       card.classList.add('card-previewing');
       requestAnimationFrame(() => wrap && wrap.classList.add('visible'));
-      if (node.play) { const p = node.play(); if (p && p.catch) p.catch(() => {}); }
+      const p = made.video.play();
+      if (p && p.catch) p.catch(() => {});
     }, HOVER_TRAILER_MS);
   };
 
@@ -2289,6 +2337,7 @@ if (qualitySelect) {
 /* ── the detail hero trailer ─────────────────────────────────────────────── */
 
 let detailTrailerVideo = null;
+let detailTrailerDestroy = null;
 
 /**
  * Autoplay the trailer muted behind the title, with a mute toggle.
@@ -2297,14 +2346,20 @@ let detailTrailerVideo = null;
  * an unmuted autoplay is rejected and leaves a dead black box. The toggle is
  * how the user opts in to sound, which is also the gesture the browser wants.
  */
-function startDetailTrailer(meta) {
+async function startDetailTrailer(meta) {
   stopDetailTrailer();
   const host = $('#detail-trailer');
   if (!host || !meta) return;
   // Was `!meta.trailerUrl`, which nothing has ever set, so this returned on
   // every title ever opened and the detail trailer has never once played.
-  const video = makeTrailerNode(meta);
-  if (!video) return;
+  // Same resolve the cards use: our own /proxy/yt-resolve, never a YouTube embed.
+  const url = await resolveTrailerUrl(meta);
+  if (!url) return;
+  // The dialog may have been closed, or moved to another title, while yt-dlp ran.
+  if (state.selected !== meta) return;
+  const made = makeTrailerVideo(url);
+  const video = made.video;
+  detailTrailerDestroy = made.destroy;
 
   const toggle = el('button', 'detail-mute-btn');
   toggle.type = 'button';
@@ -2314,13 +2369,7 @@ function startDetailTrailer(meta) {
   toggle.addEventListener('click', (event) => {
     event.stopPropagation();
     muted = !muted;
-    if (video.tagName === 'IFRAME') {
-      // An iframe has no .muted. Reloading the embed with the flag flipped is
-      // the only way to change it without pulling in the YouTube IFrame API.
-      video.src = video.src.replace(/([?&])mute=[01]/, `$1mute=${muted ? 1 : 0}`);
-    } else {
-      video.muted = muted;
-    }
+    video.muted = muted;
     toggle.textContent = muted ? '🔇' : '🔊';
     toggle.setAttribute('aria-label', muted ? 'Unmute trailer' : 'Mute trailer');
     telemetry('nav_action', { action: muted ? 'trailer_mute' : 'trailer_unmute', from: 'detail' });
@@ -2338,6 +2387,9 @@ function startDetailTrailer(meta) {
 
 function stopDetailTrailer() {
   const host = $('#detail-trailer');
+  // The hls.js instance goes too, not just the element - a detached one keeps
+  // pulling segments for as long as the tab is open.
+  if (detailTrailerDestroy) { try { detailTrailerDestroy(); } catch (e) {} detailTrailerDestroy = null; }
   if (detailTrailerVideo) {
     try { detailTrailerVideo.pause(); detailTrailerVideo.removeAttribute('src'); } catch (e) {}
     detailTrailerVideo = null;

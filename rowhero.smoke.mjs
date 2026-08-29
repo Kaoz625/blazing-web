@@ -104,6 +104,12 @@ await ctx.route('https://addon.lyreosai.com/**', (route) => {
       imdbRating: '7.8', runtime: '118 min', genres: ['Drama'],
       trailers: [{ source: 'Y1IgAEejvqM', type: 'Trailer' }],
     } }) });
+  // OUR OWN resolve, not YouTube. This is the route the education player has
+  // always used; it runs yt-dlp server-side and hands back an HLS manifest, so
+  // a Roku / Apple TV / Fire TV / LG / Samsung / VegaOS can play the same
+  // trailer the browser does. An <iframe> could not run on any of them.
+  if (u.includes('/proxy/yt-resolve')) return route.fulfill({ status: 200, contentType: 'application/json',
+    body: JSON.stringify({ url: '/proxy/hls?u=https%3A%2F%2Fmanifest.googlevideo.com%2Ffake.m3u8', streamFormat: 'hls' }) });
   if (u.includes('/api/profiles')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ profiles: [{ id: 'p1', name: 'Mark' }] }) });
   if (u.includes('/api/sync/progress/recent')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
   // KEYED ON THE SLUG, NOT THE PATH TYPE, and that distinction is the whole
@@ -122,6 +128,8 @@ await ctx.route('https://fleet.lyreosai.com/**', (route) => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 });
 
+let resolveHits = 0;
+ctx.on('request', (r) => { if (r.url().includes('/proxy/yt-resolve')) resolveHits += 1; });
 const page = await ctx.newPage();
 if (process.env.DEBUG_NET) {
   page.on('response', (r) => { const u=r.url(); if(!u.startsWith('data:')&&!u.includes('127.0.0.1')) console.log('NET', r.status(), u.slice(0,120)); });
@@ -245,7 +253,8 @@ const filled = await (async () => {
   return page.evaluate((c) => ({
     synopsis: (c.querySelector('.card-synopsis') || {}).textContent || '',
     metaLine: (c.querySelector('.card-meta-line') || {}).textContent || '',
-    frameSrc: (c.querySelector('.card-trailer-wrap iframe') || {}).src || '',
+    tag: (c.querySelector('.card-trailer-wrap > *') || {}).tagName || '',
+    hasIframe: !!c.querySelector('.card-trailer-wrap iframe'),
     wrapVisible: !!c.querySelector('.card-trailer-wrap.visible'),
   }), card);
 })();
@@ -255,8 +264,9 @@ if (!filled) {
 } else {
   ok(/only the meta route carries/.test(filled.synopsis), 'the pop-out shows a description', `("${filled.synopsis.slice(0, 40)}...")`);
   ok(/7\.8/.test(filled.metaLine) && /118 min/.test(filled.metaLine), 'and the rating and runtime line', `("${filled.metaLine}")`);
-  ok(/youtube-nocookie\.com\/embed\/Y1IgAEejvqM/.test(filled.frameSrc), 'and a trailer really is playing in it');
-  ok(/[?&]mute=1/.test(filled.frameSrc), 'muted, because no browser autoplays otherwise');
+  ok(filled.tag === 'VIDEO', 'the trailer is a <video>, playable on a TV', `(<${filled.tag.toLowerCase()}>)`);
+  ok(!filled.hasIframe, 'and NOT a YouTube iframe — no Roku, Apple TV, Fire TV, LG, Samsung or VegaOS can run one');
+  ok(resolveHits > 0, 'it resolved through OUR backend, /proxy/yt-resolve', `(${resolveHits} call${resolveHits === 1 ? '' : 's'})`);
   ok(filled.wrapVisible, 'and it is faded in, not left at opacity 0');
 }
 await page.mouse.move(5, 5);
