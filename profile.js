@@ -15,6 +15,11 @@
   const state = {
     credentials: null,
     profiles: [],
+    // True once a listProfiles() call has come back 200 for this browser. The
+    // "+ Add profile" tile depends on this, not on state.profiles.length,
+    // because a brand-new approved browser has zero profiles and must still
+    // see the tile — and a still-pending browser must never see it.
+    approved: false,
     activeProfile: null,
     pendingProfile: null,
     // True while the pad is asking for the OWNER PIN rather than a profile PIN.
@@ -92,6 +97,12 @@
       .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
       .bp-connect:hover { background: var(--surface-focus, #1c1c1f); }
       .bp-connect[data-connected="true"] { border-color: rgba(255,61,71,.42); }
+      .bp-welcome-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+      .bp-invite-input, .bp-create-input { width: 100%; min-height: 52px; margin: 16px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 18px; font-weight: 800; }
+      .bp-invite-input { letter-spacing: .1em; text-transform: uppercase; }
+      .bp-kids-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; color: var(--muted, #a3a3aa); font-size: 14px; }
+      .bp-welcome[hidden], .bp-invite[hidden], .bp-create[hidden] { display: none; }
+      .bp-profile-add { border-style: dashed; border-color: rgba(255,255,255,.22); }
       /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
          else is drawn." Two things kept deliberately different, not missed:
          (1) no per-profile art — the reference swaps a whole poster behind
@@ -243,6 +254,16 @@
     ui.close.disabled = busy;
     ui.verify.disabled = busy || state.pinDigits.length !== 4;
     ui.back.disabled = busy;
+    ui.requestAccess.disabled = busy;
+    ui.enterCode.disabled = busy;
+    ui.inviteFromPending.disabled = busy;
+    ui.inviteBack.disabled = busy;
+    ui.inviteInput.disabled = busy;
+    ui.inviteSubmit.disabled = busy;
+    ui.createBack.disabled = busy;
+    ui.createName.disabled = busy;
+    ui.createKids.disabled = busy;
+    ui.createSubmit.disabled = busy;
     document.querySelectorAll('.bp-profile, .bp-digit, .bp-action').forEach((button) => {
       button.disabled = busy;
     });
@@ -292,7 +313,6 @@
   function renderProfileList() {
     ui.profiles.replaceChildren();
     const profiles = state.profiles;
-    if (!profiles.length) return;
     profiles.forEach((profile) => {
       const button = element('button', 'bp-profile');
       button.type = 'button';
@@ -311,6 +331,22 @@
       button.addEventListener('click', () => selectProfile(profile));
       ui.profiles.appendChild(button);
     });
+    // Only once this browser is confirmed approved — a pending browser's own
+    // POST would just 403, and showing the tile there is a promise this
+    // screen can't keep yet.
+    if (state.approved) {
+      const addButton = element('button', 'bp-profile bp-profile-add');
+      addButton.type = 'button';
+      addButton.disabled = state.busy;
+      addButton.setAttribute('aria-label', 'Create a new profile');
+      const addAvatar = element('span', 'bp-avatar', '+');
+      addAvatar.setAttribute('aria-hidden', 'true');
+      const addCopy = element('span', 'bp-profile-copy');
+      addCopy.append(element('span', 'bp-profile-name', 'Add profile'));
+      addButton.append(addAvatar, addCopy);
+      addButton.addEventListener('click', showCreateProfile);
+      ui.profiles.appendChild(addButton);
+    }
   }
 
   function renderPin() {
@@ -348,7 +384,7 @@
     updateConnectButton();
     state.pendingProfile = profile;
     clearPinEntry();
-    ui.profiles.hidden = true;
+    hideAllScreens();
     ui.pin.hidden = false;
     setStatus('Enter four digits, then select Verify. A failed check uses one server attempt.', 'info');
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
@@ -370,7 +406,7 @@
     state.pendingProfile = null;
     state.ownerMode = true;
     clearPinEntry();
-    ui.profiles.hidden = true;
+    hideAllScreens();
     ui.owner.hidden = true;
     ui.pin.hidden = false;
     setStatus('Enter the seven-digit owner PIN to approve this browser. Attempts are limited.', 'info');
@@ -427,10 +463,156 @@
     state.pendingProfile = null;
     state.ownerMode = false;
     clearPinEntry();
-    ui.pin.hidden = true;
+    hideAllScreens();
     ui.profiles.hidden = false;
+    ui.kicker.textContent = 'Profiles';
+    ui.heading.textContent = 'Who is watching?';
     renderProfileList();
     if (message) setStatus(message, 'info');
+  }
+
+  /**
+   * Hide every full-screen section of the panel. Every "show X" function
+   * calls this first so exactly one section is ever visible — before this,
+   * showing the welcome/invite/create screens meant separately remembering
+   * to hide profiles and pin, and it was easy to leave two visible at once.
+   */
+  function hideAllScreens() {
+    ui.welcome.hidden = true;
+    ui.invite.hidden = true;
+    ui.createProfile.hidden = true;
+    ui.pin.hidden = true;
+    ui.profiles.hidden = true;
+  }
+
+  /**
+   * The first screen a browser with no stored device identity ever sees.
+   * Nothing is registered yet — that only happens once "Request Access" or
+   * an invite code is actually submitted, so a visitor who closes the tab
+   * here has created no pending device for Markus to see on the dashboard.
+   */
+  function showWelcome() {
+    hideAllScreens();
+    ui.welcome.hidden = false;
+    ui.kicker.textContent = 'Get Access';
+    ui.heading.textContent = 'New to Blazing?';
+    setStatus('Choose how you want to get in.', 'info');
+  }
+
+  function showInvite() {
+    hideAllScreens();
+    ui.invite.hidden = false;
+    ui.kicker.textContent = 'Invite Code';
+    ui.heading.textContent = 'Enter your code';
+    ui.inviteInput.value = '';
+    setStatus('Enter the invite code you were given.', 'info');
+    window.setTimeout(() => ui.inviteInput.focus(), 0);
+  }
+
+  function showCreateProfile() {
+    hideAllScreens();
+    ui.createProfile.hidden = false;
+    ui.kicker.textContent = 'New Profile';
+    ui.heading.textContent = 'Create a profile';
+    ui.createName.value = '';
+    ui.createKids.checked = false;
+    setStatus('Name this profile. A PIN can be added later on a TV.', 'info');
+    window.setTimeout(() => ui.createName.focus(), 0);
+  }
+
+  async function redeemInviteCode() {
+    if (state.busy) return;
+    const code = (ui.inviteInput.value || '').trim().toUpperCase();
+    if (!code) {
+      setStatus('Enter the invite code first.', 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Checking that code…', 'info');
+    try {
+      let credentials = state.credentials || storedCredentials();
+      if (!credentials) {
+        credentials = await registerDevice();
+        if (!credentials) return;
+      }
+      state.credentials = credentials;
+      const result = await request('/devices/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: credentials.id, code }),
+      });
+      if (!result.ok) {
+        if (result.status === 404) {
+          setStatus('That code was not recognized. Check it and try again.', 'error');
+        } else if (result.status === 409) {
+          setStatus('That code has already been used. Ask for a new one.', 'error');
+        } else if (result.status === 410) {
+          setStatus('That code has expired. Ask for a new one.', 'error');
+        } else if (result.status === 429) {
+          setStatus('Too many attempts. Wait a bit, then try again.', 'error');
+        } else {
+          setStatus(serverError(result, result.timeout
+            ? 'The profile server did not answer in time. Try again.'
+            : 'Could not check that invite code.'), 'error');
+        }
+        return;
+      }
+      setStatus('Code accepted. Loading profiles…', 'info');
+      const listing = await listProfiles(credentials);
+      applyProfileList(listing);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCreateProfile() {
+    if (state.busy) return;
+    const name = (ui.createName.value || '').trim();
+    if (!name) {
+      setStatus('Enter a name for the profile.', 'error');
+      return;
+    }
+    if (!state.credentials) {
+      setStatus('This browser is not connected yet. Select Refresh profiles first.', 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Creating this profile…', 'info');
+    try {
+      const result = await request(`/profiles?deviceId=${encodeURIComponent(state.credentials.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        body: JSON.stringify({ name, isKids: !!ui.createKids.checked }),
+      });
+      if (shouldRepairCredentials(result)) {
+        clearStoredCredentials();
+        state.credentials = null;
+        showWelcome();
+        setStatus('This browser connection is no longer valid. Start again.', 'error');
+        return;
+      }
+      if (result.status === 403) {
+        applyProfileList(result);
+        return;
+      }
+      if (!result.ok) {
+        setStatus(serverError(result, result.timeout
+          ? 'The profile server did not answer in time. Try again.'
+          : 'Could not create this profile.'), 'error');
+        return;
+      }
+      const created = profileFrom(result.body && result.body.profile);
+      if (!created) {
+        setStatus('The profile server returned an unusable profile. Try Refresh profiles.', 'error');
+        return;
+      }
+      const listing = await listProfiles(state.credentials);
+      applyProfileList(listing);
+      const match = state.profiles.find((profile) => profile.id === created.id) || created;
+      selectProfile(match);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function selectProfile(profile) {
@@ -552,18 +734,22 @@
 
   function applyProfileList(result) {
     if (ui.owner) ui.owner.hidden = true;
+    if (ui.inviteFromPending) ui.inviteFromPending.hidden = true;
     if (result.status === 403) {
       state.profiles = [];
+      state.approved = false;
       state.activeProfile = null;
       clearUnlock();
       updateConnectButton();
       showProfiles();
-      setStatus('This browser is waiting for approval. Approve it in the Blazing dashboard, or use "I am the owner" below.', 'pending');
+      setStatus('This browser is waiting for approval. Approve it in the Blazing dashboard, use "I am the owner" below, or enter an invite code.', 'pending');
       // THE OWNER MUST NEVER BE LOCKED OUT. Approval is an admin action, and since
       // this gate became mandatory a pending browser cannot be used at all — so
       // without a way in from the pending screen itself, a new phone away from home
-      // is simply locked out of the household's own service.
+      // is simply locked out of the household's own service. An invite code is the
+      // same escape hatch for a household member who is not the owner.
       if (ui.owner) ui.owner.hidden = false;
+      if (ui.inviteFromPending) ui.inviteFromPending.hidden = false;
       return;
     }
     if (!result.ok) {
@@ -584,6 +770,7 @@
       return;
     }
     state.profiles = rawProfiles.map(profileFrom).filter(Boolean);
+    state.approved = true;
     if (state.activeProfile && !state.profiles.some((profile) => profile.id === state.activeProfile.id)) {
       state.activeProfile = null;
       clearUnlock();
@@ -591,7 +778,7 @@
     }
     showProfiles();
     if (!state.profiles.length) {
-      setStatus('This approved browser has no profiles yet. Add a profile on an approved TV, then select Refresh profiles.', 'info');
+      setStatus('This approved browser has no profiles yet. Select "Add profile" below, or add one on an approved TV.', 'info');
       return;
     }
     setStatus('Choose who is watching.', 'info');
@@ -603,7 +790,7 @@
     setBusy(true);
     state.pendingProfile = null;
     clearPinEntry();
-    ui.pin.hidden = true;
+    hideAllScreens();
     ui.profiles.hidden = false;
     setStatus('Connecting to profiles…', 'info');
     try {
@@ -789,8 +976,10 @@
     ui.close = element('button', 'bp-close', 'Close');
     ui.close.type = 'button';
     const kicker = element('p', 'bp-kicker', 'Profiles');
+    ui.kicker = kicker;
     const heading = element('h2', 'bp-heading', 'Who is watching?');
     heading.id = 'bp-heading';
+    ui.heading = heading;
     // Two lines, because the panel is now two different things: a gate on first
     // load, and an ordinary profile switcher afterwards. Telling a person who
     // cannot proceed that this is optional is worse than saying nothing.
@@ -800,6 +989,66 @@
     ui.status.setAttribute('role', 'status');
     ui.status.setAttribute('aria-live', 'polite');
     ui.profiles = element('div', 'bp-profiles');
+
+    // First-run screen: no stored device identity yet. Neither button here
+    // touches the network on its own — "Request Access" hands off to the
+    // existing connectProfiles() (which registers), "I Have an Invite Code"
+    // just switches screens.
+    ui.welcome = element('section', 'bp-welcome');
+    ui.welcome.hidden = true;
+    const welcomeCopy = element('p', 'bp-copy', 'New here? Request access, or enter an invite code from someone in your household.');
+    ui.requestAccess = element('button', 'bp-verify', 'Request Access');
+    ui.requestAccess.type = 'button';
+    ui.enterCode = element('button', 'bp-secondary', 'I Have an Invite Code');
+    ui.enterCode.type = 'button';
+    const welcomeActions = element('div', 'bp-welcome-actions');
+    welcomeActions.append(ui.requestAccess, ui.enterCode);
+    ui.welcome.append(welcomeCopy, welcomeActions);
+
+    // Invite-code redemption. Reachable from the welcome screen (no identity
+    // yet) AND from the pending-approval screen (identity exists, waiting on
+    // Markus) — registerDevice() inside redeemInviteCode() only runs when
+    // there is no stored identity, so the pending path never re-registers.
+    ui.invite = element('section', 'bp-invite');
+    ui.invite.hidden = true;
+    const inviteTop = element('div', 'bp-pin-top');
+    ui.inviteBack = element('button', 'bp-back', 'Back');
+    ui.inviteBack.type = 'button';
+    inviteTop.append(ui.inviteBack, element('strong', '', 'Invite code'));
+    ui.inviteInput = document.createElement('input');
+    ui.inviteInput.type = 'text';
+    ui.inviteInput.className = 'bp-invite-input';
+    ui.inviteInput.maxLength = 6;
+    ui.inviteInput.autocomplete = 'off';
+    ui.inviteInput.spellcheck = false;
+    ui.inviteInput.placeholder = 'ABCD23';
+    ui.inviteInput.setAttribute('aria-label', 'Invite code');
+    ui.inviteSubmit = element('button', 'bp-verify', 'Join');
+    ui.inviteSubmit.type = 'button';
+    ui.invite.append(inviteTop, ui.inviteInput, ui.inviteSubmit);
+
+    // Profile creation. Only ever shown to an approved browser — see the
+    // "+ Add profile" tile in renderProfileList(), which is the only thing
+    // that opens this screen.
+    ui.createProfile = element('section', 'bp-create');
+    ui.createProfile.hidden = true;
+    const createTop = element('div', 'bp-pin-top');
+    ui.createBack = element('button', 'bp-back', 'Back');
+    ui.createBack.type = 'button';
+    createTop.append(ui.createBack, element('strong', '', 'New profile'));
+    ui.createName = document.createElement('input');
+    ui.createName.type = 'text';
+    ui.createName.className = 'bp-create-input';
+    ui.createName.maxLength = 40;
+    ui.createName.placeholder = 'Profile name';
+    ui.createName.setAttribute('aria-label', 'Profile name');
+    const kidsRow = element('label', 'bp-kids-row');
+    ui.createKids = document.createElement('input');
+    ui.createKids.type = 'checkbox';
+    kidsRow.append(ui.createKids, document.createTextNode(' Kids profile'));
+    ui.createSubmit = element('button', 'bp-verify', 'Create Profile');
+    ui.createSubmit.type = 'button';
+    ui.createProfile.append(createTop, ui.createName, kidsRow, ui.createSubmit);
 
     ui.pin = element('section', 'bp-pin');
     ui.pin.hidden = true;
@@ -846,11 +1095,15 @@
     ui.owner = element('button', 'bp-secondary', 'I am the owner');
     ui.owner.type = 'button';
     ui.owner.hidden = true;
+    // Only ever shown while this browser is pending. See applyProfileList.
+    ui.inviteFromPending = element('button', 'bp-secondary', 'Enter Invite Code');
+    ui.inviteFromPending.type = 'button';
+    ui.inviteFromPending.hidden = true;
     ui.keepBrowsing = element('button', 'bp-secondary', 'Keep browsing');
     ui.keepBrowsing.type = 'button';
     const keepBrowsing = ui.keepBrowsing;
-    footer.append(ui.refresh, ui.owner, keepBrowsing);
-    panel.append(ui.close, kicker, heading, copy, ui.status, ui.profiles, ui.pin, footer);
+    footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing);
+    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.createProfile, ui.profiles, ui.pin, footer);
     ui.layer.append(backdrop, panel);
     document.body.appendChild(ui.layer);
 
@@ -860,6 +1113,31 @@
     });
     ui.refresh.addEventListener('click', connectProfiles);
     ui.owner.addEventListener('click', () => openOwnerPin());
+    ui.requestAccess.addEventListener('click', connectProfiles);
+    ui.enterCode.addEventListener('click', () => showInvite());
+    ui.inviteFromPending.addEventListener('click', () => showInvite());
+    ui.inviteBack.addEventListener('click', () => {
+      // Route back to wherever this screen was reached from: a browser that
+      // already has an identity (pending or approved) belongs on the normal
+      // profile screen, a true first-timer belongs back on the welcome screen.
+      if (state.credentials || storedCredentials()) showProfiles();
+      else showWelcome();
+    });
+    ui.inviteSubmit.addEventListener('click', redeemInviteCode);
+    ui.inviteInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        redeemInviteCode();
+      }
+    });
+    ui.createBack.addEventListener('click', () => showProfiles());
+    ui.createSubmit.addEventListener('click', submitCreateProfile);
+    ui.createName.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitCreateProfile();
+      }
+    });
     ui.close.addEventListener('click', closePanel);
     keepBrowsing.addEventListener('click', closePanel);
     backdrop.addEventListener('click', closePanel);
@@ -903,7 +1181,15 @@
   function boot() {
     if (!buildUi()) return;
     openPanel();
-    connectProfiles();
+    // A browser that has never registered gets the welcome screen instead of
+    // a silent auto-registration — "Request Access" is what creates the
+    // pending device now, not a page load. A browser that already has an
+    // identity (pending or approved) skips straight to it, unchanged.
+    if (storedCredentials()) {
+      connectProfiles();
+    } else {
+      showWelcome();
+    }
   }
 
   if (document.readyState === 'loading') {
