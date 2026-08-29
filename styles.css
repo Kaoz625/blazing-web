@@ -356,10 +356,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 
 @media (max-width: 640px) {
-  /* No hover on touch, and the row is already narrow — the expand-on-focus
-     treatment needs pointer precision a phone doesn't have here. Falls back
-     to the same plain poster row every other row already is. */
-  .row-hero .card:hover, .row-hero .card:focus-visible { width: 118px; }
+  /* A PHONE GETS THIS TOO. Markus, 2026-08-29: "this should also be on all
+     devices". This used to hold the expanded width at the resting 118px, which
+     did two things, neither of them good: it switched the treatment off on
+     every phone, and — because the 16/10 aspect-ratio above still applied — a
+     card that did get focus went 118x74, SHORTER than the 177px it was resting
+     at, so the row collapsed around it.
+     Narrower, because the screen is narrower, and the same rule as the desktop
+     one holds: no taller than a resting card, or the rows below jump. A resting
+     card here is 118px at 2/3, so 177px tall; 280px at 16/10 is 175px. 74vw
+     keeps it inside the viewport on the smallest phones. */
+  .row-hero .card:hover, .row-hero .card:focus-visible { width: min(74vw, 280px); }
 }
 
 /* ── Card-hover trailer embed ────────────────────────────── */

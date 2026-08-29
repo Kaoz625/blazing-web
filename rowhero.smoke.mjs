@@ -218,6 +218,42 @@ if (!measured) {
     `(${after.cardH.toFixed(1)}px in a ${before.row.toFixed(1)}px row)`);
 }
 
+// AND ON A PHONE. "this should also be on all devices" — the <=640px rule used
+// to pin the expanded width back to the resting 118px, switching the treatment
+// off on every phone, and the 16/10 ratio still applied so a focused card went
+// SHORTER than its row. Same two rules as the desktop check: it must actually
+// grow, and it must not change the row's height.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(400);
+const phone = await (async () => {
+  const rows = await page.$$('#rows .row.row-hero');
+  if (!rows.length) return null;
+  const row = rows[0];
+  const card = await row.$('.card');
+  if (!card) return null;
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(400);
+  const before = await page.evaluate((r) => ({ row: r.getBoundingClientRect().height, card: r.querySelector('.card').getBoundingClientRect().width }), row);
+  await card.hover();
+  await page.waitForTimeout(700);
+  const after = await page.evaluate((r) => {
+    const c = r.querySelector('.card');
+    const boxes = [c, ...c.querySelectorAll('*')].map((n) => n.getBoundingClientRect());
+    const widest = boxes.reduce((a, x) => (x.width > a.width ? x : a), boxes[0]);
+    return { row: r.getBoundingClientRect().height, w: widest.width, h: widest.height };
+  }, row);
+  return { before, after };
+})();
+
+if (!phone) {
+  ok(false, 'could not measure an expanding row at phone width');
+} else {
+  ok(phone.after.w > phone.before.card + 40, 'a phone expands the card too, not just a desktop',
+    `(${phone.before.card.toFixed(0)}px -> ${phone.after.w.toFixed(0)}px)`);
+  ok(Math.abs(phone.after.row - phone.before.row) < 2, 'and the phone row keeps its height',
+    `(${phone.before.row.toFixed(1)}px -> ${phone.after.row.toFixed(1)}px)`);
+}
+
 await page.screenshot({ path: process.env.SHOT || '/tmp/rowhero.png' });
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close(); server.close();
