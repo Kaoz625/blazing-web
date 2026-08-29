@@ -879,6 +879,86 @@ const TRAILER_ROWS = Object.freeze([
 
 const EDU_SLUGS = Object.freeze(['science', 'history', 'stem', 'kids', 'languages']);
 
+/**
+ * The media type each catalog slug lives under, because /api/ui/home-config
+ * does not carry one.
+ *
+ * AN SDUI ROW'S `type` IS A WIDGET, NOT A MEDIA TYPE. The live payload names
+ * `card_row`, `audio_row`, `storybook_row`, `heritage_row`, `progress_row` and
+ * `cinematic_hero` — never movie/series/tv. There is no content type anywhere
+ * in that response, so a client that wants to build /catalog/<type>/<slug>.json
+ * has to supply the type itself. Samsung (KNOWN_CATALOG_TYPES in
+ * js/screens/home.js) and Fire TV (knownTypes in Catalogs.kt) already each keep
+ * a map exactly like this one; this client was the last without it.
+ *
+ * AND THE TYPE SEGMENT IS NOT DECORATIVE. The addon's generic
+ * /catalog/:type/:id.json handler does ignore it — it looks the row up by id —
+ * but it first hands a whole family of ids off to their OWN routes
+ * (CATALOG_IDS_WITH_OWN_ROUTE: books, anime-airing, anime-top, manga-trending,
+ * sports, trailers-*, trending-*, edu-*, kids-*, family-*) and those are
+ * registered under ONE type each. Ask under any other type and Express matches
+ * nothing: HTTP 404, fetchJSON throws, loadSDUIRow removes the shelf. Measured
+ * against addon.lyreosai.com, 29 Aug 2026:
+ *
+ *     /catalog/movie/blazing-kids-movies.json     200   20 metas
+ *     /catalog/tv/blazing-kids-movies.json        404    0
+ *     /catalog/series/blazing-kids-series.json    200   19 metas
+ *     /catalog/tv/blazing-kids-series.json        404    0
+ *     /catalog/movie/blazing-family-movies.json   200   18 metas
+ *     /catalog/tv/blazing-family-movies.json      404    0
+ *     /catalog/movie/blazing-trailers-new.json    200   20 metas
+ *     /catalog/tv/blazing-trailers-new.json       404    0
+ *     /catalog/tv/blazing-sports.json             200    3 metas
+ *     /catalog/movie/blazing-sports.json          404    0
+ *     /catalog/tv/blazing-edu-kids.json           200   22 metas
+ *     /catalog/movie/blazing-edu-kids.json        404    0
+ *
+ * So 'tv' is right for sports/edu/family-tree and fatal for kids and trailers,
+ * and 'movie' is the reverse. Only blazing-trending-* (its route takes :type)
+ * and the ids that fall through to the generic handler are type-agnostic.
+ *
+ * The order below matters: exact slug, then the open-ended prefixes the addon's
+ * own regex allows to grow (edu-*, kids-*, family-*), then 'movie' — the same
+ * default Samsung and Fire TV use. The default is only ever reached for a slug
+ * with no route of its own, which is precisely where the segment is ignored.
+ */
+const CATALOG_TYPES = Object.freeze({
+  ...Object.fromEntries([...TRENDING_ROWS, ...TRAILER_ROWS].map((r) => [r.id, r.type])),
+  'blazing-movies': 'movie',
+  'blazing-series': 'series',
+  'blazing-livetv': 'tv',
+  'blazing-music': 'tv',
+  'blazing-anime': 'series',
+  'blazing-anime-airing': 'series',
+  'blazing-anime-top': 'series',
+  'blazing-asian': 'series',
+  'blazing-bollywood': 'movie',
+  'blazing-meta-movies': 'movie',
+  'blazing-adult': 'movie',
+  'blazing-books': 'book',
+  'blazing-manga-trending': 'book',
+  'blazing-sports': 'tv',
+  'blazing-family-tree': 'tv',
+  'blazing-kids-movies': 'movie',
+  'blazing-kids-series': 'series',
+  'blazing-family-movies': 'movie',
+});
+
+function catalogTypeFor(slug) {
+  const id = String(slug || '');
+  if (CATALOG_TYPES[id]) return CATALOG_TYPES[id];
+  // Every blazing-edu-* catalog is served from `/catalog/tv/blazing-edu-<cat>.json`
+  // and from nowhere else — one loop in the addon registers all twenty of them,
+  // so a new education category added server-side needs no change here.
+  if (id.startsWith('blazing-edu-')) return 'tv';
+  // kids-* and family-* are open-ended in the addon's route regex too. Their
+  // naming is consistent enough to read: -movies is a movie catalog, -series
+  // and -shows are series ones.
+  if (/-movies$/.test(id)) return 'movie';
+  if (/-(series|shows)$/.test(id)) return 'series';
+  return 'movie';
+}
+
 
 /**
  * On dwell, fill the expanded card in: the synopsis, the meta line, the trailer.
@@ -1246,8 +1326,19 @@ async function loadSDUIRow(catalogInfo, section) {
     return [];
   }
   
-  const fetchUrl = `${API_BASE}/catalog/tv/${catalogInfo.catalogSlug}.json`;
-  
+  // WAS `/catalog/tv/${slug}.json`, hardcoded, for EVERY row whatever it held.
+  // 'tv' is the correct segment for the education and sports shelves and a 404
+  // for the kids, family and trailer ones — see catalogTypeFor() for the twelve
+  // live measurements. A 404 makes fetchJSON throw, the catch below removes the
+  // section, and the shelf simply is not there: no error, no empty row, nothing
+  // to see. On the live blazing-mode home that silently cost four of thirteen
+  // rows (🎬 New in Theaters, Kids Movies, Kids Shows, Family Movies), and the
+  // three it cost the BrightMinds home are the only three the addon says are
+  // reliably populated at all right now — every blazing-edu-* catalog returns
+  // zero items while its YouTube quota is exhausted. Same shape as loadRow().
+  const fetchUrl =
+    `${API_BASE}/catalog/${encodeURIComponent(catalogInfo.type)}/${encodeURIComponent(catalogInfo.catalogSlug)}.json`;
+
   try {
     const data = await fetchJSON(fetchUrl);
     const rawMetas = Array.isArray(data.metas) ? data.metas : (Array.isArray(data) ? data : []);
@@ -1388,7 +1479,20 @@ async function bootFromSDUI() {
     const jobs = rowsToLoad.map((row) => {
         const catalogInfo = {
           id: row.id,
-          type: row.type === 'cinematic_hero' ? 'movie' : 'series',
+          // WAS `row.type === 'cinematic_hero' ? 'movie' : 'series'`, and that
+          // is a category error twice over: row.type is a WIDGET name, so it is
+          // never 'cinematic_hero' by the time it gets here (the filter above
+          // already dropped those), and the branch that always won handed every
+          // shelf on the home the type 'series'. loadSDUIRow feeds this to
+          // safeDiscoverMeta as the per-item fallback type, which is what
+          // openDetail then asks /meta/<type>/ and /stream/<type>/ for — so a
+          // film would have been looked up as a show. That damage stayed
+          // hypothetical only because every live catalog meta happens to carry
+          // its own type (measured 29 Aug 2026: 365/365 metas across five
+          // catalogs — kids-movies, trailers-new, sports, edu-kids and anime —
+          // so the `item.type ||` fallback never fires today). Now it is the
+          // catalog's real type, which is also what builds the URL.
+          type: catalogTypeFor(row.catalogSlug),
           name: row.label,
           catalogSlug: row.catalogSlug,
         };
