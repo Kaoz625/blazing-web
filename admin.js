@@ -25,7 +25,7 @@ export async function initAdmin() {
       approveBtn.disabled = true;
       approveBtn.textContent = "Approving...";
       try {
-        const token = prompt("Enter Admin Token:");
+        const token = prompt("Enter Admin Password:");
         if (!token) throw new Error("Cancelled");
         
         const res = await fetch(`${fleetUrl}/admin/devices/${deviceId}/approve`, {
