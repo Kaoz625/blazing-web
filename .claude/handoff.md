@@ -1,4 +1,19 @@
-Working on: Self-service onboarding — "Request Access" and "Enter Invite Code" buttons on the web profile gate.
+Working on: BRK-12 rating-gap sweep — Discover screen was showing every title unfiltered.
+Last action: `0b9f7a2` (pushed). `openDiscover()` in `app.js` (~line 438) built
+`cards` from `embyMetaSafe()` (which already decodes `contentRating`) but never
+called `ratingAllowed()` on it — every OTHER row-building path in the file
+does. One-line fix, same pattern as `appendEmbyRow`/etc. Verified: `node --check`
+clean, ran all 11 `*.smoke.mjs` files, 2 pre-existing failures
+(`pinpad.smoke.mjs` 3 failed, `search.smoke.mjs` TimeoutError) confirmed via
+`git stash` to reproduce identically on the commit before this change — not
+caused by it, not investigated further (out of scope for this task).
+Next step: none required for this fix. The pinpad/search test failures are a
+separate, real, pre-existing gap worth a look next session — not yet in the
+register as their own item.
+Key files: `app.js` (`openDiscover`, ~line 407-443).
+Blockers: none.
+
+## Earlier: self-service onboarding — "Request Access" and "Enter Invite Code" buttons on the web profile gate.
 Last action: 5a571a8 (pushed). profile.js's gate no longer auto-registers a
 browser the instant the page loads. A first-time visitor now sees a welcome
 screen with two buttons: Request Access (same registration as before, but
