@@ -1,14 +1,14 @@
 # Handoff — blazing-web — 2026-08-29 05:10
 
 Working on: "only the first row pops out, all rows should do this, on all devices" (Markus).
-Last action: DONE and LIVE. Verified by content on https://blazingstream.lyreosai.com/app/.
+Last action: pop-out now fills a synopsis and plays a trailer. 6acf3cc, deployed, verified live.
 Next step: `cd ~/Desktop/blazing-web && node locker.smoke.mjs` — then fix it the same way (see DEP-11).
 
 ## STATE
 
 | repo | sha | clean | pushed |
 |---|---|---|---|
-| blazing-web | 091db56 | yes | yes |
+| blazing-web | 6acf3cc | yes | yes |
 | blazing-site | b5036ae | yes | yes (dist/ is gitignored; deployed by wrangler) |
 
 ## What shipped
@@ -26,6 +26,26 @@ Next step: `cd ~/Desktop/blazing-web && node locker.smoke.mjs` — then fix it t
 - `rowhero.smoke.mjs` — new, 9 assertions, all pass. PROVED to catch the bug:
   restoring `heroRowClaimed` takes it from 9/0 to 2/2.
 - `home.smoke.mjs` — was failing, and it was NOT the pop-out. Fixed. Closes DEP-9.
+
+## Then: the pop-out was empty (6acf3cc)
+
+A CATALOG META CARRIES ALMOST NOTHING. Over the 300 live metas of
+blazing-movies: description 129, imdbRating 39, runtime 0, certification 0,
+**trailerUrl 0**. Nothing in this system has ever sent a `trailerUrl` - not the
+catalog route, not `/meta/` - so `attachHoverTrailer` AND `startDetailTrailer`
+both returned on their `!meta.trailerUrl` guard on every title. The detail
+dialog's trailer had never played either.
+
+`/meta/` carries `trailers: [{source: '<11-char YouTube id>'}]`. A bare id.
+**A YouTube id cannot go in a `<video>`** - it needs a youtube-nocookie iframe,
+muted, and looped via `playlist` or it plays once. `makeTrailerNode()` handles
+both shapes. The card fetches `/meta/` on dwell: 550ms text, 1400ms video,
+cached, only inside a `.row-hero`, skipped for Emby ids and anything not
+`tt<digits>` (156 of 300 qualify).
+
+REDDIT CANNOT BE FETCHED FROM THIS MACHINE. Every route hits "Prove your
+humanity" - curl, .json, old.reddit, r.jina.ai, headless and HEADED real Chrome,
+and a real logged-in cookie jar. Do not try again; ask Markus to paste it.
 
 ## THE TWO THINGS THAT COST THE MOST TIME
 
