@@ -1,46 +1,59 @@
-Working on: blazing-web (the live public PWA) — 4K Upscale button UX, the upscale host/contract, and the proxy resolver moved from the default play path to a fallback.
+# Handoff — blazing-web — 2026-08-29 05:10
 
-Last action: Edited app.js, styles.css, index.html, sw.js (CACHE v7 -> v8) and added upscale.smoke.mjs.
-All three smoke tests green: locker 35/0, watch-party 15/0, upscale 50/0. NOT committed, NOT pushed —
-the orchestrator owns git for this run.
+Working on: "only the first row pops out, all rows should do this, on all devices" (Markus).
+Last action: DONE and LIVE. Verified by content on https://blazingstream.lyreosai.com/app/.
+Next step: `cd ~/Desktop/blazing-web && node locker.smoke.mjs` — then fix it the same way (see DEP-11).
 
-Next step:
-  1. Read the diff:  cd "/Users/markususche/Desktop/blazing-web" && git diff
-  2. Re-run the checks: node upscale.smoke.mjs && node locker.smoke.mjs && node watch-party.smoke.mjs
-  3. Commit + push (push auto-deploys GitHub Pages).
+## STATE
 
-Key files:
-  - /Users/markususche/Desktop/blazing-web/app.js       (upscale module ~L455-620, player fallback ~L690-800)
-  - /Users/markususche/Desktop/blazing-web/styles.css   (.secondary-button.is-spent, .toast-host/.toast)
-  - /Users/markususche/Desktop/blazing-web/index.html   (aria-pressed on #detail-upscale)
-  - /Users/markususche/Desktop/blazing-web/sw.js        (CACHE = blazing-shell-v8)
-  - /Users/markususche/Desktop/blazing-web/upscale.smoke.mjs  (new, 50 checks)
+| repo | sha | clean | pushed |
+|---|---|---|---|
+| blazing-web | 091db56 | yes | yes |
+| blazing-site | b5036ae | yes | yes (dist/ is gitignored; deployed by wrangler) |
 
-Blockers:
-  1. THE WEB UPSCALE BUTTON CANNOT WORK UNTIL THE BACKEND SENDS CORS HEADERS.
-     Measured 26 Aug 2026:
-       OPTIONS https://upscale.lyreosai.com/api/upscale/request  -> 405, allow: POST, no access-control-* header
-       POST    (same URL)                                        -> 200, still no access-control-allow-origin
-     Content-Type: application/json forces a preflight, the preflight 405s, so the browser never
-     sends the POST. Roku / tvOS / Fire TV are native and unaffected. Fix belongs in the upscale
-     FastAPI service (CORSMiddleware, allow the Pages origin). The client is already correct and
-     starts working the moment CORS lands.
-  2. GET https://upscale.lyreosai.com/api/upscale/status -> 404. Not deployed. Handled gracefully
-     (button keeps its normal label), but the "already requested" label will not appear until the
-     route ships.
-  3. GET https://addon.lyreosai.com/proxy/resolve -> 404 and /proxy/resolve/redirect -> 404.
-     Neither is deployed. That is fine now: the resolver is only a fallback.
+## What shipped
 
-Facts worth keeping:
-  - The deployed POST response has NO "count" field and its message reads
-    "'<title>' has been added to the AI Queue and is awaiting Admin approval." — it does NOT say
-    "Requested N times". The client falls back to a count of 1. The message is matched strictly
-    (/requested\s+(\d+)\s+time/i) so a title like "Dune 2" cannot be misread as a count of 2.
-  - `meta` has no `.title` — safeMeta() produces `.name`. The old status call sent the literal
-    string "undefined".
-  - #detail-dialog is opened with showModal(), so a body-level popup draws UNDER it at any
-    z-index. The toast host is moved into the open dialog for exactly this reason.
-  - FIXED A PRE-EXISTING LIVE BUG: `adminView` was read by showRoute() on every navigation but
-    never declared, so under 'use strict' every route change threw ReferenceError before
-    updateNavigation() and closeDrawer() could run. Proven on a pristine HEAD checkout with
-    locker.smoke.mjs. One line: `const adminView = $('#admin-view');`
+- `app.js` — `claimHeroRow()` lost the `heroRowClaimed` single-claim flag, so EVERY
+  qualifying row expands, not the first one. The `background` check STAYS: a Live TV
+  channel-logo row has no backdrop, so expanding one opens an empty black panel.
+- `app.js` — `appendEmbyRow()` now calls `claimHeroRow()`. It never did. On a browser
+  still waiting for fleet approval the three Emby shelves are the ONLY rows on screen.
+- `styles.css` — expanded card capped at `clamp(240px, 24vw, 316px)`. With every row
+  expanding, a card taller than its row would shove the page down on each pointer
+  crossing. Measured: 197.5px inside a 282px row, the row below moves 0px.
+- `styles.css` — the `<=640px` breakpoint no longer switches the treatment off on
+  phones. `min(74vw, 280px)`. Measured at 390x844: 118px -> 280px, row 222.0 -> 222.0.
+- `rowhero.smoke.mjs` — new, 9 assertions, all pass. PROVED to catch the bug:
+  restoring `heroRowClaimed` takes it from 9/0 to 2/2.
+- `home.smoke.mjs` — was failing, and it was NOT the pop-out. Fixed. Closes DEP-9.
+
+## THE TWO THINGS THAT COST THE MOST TIME
+
+**1. A push does not reach the URL Markus uses.** `git push` updates GitHub Pages only.
+`https://blazingstream.lyreosai.com/app/` is a SEPARATE Cloudflare Pages copy:
+
+    cd ~/Desktop/blazing-site && ./build.sh
+    npx wrangler pages deploy dist --project-name blazingstream --branch main
+
+`build.sh` does `rm -rf dist` first, so check the four installers exist before running
+it. Verify by CONTENT, never by status — that host 200s on any path. (DEP-10)
+
+**2. A ROW TEST MUST CHOOSE WHO IS WATCHING.** `ratingAllowed()` defaults `profileCap`
+to `'general'` while nobody has chosen a profile, and refuses an UNRATED title under a
+kids cap. So a fixture whose metas carry no `contentRating` has every row emptied, every
+loader removes its own section, and the page reads "Nothing is available right now."
+with NO error thrown. That is the parental gate working exactly as written. Dispatch
+`blazing-profile-selected` and remove the `.bp-layer` overlay (it swallows the pointer).
+
+Two more fixture traps: `safeMeta()` runs art through `safeHttpsUrl()`, https ONLY, so a
+`data:` URI arrives as `background` undefined and no row can qualify as a hero; and
+`loadSDUIRow()` asks for `/catalog/tv/<slug>.json` for EVERY row whatever its real type.
+
+## Key files
+app.js (claimHeroRow ~line 228, loadSDUIRow, appendEmbyRow), styles.css (~line 319
+`.row-hero`), rowhero.smoke.mjs, home.smoke.mjs
+
+## Blockers
+None for the pop-out. Pre-existing and untouched: locker.smoke.mjs, upscale.smoke.mjs
+and watch-party.smoke.mjs all time out, and fail identically on a pristine HEAD
+worktree — almost certainly the same two causes fixed above. (DEP-11)
