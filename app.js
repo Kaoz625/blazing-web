@@ -1145,9 +1145,22 @@ function attachHoverTrailer(card, meta) {
   };
 
   const begin = () => {
-    // Only where the panel is visible. Outside a .row-hero this would fetch a
-    // payload and start a video behind a poster nobody can see through.
-    if (!card.closest('.row-hero')) return;
+    // Where the preview can actually be SEEN. Two places qualify, and they show
+    // different amounts of it:
+    //
+    //   .row-hero       — the card widens to 16/10 and the text panel opens too.
+    //   .search-results — the poster GRID (search, Emby, Discover, Requests).
+    //                     The card cannot widen here without breaking a 5-across
+    //                     grid, and DebridStream's own search is a plain poster
+    //                     grid for the same reason. So the trailer plays in place
+    //                     and the text panel stays shut: .card-trailer-wrap is
+    //                     `position:absolute; inset:0` over an opaque black, so it
+    //                     needs no room of its own, and .card-hero-content is only
+    //                     revealed by the `.row-hero .card:hover` rule, which a
+    //                     grid card never matches.
+    //
+    // Markus, 2026-08-30: "even when you search for the movie."
+    if (!card.closest('.row-hero, .search-results')) return;
     clearTimeout(textTimer); clearTimeout(videoTimer);
 
     textTimer = setTimeout(async () => {
@@ -2321,27 +2334,51 @@ function closePlayer() {
  * loadContinueWatching PREPENDS its row, so it lands above whatever the shelves
  * have already drawn, whichever finishes first.
  */
-async function loadContinueWatching() {
-  const profileId = localStorage.getItem('profileId');
+async function loadContinueWatching(explicitProfileId) {
+  const profileId = explicitProfileId || localStorage.getItem('profileId');
   if (!profileId) return;
   try {
     const res = await fetch(`${API_BASE}/api/sync/progress/recent?profileId=${profileId}`);
     const data = await res.json();
     if (data.items && data.items.length) {
       const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
+      section.dataset.rowId = 'continue-watching';
+      // Exactly ONE of these, ever. boot() and the profile-selected listener can
+      // both reach here in a single session, and a second prepend would stack a
+      // second Continue Watching on top of the first.
+      const stale = rowsWrap.querySelector('[data-row-id="continue-watching"]');
+      if (stale) stale.remove();
       rowsWrap.prepend(section);
       const track = $('.row-track', section);
-      const metas = data.items.map(safeDiscoverMeta).filter(Boolean);
-      track.replaceChildren(...metas.map((m) => {
-        const c = buildCard(m);
-        if (m.progress) {
+      // Keep the RAW item beside the safe one. safeMeta() is an allow list and
+      // `progress` is not on it, so `m.progress` below was undefined for every
+      // card and the resume bar never drew once — the row whose whole job is to
+      // show how far you got showed no position at all. Widening the allow list
+      // would change every other caller's shape; this does not.
+      const pairs = data.items
+        .map((raw) => ({ raw, meta: safeDiscoverMeta(raw) }))
+        .filter((pair) => pair.meta);
+      const metas = pairs.map((pair) => pair.meta);
+      track.replaceChildren(...pairs.map(({ raw, meta }) => {
+        const c = buildCard(meta);
+        const seen = raw && raw.progress;
+        // A zero or missing duration is the API saying it does not know, not
+        // "0% watched" — a bar of NaN width renders as a full one.
+        if (seen && Number(seen.duration) > 0) {
           const bar = document.createElement('div');
           bar.className = 'progress-bar';
-          bar.innerHTML = `<div class="progress-fill" style="width: ${Math.min(100, (m.progress.position / m.progress.duration) * 100)}%"></div>`;
+          const pct = Math.max(0, Math.min(100, (Number(seen.position) / Number(seen.duration)) * 100));
+          bar.innerHTML = `<div class="progress-fill" style="width: ${pct}%"></div>`;
           c.appendChild(bar);
         }
         return c;
       }));
+      // Continue Watching was the ONE card-building path in this file that never
+      // called this, so the row could never carry .row-hero and its posters never
+      // expanded or played a trailer — while the identical titles one row down,
+      // in Trending, did. Markus, 2026-08-30: "embry continue watching all the
+      // posters. even when you search for the movie."
+      claimHeroRow(section, metas);
     }
   } catch (e) {}
 }
@@ -2870,6 +2907,37 @@ document.addEventListener('blazing-profile-selected', () => {
   (async () => {
     if (!(await bootFromSDUI())) await bootFromShelves();
   })();
+});
+
+/**
+ * Continue Watching, for the profile that was just picked.
+ *
+ * THIS ROW HAS NEVER RENDERED FOR ANYBODY. loadContinueWatching() returns at its
+ * first line unless `localStorage.profileId` is set, and profile.js — the gate
+ * every real device goes through — NEVER writes that key (grepped: the only two
+ * writers in the whole app are boot()'s legacy #profile-picker at the two lines
+ * above, a dialog the modern gate never opens). So `profileId` was null on every
+ * device, on every visit, and the row was skipped in silence. Markus, 2026-08-30:
+ * "embry continue watching all the posters." There were no posters to hover.
+ *
+ * The event carries the id, so take it from there and persist it — the next
+ * boot() then draws the row on the first paint instead of waiting for a pick.
+ *
+ * Registered AFTER the household listener above on purpose: that one removes
+ * every `section:not([data-emby-row])`, and Continue Watching is one of those. It
+ * ran on a first-time device and wiped a row nothing rebuilt.
+ *
+ * It also runs on EVERY selection, outside that listener's own early return, so
+ * switching profile swaps the row instead of leaving the previous profile's
+ * history on screen under a new name.
+ */
+document.addEventListener('blazing-profile-selected', (event) => {
+  const id = ((event && event.detail) || {}).id;
+  if (!id) return;
+  localStorage.setItem('profileId', String(id));
+  const stale = rowsWrap.querySelector('[data-row-id="continue-watching"]');
+  if (stale) stale.remove();
+  loadContinueWatching(String(id));
 });
 
 /* ---- Comics ------------------------------------------------------------- */
