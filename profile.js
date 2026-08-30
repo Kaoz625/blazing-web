@@ -104,12 +104,8 @@
       .bp-welcome[hidden], .bp-invite[hidden], .bp-create[hidden] { display: none; }
       .bp-profile-add { border-style: dashed; border-color: rgba(255,255,255,.22); }
       /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
-         else is drawn." Two things kept deliberately different, not missed:
-         (1) no per-profile art — the reference swaps a whole poster behind
-         each profile, which needs a "this profile's featured title" concept
-         this app has no data for yet, so the background is a tinted gradient
-         instead of a lie about having art it doesn't; (2) the rating/PIN
-         meta line stays on each row — the reference shows only a name, but
+         else is drawn." One thing kept deliberately different, not missed:
+         the rating/PIN meta line stays on each row — the reference shows only a name, but
          "which profile needs a PIN" and "what's this one capped at" are real
          answers Markus's household needs, not decoration to cut for parity.
          Everything else here is CSS only — no line in this file's actual
@@ -123,6 +119,23 @@
         display: flex;
         align-items: stretch;
         background: radial-gradient(120% 100% at 0% 0%, rgba(255,61,71,.16), transparent 55%), #08080a;
+      }
+      /* The per-profile art, swapped as the focus moves down the rail. It is
+         the FIRST child of the layer and pointer-events:none, so it can never
+         take a click or a focus stop away from the gate — this is the parental
+         control surface, and a decoration must not be reachable on it. The
+         gradient on .bp-layer stays underneath, so a profile with no history,
+         or a profile server that did not answer, looks deliberate rather than
+         broken. Its ::after keeps the rail readable over a photograph. */
+      .bp-art {
+        position: absolute; inset: 0; z-index: 0; pointer-events: none;
+        background-position: center; background-size: cover; background-repeat: no-repeat;
+        opacity: 0; transition: opacity .45s ease;
+      }
+      .bp-art[data-shown="true"] { opacity: .5; }
+      .bp-art::after {
+        content: ""; position: absolute; inset: 0;
+        background: linear-gradient(90deg, #08080a 0%, rgba(8,8,10,.88) 30%, rgba(8,8,10,.4) 66%, rgba(8,8,10,.6) 100%);
       }
       .bp-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: transparent; }
       .bp-panel {
@@ -310,6 +323,98 @@
     }));
   }
 
+  /**
+   * The art behind the rail, per profile, taken from that profile's own last
+   * watched title — DebridStream swaps a whole poster behind each profile, and
+   * this screen drew one flat gradient for everybody because the comment above
+   * said the app "has no data for it yet". It does: the fleet keeps per-profile
+   * progress at GET /profiles/:id/progress and every item carries a
+   * `background` URL.
+   *
+   * Three rules, all deliberate:
+   *
+   * 1. NOT FOR AN ADULT-ENABLED PROFILE. The gate is the screen the whole
+   *    household stands in front of, and the progress payload carries NO
+   *    contentRating — sanitizeProgressPayload (firetv/server/profiles.js)
+   *    keeps id, name, poster, type, progress, positionSecs, videoId,
+   *    background and updatedAt, and drops everything else. So there is no way
+   *    to filter one title out; the only honest filter is the profile itself.
+   * 2. IT NEVER BLOCKS THE GATE. Started after the rail is already on screen,
+   *    never awaited by selectProfile, and every failure leaves the gradient
+   *    exactly as it was. A slow profile server must not slow down choosing a
+   *    profile.
+   * 3. THE FRESHEST ITEM IS PICKED HERE. getProgress returns the stored order
+   *    capped at MAX_PROGRESS_ITEMS and does not sort — there is no
+   *    server-side recency, so "last watched" is this client's own decision.
+   */
+  function artEligible(profile) {
+    return Boolean(profile)
+      && profile.allowAdult !== true
+      && String(profile.maxRating || '').toLowerCase() !== 'adult';
+  }
+
+  function httpsArt(value) {
+    const raw = text(value);
+    if (!raw) return '';
+    try {
+      const url = new URL(raw, window.location.href);
+      return url.protocol === 'https:' ? url.href : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function freshestArt(body) {
+    const items = body && body.progress && Array.isArray(body.progress.items)
+      ? body.progress.items
+      : [];
+    let best = null;
+    for (const item of items) {
+      const art = httpsArt(item && (item.background || item.poster));
+      if (!art) continue;
+      const when = Date.parse((item && item.updatedAt) || '') || 0;
+      if (!best || when > best.when) best = { art, when };
+    }
+    return best ? best.art : '';
+  }
+
+  function showProfileArt(profile) {
+    if (!ui.art) return;
+    const art = profile && profile.artUrl;
+    if (!art) {
+      ui.art.dataset.shown = 'false';
+      return;
+    }
+    // Quotes are the only character that can break out of url("…"); a URL that
+    // reached here already passed httpsArt(), which is a real URL parse.
+    ui.art.style.backgroundImage = `url("${art.replace(/"/g, '%22')}")`;
+    ui.art.dataset.shown = 'true';
+  }
+
+  async function loadProfileArt() {
+    const credentials = state.credentials;
+    if (!credentials || !ui.art) return;
+    // A refresh replaces state.profiles with a NEW array, so holding the old one
+    // is how a late answer knows it is answering a question nobody asked any more.
+    const generation = state.profiles;
+    try {
+      await Promise.all(generation.filter(artEligible).map(async (profile) => {
+        const result = await request(
+          `/profiles/${encodeURIComponent(profile.id)}/progress?deviceId=${encodeURIComponent(credentials.id)}`,
+          { headers: { 'X-Device-Token': credentials.token } },
+        );
+        if (result.ok) profile.artUrl = freshestArt(result.body);
+      }));
+      if (state.profiles !== generation) return;
+      const opening = generation.find((profile) => (
+        state.activeProfile && profile.id === state.activeProfile.id && profile.artUrl
+      )) || generation.find((profile) => profile.artUrl);
+      if (opening) showProfileArt(opening);
+    } catch {
+      // Decoration. It is never worth a broken gate.
+    }
+  }
+
   function renderProfileList() {
     ui.profiles.replaceChildren();
     const profiles = state.profiles;
@@ -329,6 +434,11 @@
       button.append(avatar, copy);
       if (profile.hasPin) button.append(element('span', 'bp-profile-tag', 'PIN'));
       button.addEventListener('click', () => selectProfile(profile));
+      // Hover AND focus: a mouse hovers, a television remote only ever focuses,
+      // and the art has to follow both or it follows neither on a TV.
+      const swap = () => showProfileArt(profile);
+      button.addEventListener('mouseenter', swap);
+      button.addEventListener('focus', swap);
       ui.profiles.appendChild(button);
     });
     // Only once this browser is confirmed approved — a pending browser's own
@@ -783,6 +893,8 @@
     }
     setStatus('Choose who is watching.', 'info');
     window.setTimeout(() => ui.profiles.querySelector('.bp-profile')?.focus(), 0);
+    // Deliberately not awaited: the rail is already usable, and this is art.
+    loadProfileArt();
   }
 
   async function connectProfiles() {
@@ -966,6 +1078,9 @@
     ui.layer = element('section', 'bp-layer');
     ui.layer.hidden = true;
     ui.layer.setAttribute('aria-hidden', 'true');
+    ui.art = element('div', 'bp-art');
+    ui.art.dataset.shown = 'false';
+    ui.art.setAttribute('aria-hidden', 'true');
     const backdrop = element('button', 'bp-backdrop');
     backdrop.type = 'button';
     backdrop.setAttribute('aria-label', 'Close profile panel');
@@ -1104,7 +1219,8 @@
     const keepBrowsing = ui.keepBrowsing;
     footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing);
     panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.createProfile, ui.profiles, ui.pin, footer);
-    ui.layer.append(backdrop, panel);
+    // Art FIRST, so the close-catcher and the rail both paint over it.
+    ui.layer.append(ui.art, backdrop, panel);
     document.body.appendChild(ui.layer);
 
     ui.connect.addEventListener('click', () => {
