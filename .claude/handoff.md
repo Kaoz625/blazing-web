@@ -68,3 +68,32 @@ for f in *.smoke.mjs; do node "$f"; sleep 2; done
   `firetv/apple`. blazing-tvos is older, 3x the code, and has PIN gate, Watch
   Party, Top Shelf, Search, Live TV and a real test target that firetv/apple has
   none of. Archiving a repo is not reversible, so it is waiting on a yes.
+
+---
+
+## TV packaging lane — 2026-08-30 12:37
+
+Working on: rebuilding the stale Samsung `.wgt` and LG `.ipk`.
+Last action: pushed `5c97791` — build-tvs.sh no longer stages `.claude/` or `.omc/`.
+Next step: nothing blocking. To rebuild: `cd /Users/markususche/Desktop/blazing-web && ./build-tvs.sh`
+Key files: `build-tvs.sh`, `dist/` (gitignored — packages are never committed).
+Blockers: none.
+
+Both packages were Aug 29 07:42 and contained none of today's five commits.
+Rebuilt; both are now signed, 0.27 MiB, and `index.html`/`profile.js`/`app.js`
+inside them are byte-identical md5 to the working tree.
+
+**The thing worth remembering:** every TV package this repo ever shipped
+contained `.claude/handoff.md` and `.omc/` — this file, on a television, and in
+a public deploy. `build-tvs.sh` stages with an rsync exclude list and every
+entry on it was a name you can see in `ls`, so the dotdirs walked straight past
+it. Same bug the script's own header says it fixed on 27 Aug, one layer down.
+No credential was in any of it (scanned: long quoted strings, `sk-`/`ghp_`/
+`AKIA`/`xox`/`AIza`, PEM headers, key/secret/token/password assignments — zero
+hits), so it was disclosure of internal notes, not a leak. Staged file count
+went 43 -> 24.
+
+**Unchecked, and outside this repo's script:** build-tvs.sh's own comment says
+to keep its exclude list in step with what Cloudflare Pages is given. If Pages
+is fed the repo root the same way, the live site is serving this file too.
+Worth one look by whoever owns the Pages config.
