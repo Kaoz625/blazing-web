@@ -198,6 +198,61 @@ ok(logoRowIsPlain !== false, 'a row with no backdrop art does NOT expand', logoR
 // card that had not moved at all - 164x238, the resting size - because the
 // element that carries the width is not the one `.card` matches. Playwright can
 // move a real pointer, so it does. Nothing here trusts the arithmetic.
+/**
+ * Hover, and do not measure until the card has actually finished growing.
+ *
+ * WHY THIS EXISTS. Both width checks here — the desktop one and the phone one —
+ * failed about one run in three at 118px and 158px, the RESTING widths, which
+ * reads exactly like "the expand is broken" and is not. A width trace taken
+ * every 150ms after the pointer landed says what really happens:
+ *
+ *     H118px H118px H118px H118px H280px H280px H280px H280px
+ *
+ * The card is hovered (H) for about 600ms at its resting width and then jumps
+ * straight to the final 280px — no in-between values at all. That is headless
+ * Chromium painting when it feels like it: a CSS transition only advances on a
+ * frame, and with the test idle in a `waitForTimeout` no frames are asked for,
+ * so the transition sits at 0% and then snaps to 100% on the next frame. The
+ * old fixed `waitForTimeout(700)` was a coin toss against that ~600ms stall,
+ * and when it lost it measured a resting card and called the feature broken.
+ *
+ * So wait for the THING, not for a duration: hover, confirm the browser agrees
+ * the card is `:hover` (retrying, because a pointer can land beside a card the
+ * row-track is still settling), then wait for the computed width to leave its
+ * resting value AND then hold still for two polls. Both halves are needed: "not
+ * resting any more" alone caught a card in flight and measured 176px of a
+ * 158->316px grow. A card that never expands still fails the check — it just
+ * fails after a real 4s wait instead of a hopeful 700ms one.
+ *
+ * `polling: 100` on both waits, NOT the default `raf`: no frames is the very
+ * condition being waited out, so an rAF-driven poll would be asleep for exactly
+ * as long as the thing it is watching for. A timer poll runs anyway, and its
+ * `getComputedStyle` forces the style recalc that moves the transition on.
+ */
+async function hoverHot(page, card, settle = 0) {
+  const rest = await card.evaluate((c) => { delete c.__lastW; return getComputedStyle(c).width; });
+  let hot = false;
+  for (let attempt = 0; attempt < 3 && !hot; attempt++) {
+    await card.hover().catch(() => {});
+    hot = await page.waitForFunction((c) => c.matches(':hover'), card, { timeout: 1500, polling: 100 })
+      .then(() => true).catch(() => false);
+    if (!hot) { await page.mouse.move(5, 5); await page.waitForTimeout(150); }
+  }
+  if (hot) {
+    await page.waitForFunction(
+      ([c, w]) => {
+        const now = getComputedStyle(c).width;
+        if (now === w) return false;          // still resting
+        if (c.__lastW === now) return true;   // two polls the same: it has settled
+        c.__lastW = now;                      // still moving
+        return false;
+      }, [card, rest], { timeout: 4000, polling: 100 },
+    ).catch(() => {});
+  }
+  if (settle) await page.waitForTimeout(settle);
+  return hot;
+}
+
 const heroEls = await page.$$('#rows .row.row-hero');
 let measured = null;
 if (heroEls.length >= 2) {
@@ -208,8 +263,7 @@ if (heroEls.length >= 2) {
       const b = r.nextElementSibling;
       return { row: r.getBoundingClientRect().height, below: b ? b.getBoundingClientRect().top : 0 };
     }, row);
-    await card.hover();
-    await page.waitForTimeout(700);   // the expand is a transition, not a jump
+    await hoverHot(page, card);
     const after = await page.evaluate(({ r, c }) => {
       const b = r.nextElementSibling;
       // The widest box inside the card is what actually grew; `.card` itself may
@@ -248,8 +302,7 @@ const filled = await (async () => {
   const rows = await page.$$('#rows .row.row-hero');
   const card = rows.length ? await rows[0].$('.card') : null;
   if (!card) return null;
-  await card.hover();
-  await page.waitForTimeout(2600);   // past DWELL_MS (550) and HOVER_TRAILER_MS (1400)
+  await hoverHot(page, card, 2600);   // past DWELL_MS (550) and HOVER_TRAILER_MS (1400)
   return page.evaluate((c) => ({
     synopsis: (c.querySelector('.card-synopsis') || {}).textContent || '',
     metaLine: (c.querySelector('.card-meta-line') || {}).textContent || '',
@@ -288,8 +341,7 @@ const phone = await (async () => {
   await page.mouse.move(5, 5);
   await page.waitForTimeout(400);
   const before = await page.evaluate((r) => ({ row: r.getBoundingClientRect().height, card: r.querySelector('.card').getBoundingClientRect().width }), row);
-  await card.hover();
-  await page.waitForTimeout(700);
+  await hoverHot(page, card);
   const after = await page.evaluate((r) => {
     const c = r.querySelector('.card');
     const boxes = [c, ...c.querySelectorAll('*')].map((n) => n.getBoundingClientRect());

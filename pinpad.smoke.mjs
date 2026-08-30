@@ -31,6 +31,21 @@ const check = (n, pass, d = '') => { results.push(pass); console.log(`${pass ? '
 const browser = await chromium.launch({ executablePath: CHROME });
 const ctx = await browser.newContext();
 
+// A DEVICE IDENTITY, seeded before the first byte of profile.js runs.
+// boot() no longer registers by itself — profile.js:1181, "A browser that has
+// never registered gets the welcome screen instead of a silent auto-
+// registration". That product change (deliberate, and correct: Request Access is
+// what creates a pending device now) is what broke this file: with no stored
+// credentials the gate showed Get Access, /profiles was never called, so the
+// pending screen that OWNS the "I am the owner" button never appeared, and
+// openOwnerPin() would have refused anyway because state.credentials was null.
+// Three checks failed for that one reason and none of them was about the pad.
+// This puts the test back on the branch it was written for.
+await ctx.addInitScript(() => {
+  localStorage.setItem('blazing-web-profile-device-v1',
+    JSON.stringify({ id: 'dev-1', token: 'tok' }));
+});
+
 // The fleet, stubbed. The PIN VALUE is never sent to a real server from a test:
 // it is verified server-side against a scrypt hash, and burning the live route
 // costs 1 of only 5 attempts per hour per IP AND per device.
@@ -133,6 +148,35 @@ check('it accepted exactly 7 of the 8 digits typed', typed.dotsAfter === 7,
   `filled=${typed.dotsAfter}, aria says "${typed.label}"`);
 
 await page.screenshot({ path: process.env.SHOT || '/tmp/pinpad.png' });
+
+// ── and the rule the seed above leans on, pinned ─────────────────────────────
+// Everything above runs as an ALREADY-REGISTERED browser, because that is the
+// only branch the owner PIN exists on. That seed is only honest if the other
+// branch is what profile.js says it is, so this proves it instead of assuming
+// it: a browser with NO stored identity must land on the welcome screen and
+// must NOT touch the fleet. Silent auto-registration is what this replaced —
+// it enrolled a pending device for anyone who merely opened the page.
+const fresh = await browser.newContext();
+const freshSeen = [];
+await fresh.route('https://fleet.lyreosai.com/**', (route) => {
+  freshSeen.push(route.request().method() + ' ' + route.request().url().replace('https://fleet.lyreosai.com', ''));
+  return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+});
+await fresh.route('https://addon.lyreosai.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+const freshPage = await fresh.newPage();
+await freshPage.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
+await freshPage.waitForTimeout(2500);
+const freshView = await freshPage.evaluate(() => ({
+  welcome: !(document.querySelector('.bp-welcome') || { hidden: true }).hidden,
+  padShown: !(document.querySelector('.bp-pin') || { hidden: true }).hidden,
+}));
+check('a never-registered browser gets the welcome screen', freshView.welcome,
+  `welcome=${freshView.welcome} pad=${freshView.padShown}`);
+check('and it registers NOTHING until the viewer asks',
+  !freshSeen.some((c) => c.includes('/agent/register')),
+  freshSeen.join(', ') || 'no fleet calls at all');
+await fresh.close();
+
 await browser.close(); server.close();
 const failed = results.filter((r) => !r).length;
 console.log(`\n${results.length - failed} passed, ${failed} failed`);

@@ -140,6 +140,22 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 // scripts, which is what lets it win the `window.BLAZING_FLEET_BASE ||` default.
 if (!LIVE) await page.addInitScript(() => { window.BLAZING_FLEET_BASE = location.origin; });
 
+// AND a device identity, because boot() no longer registers one by itself.
+// profile.js:1181 now reads: "A browser that has never registered gets the
+// welcome screen instead of a silent auto-registration — Request Access is what
+// creates the pending device now". That was a deliberate product change, and it
+// made this file hang: with no stored credentials the gate draws Get Access, the
+// profile list is never fetched, and the `.bp-profile` click below timed out
+// after 15s with a TimeoutError that read like a broken search screen.
+// Seeding the same key profile.js reads (DEVICE_STORAGE_KEY) puts this test back
+// on the branch it was written for — an already-registered browser.
+if (!LIVE) {
+  await page.addInitScript(() => {
+    localStorage.setItem('blazing-web-profile-device-v1',
+      JSON.stringify({ id: 'qa-smoke-device', token: 'qa-smoke-token' }));
+  });
+}
+
 // Every UNCAUGHT EXCEPTION, collected from before the first byte of app.js
 // runs. A ReferenceError thrown at boot is the failure mode that removing a
 // script tag causes, and it is silent to a human who only looks at one screen.
@@ -161,9 +177,10 @@ page.on('console', (m) => {
 await page.goto(base, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(1200);
 
-// boot() (profile.js:806) opens the gate on every load. Clear it before anything
-// below tries to click through it — see the mock's comment above for why this
-// is a fake local profile rather than the real household one.
+// boot() opens the gate on every load. Clear it before anything below tries to
+// click through it — see the mock's comment above for why this is a fake local
+// profile rather than the real household one. The profile list only exists
+// because the init script above seeded a device identity.
 if (!LIVE) {
   await page.locator('.bp-profile').first().click({ timeout: 15000 });
   await page.waitForTimeout(300);
