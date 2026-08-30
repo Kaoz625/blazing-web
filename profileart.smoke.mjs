@@ -46,6 +46,10 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const NEWEST = 'https://img.invalid/newest.jpg';
 const OLDER = 'https://img.invalid/older.jpg';
 const INSECURE = 'http://img.invalid/insecure.jpg';
+// The add-on store, which is the one THIS app writes to. The televisions write
+// to the fleet. Both halves have to count.
+const ADDON_ONLY = 'https://img.invalid/addon-only.jpg';
+const ADDON_NEWER = 'https://img.invalid/addon-newer.jpg';
 
 const PROFILES = [
   { id: 'p-mark', name: 'Mark', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
@@ -53,6 +57,8 @@ const PROFILES = [
   { id: 'p-empty', name: 'Fresh', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
   { id: 'p-broken', name: 'Offline', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
   { id: 'p-http', name: 'Insecure', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
+  { id: 'p-addon', name: 'Browseronly', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
+  { id: 'p-both', name: 'Everywhere', maxRating: 'teen', hasPin: false, allowAdult: false, isKids: false },
 ];
 
 // Stored order, NOT recency order — the newest sits last on purpose. The fleet
@@ -66,6 +72,21 @@ const PROGRESS = {
   'p-empty': { items: [] },
   'p-http': { items: [
     { id: 'tt9', name: 'Insecure art', type: 'movie', background: INSECURE, updatedAt: '2026-08-29T10:00:00.000Z' },
+  ] },
+  // Watched on a television a while ago; the browser has something newer.
+  'p-both': { items: [
+    { id: 'tt20', name: 'On the TV', type: 'movie', background: OLDER, updatedAt: '2026-08-10T10:00:00.000Z' },
+  ] },
+};
+
+// The OTHER store — what this app itself writes. p-addon has nothing on any
+// television at all, which is every browser-only household.
+const ADDON = {
+  'p-addon': { items: [
+    { id: 'tt30', name: 'Only in the browser', type: 'movie', background: ADDON_ONLY, updatedAt: '2026-08-20T10:00:00.000Z' },
+  ] },
+  'p-both': { items: [
+    { id: 'tt31', name: 'In the browser, later', type: 'movie', background: ADDON_NEWER, updatedAt: '2026-08-27T10:00:00.000Z' },
   ] },
 };
 
@@ -81,9 +102,17 @@ await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));
 });
 
-await ctx.route('https://addon.lyreosai.com/**', (route) => route.fulfill({
-  status: 200, contentType: 'application/json', body: '{"metas":[],"items":[],"catalogs":[]}',
-}));
+const askedAddon = [];
+await ctx.route('https://addon.lyreosai.com/**', (route) => {
+  const u = new URL(route.request().url());
+  if (u.pathname === '/api/sync/progress/recent') {
+    const id = u.searchParams.get('profileId') || '';
+    askedAddon.push(id);
+    return route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify(ADDON[id] || { items: [] }) });
+  }
+  return route.fulfill({ status: 200, contentType: 'application/json', body: '{"metas":[],"items":[],"catalogs":[]}' });
+});
 await ctx.route('https://upscale.lyreosai.com/**', (route) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
 
@@ -143,7 +172,9 @@ ok(artNow.includes('newest.jpg'), 'and it is the LAST WATCHED title, not the fir
 ok(!artNow.includes('older.jpg'), 'the older title is not the one on screen');
 
 // ── an adult-enabled profile is never even asked ────────────────────────────
-ok(!asked.includes('p-adult'), 'an adult-enabled profile is never asked for its history', `(asked: ${asked.join(',')})`);
+ok(!asked.includes('p-adult') && !askedAddon.includes('p-adult'),
+  'an adult-enabled profile is never asked for its history, on EITHER store',
+  `(fleet: ${asked.join(',')} | addon: ${askedAddon.join(',')})`);
 ok(asked.includes('p-mark') && asked.includes('p-empty'), 'the ordinary profiles are');
 
 const focusArt = async (name) => {
@@ -176,6 +207,18 @@ ok(broken.shown === 'false', 'a profile whose history failed shows the gradient,
 await focusArt('Mark');
 const insecure = await focusArt('Insecure');
 ok(insecure.shown === 'false', 'an http:// background is refused, like every other image here', `(${insecure.image})`);
+
+// ── the two progress stores, both counted ───────────────────────────────────
+const addonOnly = await focusArt('Browseronly');
+ok(addonOnly.shown === 'true' && addonOnly.image.includes('addon-only.jpg'),
+  'a browser-only profile still gets art — nothing of it is on any television',
+  `(${addonOnly.image})`);
+
+const both = await focusArt('Everywhere');
+ok(both.image.includes('addon-newer.jpg'),
+  'when both stores answer, the NEWER one wins whichever store it came from',
+  `(${both.image})`);
+ok(!both.image.includes('older.jpg'), 'the older television record is not the one shown');
 
 // The gate still works. Everything above is decoration on a parental control.
 const gate = await page.evaluate(() => {

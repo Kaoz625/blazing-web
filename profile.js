@@ -3,6 +3,15 @@
 
 (() => {
   const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
+  // The add-on, only ever for the login art. There are TWO progress stores and
+  // they hold different halves of the same history: the televisions write to the
+  // fleet (PUT /profiles/:id/progress), and THIS app writes to the add-on
+  // (app.js POSTs /api/sync/progress and reads /api/sync/progress/recent for the
+  // Continue Watching row). Reading only the fleet would leave a browser-only
+  // household with no art at all, and reading only the add-on would ignore
+  // everything watched on a TV — so loadProfileArt() asks both and keeps
+  // whichever answer is newer.
+  const ADDON_BASE = window.BLAZING_API_BASE || 'https://addon.lyreosai.com';
   const DEVICE_STORAGE_KEY = 'blazing-web-profile-device-v1';
   const REQUEST_TIMEOUT_MS = 15000;
   const DEVICE_VERSION = 73;
@@ -364,18 +373,51 @@
     }
   }
 
-  function freshestArt(body) {
-    const items = body && body.progress && Array.isArray(body.progress.items)
-      ? body.progress.items
-      : [];
+  /**
+   * The two stores answer in two shapes: the fleet wraps its list in
+   * `progress`, the add-on returns `items` at the top level.
+   */
+  function progressItems(body) {
+    if (!body || typeof body !== 'object') return [];
+    if (body.progress && Array.isArray(body.progress.items)) return body.progress.items;
+    if (Array.isArray(body.items)) return body.items;
+    return [];
+  }
+
+  /**
+   * Newest wins, and on a tie the earlier item wins — which is what keeps the
+   * add-on's answer usable: /api/sync/progress/recent is already in recent order
+   * and its items may carry no `updatedAt` at all, so every one of them scores
+   * zero and the order it arrived in is the only recency there is.
+   */
+  function freshestArt(bodies) {
     let best = null;
-    for (const item of items) {
-      const art = httpsArt(item && (item.background || item.poster));
-      if (!art) continue;
-      const when = Date.parse((item && item.updatedAt) || '') || 0;
-      if (!best || when > best.when) best = { art, when };
+    for (const body of bodies) {
+      for (const item of progressItems(body)) {
+        const art = httpsArt(item && (item.background || item.poster));
+        if (!art) continue;
+        const when = Date.parse((item && item.updatedAt) || '') || 0;
+        if (!best || when > best.when) best = { art, when };
+      }
     }
     return best ? best.art : '';
+  }
+
+  async function addonProgress(profileId) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(
+        `${ADDON_BASE}/api/sync/progress/recent?profileId=${encodeURIComponent(profileId)}`,
+        { headers: { Accept: 'application/json' }, signal: controller.signal, mode: 'cors', credentials: 'omit', cache: 'no-store' },
+      );
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function showProfileArt(profile) {
@@ -399,11 +441,14 @@
     const generation = state.profiles;
     try {
       await Promise.all(generation.filter(artEligible).map(async (profile) => {
-        const result = await request(
-          `/profiles/${encodeURIComponent(profile.id)}/progress?deviceId=${encodeURIComponent(credentials.id)}`,
-          { headers: { 'X-Device-Token': credentials.token } },
-        );
-        if (result.ok) profile.artUrl = freshestArt(result.body);
+        const [fleet, addon] = await Promise.all([
+          request(
+            `/profiles/${encodeURIComponent(profile.id)}/progress?deviceId=${encodeURIComponent(credentials.id)}`,
+            { headers: { 'X-Device-Token': credentials.token } },
+          ),
+          addonProgress(profile.id),
+        ]);
+        profile.artUrl = freshestArt([fleet.ok ? fleet.body : null, addon]);
       }));
       if (state.profiles !== generation) return;
       const opening = generation.find((profile) => (
