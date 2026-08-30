@@ -1,99 +1,70 @@
-# blazing-web handoff
+# blazing-web handoff — 2026-08-30
 
-Working on: the smoke suite. Five red or silently-vacuous checks across four
-files — every one of them the TEST being wrong, not the app.
-Last action: `9b3794a` and `17650aa`, both pushed. origin/main 0 ahead.
-Next step: `cd ~/Desktop/blazing-web && for f in *.smoke.mjs; do echo "== $f"; node "$f" || echo FAILED; sleep 2; done`
-Key files: `rowhero.smoke.mjs`, `pinpad.smoke.mjs`, `search.smoke.mjs`,
-`manga.smoke.mjs`, `games.smoke.mjs`. NO app file is changed by either commit.
-Blockers: none.
+Working on: poster/trailer parity, nav+section parity, and per-profile login art.
+Last action: pushed bca0bc8 — login art now reads BOTH progress stores.
+Next step: `cd /Users/markususche/Desktop/blazing-web && node profileart.smoke.mjs`
+Key files: app.js, profile.js, index.html, styles.css, *.smoke.mjs (15 files)
+Blockers: none in this repo. Two things need Markus, listed at the bottom.
 
-## There is no `npm test` here
+## What shipped this session
 
-No `package.json` in this repo. The suite is 12 loose `*.smoke.mjs` files, each
-run with `node <file>`, each starting its own simulator on its own fixed port.
-Run them ONE AT A TIME with a small pause: two files at once collide on a port,
-and a file that exits without releasing its port can redden the NEXT one. That
-is what a single stray `home.smoke.mjs rc=1` in a back-to-back sweep was —
-`home.smoke.mjs` passes 8 times out of 8 on its own.
+| commit | what |
+|---|---|
+| 88c0de6 | Continue Watching never rendered for anyone; search posters never played |
+| 6beb016 | FLT-10 — nav holds on all 15 tabs, three content gaps closed |
+| dca8a5e | Login screen shows each profile's own last-watched art |
+| bca0bc8 | That art reads BOTH progress stores, not just the fleet |
 
-## `9b3794a` — three files red about themselves
+## The four defects behind "embry continue watching all the posters"
 
-**pinpad + search: stale against a deliberate product change.** `boot()` in
-`profile.js` no longer auto-registers a device. With no stored credentials it
-draws the welcome screen and waits for a person (`profile.js:1181`). Both files
-were written for the old auto-register and never got past that screen. A prior
-handoff had recorded this as "a separate, real, pre-existing gap" in the
-product. It was not. Both now seed the device identity into `localStorage`
-under the key `profile.js:6` reads, in an init script that runs before the
-first navigation — which is what a returning viewer actually has.
+1. **The row never existed, for anybody.** `loadContinueWatching()` returns at
+   its first line unless `localStorage.profileId` is set, and **profile.js never
+   writes that key** — the only two writers are boot()'s legacy `#profile-picker`
+   dialog, which the modern gate never opens. A new `blazing-profile-selected`
+   listener takes the id off the event and persists it.
+2. It never called `claimHeroRow()` — the one card-building path in app.js that
+   skipped it, so its posters could not expand or play a trailer.
+3. The resume bar never drew: `safeMeta()` is an allow list and `progress` is
+   not on it, so `m.progress` was always undefined.
+4. Search results played nothing: `attachHoverTrailer` refused anything outside
+   `.row-hero`. It now admits `.search-results` too.
 
-pinpad also gained the OTHER branch, because a seeded test can no longer see
-it: a fresh context must show the welcome screen and must NOT call
-`/agent/register`. The rule the seed depends on is now tested, not assumed.
+**Side effect worth knowing:** `#emby-results`, `#discover-results`,
+`#games-results`, `#requests-results` and `#edu-results` all carry
+`class="search-results"`, so five more grids gained hover previews for free on
+any card built by `buildCard()`.
 
-**rowhero: a flaky wait, about 1 run in 3.**
+## Two testing traps, both cost real time — read before writing a smoke file
 
-    FAIL  a phone expands the card too, not just a desktop  (118px -> 118px)
+- **A Locator is not a valid `waitForFunction` argument.** It serialises to `{}`,
+  the predicate throws on its first line, and the wait "finishes" in about a
+  millisecond against an element the pointer never reached. Use
+  `await locator.elementHandle()`.
+- **`locator.hover()` fails its actionability check under the sticky top bar**,
+  and a `.catch(() => {})` swallows it silently. Scroll the element into view,
+  read its `boundingBox()`, and drive `page.mouse.move()` to its centre.
+- (Still true from before: poll on a timer, `polling: 100`, never on `raf` —
+  headless Chromium does not paint while the test sleeps.)
 
-118px is the RESTING width, so it reads as "the hero expand is switched off on
-phones" — the exact bug the check exists for. It is not. A width trace every
-150ms after the pointer lands:
+## Running the suite
 
-    H118px H118px H118px H118px H280px H280px H280px H280px
+15 loose `*.smoke.mjs`, no package.json. **One at a time, with a ~2s pause** —
+several bind fixed ports and back-to-back runs redden the next file. Under heavy
+CPU load (an Xcode build in parallel) `watch-party.smoke.mjs` can exit non-zero
+with zero FAIL lines; it is timing, re-run it on a quiet machine.
 
-Hovered (H) at the resting width for ~600ms, then a jump straight to the final
-280px with no in-between values. Headless Chromium was not painting: a CSS
-transition only advances on a frame, and while the test sits in a
-`waitForTimeout` nothing asks for one, so the transition stays at 0% and snaps
-to 100% when a frame finally arrives. `waitForTimeout(700)` was a coin toss
-against that stall.
+```
+cd /Users/markususche/Desktop/blazing-web
+for f in *.smoke.mjs; do node "$f"; sleep 2; done
+```
 
-`hoverHot()` now waits for the THING: hover, confirm the browser agrees the
-card is `:hover`, then wait for the computed width to leave its resting value
-AND hold still for two polls. Both halves are needed — "not resting any more"
-alone caught a card in flight and measured 176px of a 158→316px grow. Both
-waits use `polling: 100`, NOT the default `raf`: no frames is the very
-condition being waited out, so an rAF poll would sleep exactly as long as the
-thing it watches for.
+## Needs Markus
 
-## `17650aa` — a wait its own placeholder satisfied, and a check that could not tell
-
-    FAIL  the server's own reason is shown, not a generic failure — Loading chapters…
-
-`#manga-chapters-status` is written twice per open: "Loading chapters…" when
-the request goes out (`manga.js:308`), the answer when it lands
-(`manga.js:327`). The test waited for `textContent.length > 0`, which the
-PLACEHOLDER already satisfies, so it returned at once. Three more waits had the
-same shape (`#manga-status` ×2, `#games-status`). All four now call
-`settledStatus()`, which refuses a line that is empty, starts Loading/Searching,
-or ends in an ellipsis.
-
-The check itself was worse. It asked `status.includes('licensed')` — and the
-app's own fallback sentence is "No English chapters are available. This often
-means the title is officially **licensed** and removed from this source." So it
-passed whether the server's reason survived or was thrown away, which is the
-one thing it exists to tell apart. Proven by swallowing `why` in `manga.js`:
-the check stayed GREEN. It now names a phrase only the fixture's reason carries
-and refuses the fallback outright.
-
-## Negative controls actually run, and restored
-
-- `<=640px` rule pinned back to 118px → phone check reddens (118px -> 118px).
-- desktop expand switched off → three checks redden (158px wide).
-- `why` swallowed in `manga.js` → the reason check reddens on the fallback text.
-
-`styles.css` and `manga.js` were each restored and verified identical to HEAD
-(`git diff --stat` empty) before the final clean runs.
-
-## State of the suite
-
-12 files, all green run individually. rowhero 15/15 six times running; manga
-28/28 and games all-green three times each; home 8/8 runs; pinpad 9/9;
-search 24/24.
-
-## Still open on this repo (not started here)
-
-- Nothing in `blazing-web` alone reaches the live product. The site is built
-  from `blazing-site` and Cloudflare Pages is NOT built from git — committing
-  here ships nothing. See the memory note `the-product-is-one-domain-built-from-blazing-site`.
+- **DEP-8**: none of this is live. Cloudflare Pages is NOT built from git here —
+  committing blazing-web never ships it. The product is one domain built from
+  blazing-site; deploying blazing-web alone never touches
+  blazingstream.lyreosai.com/app/.
+- **Two Apple TV codebases.** Recommendation: ship `blazing-tvos`, archive
+  `firetv/apple`. blazing-tvos is older, 3x the code, and has PIN gate, Watch
+  Party, Top Shelf, Search, Live TV and a real test target that firetv/apple has
+  none of. Archiving a repo is not reversible, so it is waiting on a yes.
