@@ -33,10 +33,22 @@ mkdir -p "$OUT"
 
 # The app, and only the app. Keep this list in step with what Cloudflare Pages
 # is given, so the TV app and the website cannot drift apart.
+#
+# 30 Aug 2026: the same bug as the header, one layer down. The excludes above
+# are all VISIBLE names, so `.claude/` and `.omc/` were copied straight in, and
+# every package built before today shipped the agent's own working state to a
+# television: `.claude/handoff.md` (internal engineering notes, the deploy
+# gap, the two-Apple-TV-codebases decision), `.omc/state/mission-state.json`
+# (18 KB), session ids, and one absolute /Users path. No credential was in
+# them — checked — but none of it is app code and none of it belongs on a TV
+# or in a public deploy. The *.md excludes drop README/DESIGN/PRODUCT for the
+# same reason. A dotfile is not excluded just because its parent looks tidy.
 rsync -a \
   --exclude '.git' --exclude '.wrangler' --exclude 'node_modules' \
   --exclude 'dist' --exclude '*.smoke.mjs' --exclude 'patch*.py' \
   --exclude 'build-tvs.sh' --exclude '.DS_Store' --exclude 'admin.js' \
+  --exclude '.claude' --exclude '.omc' --exclude '.gitignore' \
+  --exclude '*.md' \
   "$ROOT"/ "$STAGE"/
 
 echo "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"
