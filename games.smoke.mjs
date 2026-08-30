@@ -170,10 +170,36 @@ async function openApp({ configured = true, onCall } = {}) {
   await ctx.close();
 }
 
+/**
+ * Wait for a status line to say its ANSWER, not its placeholder.
+ *
+ * `#games-status` is written twice on every load: the code sets a
+ * "Loading…"-style placeholder the moment the request goes out, and replaces it
+ * when the answer lands. A wait for "textContent is not empty" is therefore
+ * already satisfied by the placeholder, so it returns at once and the check
+ * that follows reads whatever happens to be on screen — usually the answer,
+ * sometimes the placeholder. The identical wait in manga.smoke.mjs did lose
+ * that race and reported the app broken:
+ *
+ *     FAIL  the server's own reason is shown, not a generic failure — Loading chapters…
+ *
+ * The app was right and had simply not been given the millisecond it needed.
+ * This file had the same latent flake, so it gets the same fix. Waiting for a
+ * settled line makes the check honest; a status that never leaves its
+ * placeholder now times out and fails on its own account.
+ */
+async function settledStatus(page, id, timeout = 5000) {
+  await page.waitForFunction((el) => {
+    const t = (document.getElementById(el).textContent || '').trim();
+    return t.length > 0 && !/^(Loading|Searching)\b/i.test(t) && !t.endsWith('…');
+  }, id, { timeout, polling: 100 });
+  return (await page.locator(`#${id}`).textContent()) || '';
+}
+
 // --- 2: not configured on the server ----------------------------------------
 {
   const { ctx, page } = await openApp({ configured: false });
-  await page.waitForFunction(() => (document.getElementById('games-status').textContent || '').length > 0, null, { timeout: 5000 });
+  await settledStatus(page, 'games-status');
   check('no cards render when not configured', (await page.locator('#games-results .card').count()) === 0);
   const status = (await page.locator('#games-status').textContent()) || '';
   check('the not-configured message is shown, not a silent empty grid', status.includes('RAWG_API_KEY is not set.'), status);

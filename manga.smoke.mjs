@@ -101,10 +101,34 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
   return { ctx, page, calls };
 }
 
+/**
+ * Wait for a status line to say its ANSWER, not its placeholder.
+ *
+ * `#manga-status` is written twice on every load: the code sets a
+ * "Loading…"-style placeholder the moment the request goes out, and replaces it
+ * when the answer lands. A wait for "textContent is not empty" is therefore
+ * already satisfied by the placeholder, so it returns at once and the check
+ * that follows reads whatever happens to be on screen — usually the answer,
+ * sometimes the placeholder. That is how
+ *
+ *     FAIL  the server's own reason is shown, not a generic failure — Loading chapters…
+ *
+ * happened: the app was right and had simply not been given the millisecond it
+ * needed. Waiting for a settled line makes the check honest; a status that
+ * never leaves its placeholder now times out and fails on its own account.
+ */
+async function settledStatus(page, id, timeout = 5000) {
+  await page.waitForFunction((el) => {
+    const t = (document.getElementById(el).textContent || '').trim();
+    return t.length > 0 && !/^(Loading|Searching)\b/i.test(t) && !t.endsWith('…');
+  }, id, { timeout, polling: 100 });
+  return (await page.locator(`#${id}`).textContent()) || '';
+}
+
 // --- 1a: no profile chosen reads as the strictest cap, not "no cap" --------
 {
   const { ctx, page, calls } = await openApp({ profile: {} });
-  await page.waitForFunction(() => (document.getElementById('manga-status').textContent || '').length > 0, null, { timeout: 5000 });
+  await settledStatus(page, 'manga-status');
   const status = (await page.locator('#manga-status').textContent()) || '';
   check('no profile at all is refused the Mature section', status.toLowerCase().includes('mature'), status);
   check('no manga request is made before a profile clears the gate', !calls.some((c) => c.url.includes('/manga/discover')));
@@ -115,7 +139,7 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
 // --- 1b: Kids, Guest-as-kids and Teen all fail closed ------------------------
 for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) {
   const { ctx, page } = await openApp({ profile });
-  await page.waitForFunction(() => (document.getElementById('manga-status').textContent || '').length > 0, null, { timeout: 5000 });
+  await settledStatus(page, 'manga-status');
   const status = (await page.locator('#manga-status').textContent()) || '';
   check(`refused for ${JSON.stringify(profile)}`, status.toLowerCase().includes('mature'), status);
   await ctx.close();
@@ -210,9 +234,16 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
   const { ctx, page } = await openApp({ chaptersBody: { chapters: { list: [], error: 'Officially licensed. Removed at the publisher’s request.', via: 'mangadex' } } });
   await page.waitForSelector('#manga-rows .card', { timeout: 10000 });
   await page.click('#manga-rows .card >> nth=0');
-  await page.waitForFunction(() => (document.getElementById('manga-chapters-status').textContent || '').length > 0, null, { timeout: 5000 });
+  await settledStatus(page, 'manga-chapters-status');
   const status = (await page.locator('#manga-chapters-status').textContent()) || '';
-  check('the server\'s own reason is shown, not a generic failure', status.includes('licensed'), status);
+  // NOT `includes('licensed')`. The app's OWN fallback sentence — "No English
+  // chapters are available. This often means the title is officially licensed
+  // and removed from this source." — contains that word too, so the check
+  // passed even with the server's reason thrown away. Proven: swallowing `why`
+  // in manga.js left this green. It now names a phrase only the fixture's
+  // reason has, and refuses the fallback outright.
+  check('the server\'s own reason is shown, not a generic failure',
+    status.includes('Removed at the publisher') && !status.includes('This often means'), status);
   check('zero chapters renders no rows', (await page.locator('#manga-chapters-list .stream-row').count()) === 0);
   await ctx.close();
 }
