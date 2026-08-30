@@ -1,68 +1,99 @@
-Working on: BRK-12 rating-gap sweep — Discover screen was showing every title unfiltered.
-Last action: `0b9f7a2` (pushed). `openDiscover()` in `app.js` (~line 438) built
-`cards` from `embyMetaSafe()` (which already decodes `contentRating`) but never
-called `ratingAllowed()` on it — every OTHER row-building path in the file
-does. One-line fix, same pattern as `appendEmbyRow`/etc. Verified: `node --check`
-clean, ran all 11 `*.smoke.mjs` files, 2 pre-existing failures
-(`pinpad.smoke.mjs` 3 failed, `search.smoke.mjs` TimeoutError) confirmed via
-`git stash` to reproduce identically on the commit before this change — not
-caused by it, not investigated further (out of scope for this task).
-Next step: none required for this fix. The pinpad/search test failures are a
-separate, real, pre-existing gap worth a look next session — not yet in the
-register as their own item.
-Key files: `app.js` (`openDiscover`, ~line 407-443).
+# blazing-web handoff
+
+Working on: the smoke suite. Five red or silently-vacuous checks across four
+files — every one of them the TEST being wrong, not the app.
+Last action: `9b3794a` and `17650aa`, both pushed. origin/main 0 ahead.
+Next step: `cd ~/Desktop/blazing-web && for f in *.smoke.mjs; do echo "== $f"; node "$f" || echo FAILED; sleep 2; done`
+Key files: `rowhero.smoke.mjs`, `pinpad.smoke.mjs`, `search.smoke.mjs`,
+`manga.smoke.mjs`, `games.smoke.mjs`. NO app file is changed by either commit.
 Blockers: none.
 
-## Earlier: self-service onboarding — "Request Access" and "Enter Invite Code" buttons on the web profile gate.
-Last action: 5a571a8 (pushed). profile.js's gate no longer auto-registers a
-browser the instant the page loads. A first-time visitor now sees a welcome
-screen with two buttons: Request Access (same registration as before, but
-behind a real click now) and I Have an Invite Code (POST /devices/join for
-instant approval, no admin needed). Either path lands on the profile picker,
-which now has an "Add profile" tile (POST /profiles) so a newly-approved
-visitor can make their own profile without a TV. The pending-approval screen
-also grew an "Enter Invite Code" button next to "I am the owner", so someone
-waiting on admin approval isn't stuck if they actually have a code.
-Next step: NOT YET DEPLOYED. Git push only updates GitHub Pages (DEP-10) — the
-site Markus opens is a separate Cloudflare Pages copy. Run
-`~/.claude-team/bin/deploy-web.sh` to ship this, or `--status` to see what's
-live vs committed first.
-Key files: profile.js (state.approved, showWelcome/showInvite/showCreateProfile/
-hideAllScreens, redeemInviteCode, submitCreateProfile, the "+ Add profile" tile
-in renderProfileList).
-Blockers: none.
+## There is no `npm test` here
 
-## What was verified
+No `package.json` in this repo. The suite is 12 loose `*.smoke.mjs` files, each
+run with `node <file>`, each starting its own simulator on its own fixed port.
+Run them ONE AT A TIME with a small pause: two files at once collide on a port,
+and a file that exits without releasing its port can redden the NEXT one. That
+is what a single stray `home.smoke.mjs rc=1` in a back-to-back sweep was —
+`home.smoke.mjs` passes 8 times out of 8 on its own.
 
-Headless Chromium against a local static server (`python3 -m http.server` +
-`playwright-pp-cli --browser chromium run-flow`, not Comet — this is our own
-static file, not a live site):
-- Fresh load with no stored device identity shows the welcome screen, and
-  confirms NO device key gets written to localStorage — the silent
-  auto-registration this task was meant to remove really is gone.
-- "I Have an Invite Code" → invite screen; Back → welcome screen again; both
-  transitions confirmed by reading `.hidden` on each section plus the heading
-  text, not just "it didn't throw."
-- Submitting an empty/whitespace code shows "Enter the invite code first."
-  and (confirmed via localStorage) makes NO network call — the guard fires
-  before any fetch.
+## `9b3794a` — three files red about themselves
 
-## What was NOT verified — do not assume these work end to end
+**pinpad + search: stale against a deliberate product change.** `boot()` in
+`profile.js` no longer auto-registers a device. With no stored credentials it
+draws the welcome screen and waits for a person (`profile.js:1181`). Both files
+were written for the old auto-register and never got past that screen. A prior
+handoff had recorded this as "a separate, real, pre-existing gap" in the
+product. It was not. Both now seed the device identity into `localStorage`
+under the key `profile.js:6` reads, in an init script that runs before the
+first navigation — which is what a returning viewer actually has.
 
-- **The three real network paths — Request Access, Join with a real code,
-  Create Profile — were never exercised.** Doing so would either burn the
-  household's shared 20/hour device-registration budget on a test run, or
-  (for Join) needed a real invite code, which needs an already-approved
-  device to mint one first. The client-side contract for all three was
-  cross-checked line-by-line against `firetv/server/server.js` and
-  `household.js` (exact status codes: /devices/join → 404 unknown code / 409
-  already used / 410 expired / 200 `{ok:true,...}`; POST /profiles → 200
-  `{profile:{...}}` on success, 403 if the device isn't approved), but "matches
-  the server source" is not the same as "tried against the live fleet."
-- **No PIN on profiles created through this new form.** `submitCreateProfile()`
-  sends only `{name, isKids}` — a PIN can still be added later on a TV. Not a
-  bug, just unbuilt: adding a PIN field here was out of scope for this task.
-- Placement: this lives in `blazing-web/profile.js` (the app's existing
-  mandatory gate), not on the separate `blazing-site` marketing homepage.
-  `blazing-site`'s homepage only ever links to `/app/` — it has no onboarding
-  UI of its own and needs none; the gate visitors actually hit is this one.
+pinpad also gained the OTHER branch, because a seeded test can no longer see
+it: a fresh context must show the welcome screen and must NOT call
+`/agent/register`. The rule the seed depends on is now tested, not assumed.
+
+**rowhero: a flaky wait, about 1 run in 3.**
+
+    FAIL  a phone expands the card too, not just a desktop  (118px -> 118px)
+
+118px is the RESTING width, so it reads as "the hero expand is switched off on
+phones" — the exact bug the check exists for. It is not. A width trace every
+150ms after the pointer lands:
+
+    H118px H118px H118px H118px H280px H280px H280px H280px
+
+Hovered (H) at the resting width for ~600ms, then a jump straight to the final
+280px with no in-between values. Headless Chromium was not painting: a CSS
+transition only advances on a frame, and while the test sits in a
+`waitForTimeout` nothing asks for one, so the transition stays at 0% and snaps
+to 100% when a frame finally arrives. `waitForTimeout(700)` was a coin toss
+against that stall.
+
+`hoverHot()` now waits for the THING: hover, confirm the browser agrees the
+card is `:hover`, then wait for the computed width to leave its resting value
+AND hold still for two polls. Both halves are needed — "not resting any more"
+alone caught a card in flight and measured 176px of a 158→316px grow. Both
+waits use `polling: 100`, NOT the default `raf`: no frames is the very
+condition being waited out, so an rAF poll would sleep exactly as long as the
+thing it watches for.
+
+## `17650aa` — a wait its own placeholder satisfied, and a check that could not tell
+
+    FAIL  the server's own reason is shown, not a generic failure — Loading chapters…
+
+`#manga-chapters-status` is written twice per open: "Loading chapters…" when
+the request goes out (`manga.js:308`), the answer when it lands
+(`manga.js:327`). The test waited for `textContent.length > 0`, which the
+PLACEHOLDER already satisfies, so it returned at once. Three more waits had the
+same shape (`#manga-status` ×2, `#games-status`). All four now call
+`settledStatus()`, which refuses a line that is empty, starts Loading/Searching,
+or ends in an ellipsis.
+
+The check itself was worse. It asked `status.includes('licensed')` — and the
+app's own fallback sentence is "No English chapters are available. This often
+means the title is officially **licensed** and removed from this source." So it
+passed whether the server's reason survived or was thrown away, which is the
+one thing it exists to tell apart. Proven by swallowing `why` in `manga.js`:
+the check stayed GREEN. It now names a phrase only the fixture's reason carries
+and refuses the fallback outright.
+
+## Negative controls actually run, and restored
+
+- `<=640px` rule pinned back to 118px → phone check reddens (118px -> 118px).
+- desktop expand switched off → three checks redden (158px wide).
+- `why` swallowed in `manga.js` → the reason check reddens on the fallback text.
+
+`styles.css` and `manga.js` were each restored and verified identical to HEAD
+(`git diff --stat` empty) before the final clean runs.
+
+## State of the suite
+
+12 files, all green run individually. rowhero 15/15 six times running; manga
+28/28 and games all-green three times each; home 8/8 runs; pinpad 9/9;
+search 24/24.
+
+## Still open on this repo (not started here)
+
+- Nothing in `blazing-web` alone reaches the live product. The site is built
+  from `blazing-site` and Cloudflare Pages is NOT built from git — committing
+  here ships nothing. See the memory note `the-product-is-one-domain-built-from-blazing-site`.
