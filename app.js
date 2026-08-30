@@ -799,10 +799,29 @@ function applyRowFilter(route) {
   });
 }
 
+/**
+ * Home, Movies, Shows and Anime are ONE section with the rows filtered, so the
+ * heading is the only thing on screen that tells them apart. Same eyebrow +
+ * title + line the other ten views carry; see the comment on .page-heading in
+ * index.html for why all four were missing it.
+ */
+const BROWSE_HEADINGS = Object.freeze({
+  home: ['Browse', 'Home', 'Everything on the household’s shelves.'],
+  movies: ['Browse', 'Movies', 'Every film across the catalogues.'],
+  shows: ['Browse', 'TV Shows', 'Series from the catalogues and the Emby library.'],
+  anime: ['Browse', 'Anime', 'The anime shelves, subbed and dubbed.'],
+});
+
 function showRoute(route) {
   const browseRoute = ['home', 'movies', 'shows', 'anime'].includes(route);
   state.route = route;
   homeView.hidden = !browseRoute;
+  if (browseRoute) {
+    const [eyebrow, title, blurb] = BROWSE_HEADINGS[route] || BROWSE_HEADINGS.home;
+    $('#browse-eyebrow').textContent = eyebrow;
+    $('#browse-title').textContent = title;
+    $('#browse-blurb').textContent = blurb;
+  }
   searchView.hidden = route !== 'search';
   libraryView.hidden = route !== 'library';
   adminView.hidden = route !== 'admin' && route !== 'link';
@@ -3001,7 +3020,23 @@ async function loadComicsView() {
 function seerrCard(result) {
   const card = el('article', 'seerr-card');
   const art = el('div', 'seerr-art');
-  if (result.poster) setBackground(art, result.poster);
+  // An <img>, like every other card builder here — buildCard(), the comics
+  // shelf and manga.js all use one. This was the ONE builder that painted its
+  // poster as a CSS background, so it got none of what an <img> brings: lazy
+  // loading, async decode, and above all an `error` event. A dead poster URL
+  // left a blank grey rectangle with nothing to catch it; it now falls back to
+  // the same .no-image mark every other poster in the app shows.
+  const image = el('img', 'card-image');
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  image.alt = '';
+  if (result.poster) {
+    image.src = result.poster;
+    image.addEventListener('error', () => art.classList.add('no-image'), { once: true });
+  } else {
+    art.classList.add('no-image');
+  }
+  art.appendChild(image);
   const body = el('div', 'seerr-body');
   const title = el('h3', 'seerr-title');
   title.textContent = `${result.title}${result.releaseInfo ? ` (${result.releaseInfo})` : ''}`;

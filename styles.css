@@ -264,8 +264,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .card:active { transform: scale(.97); }
 .card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #252529, #111113); transition: opacity var(--transition); }
-.card.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 42px; font-weight: 900; }
-.card.no-image .card-image { visibility: hidden; }
+/* .seerr-art joins these: the Requests poster is a real <img> now, like every
+   other card in the app, so it needs the same dead-URL mark rather than a
+   private one that would drift from this. */
+.card.no-image::before, .seerr-art.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 42px; font-weight: 900; }
+.card.no-image .card-image, .seerr-art.no-image .card-image { visibility: hidden; }
 .card-label { position: absolute; right: 0; bottom: 0; left: 0; padding: 32px 10px 9px; background: linear-gradient(0deg, rgba(0,0,0,.93), rgba(0,0,0,0)); font-size: 12px; font-weight: 750; line-height: 1.25; text-shadow: 0 1px 4px #000; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
 .skeleton { background: linear-gradient(100deg, #151518 30%, #242429 50%, #151518 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
@@ -886,6 +889,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .seerr-art {
   aspect-ratio: 2 / 3; border-radius: 8px; background-size: cover;
   background-position: center; background-color: rgba(255, 255, 255, 0.06);
+  /* Both needed by the <img> this now holds: `relative` anchors the .no-image
+     mark's `inset: 0`, and `hidden` keeps the poster inside the rounded corner
+     the background-image used to follow for free. */
+  position: relative; overflow: hidden;
 }
 .seerr-body { display: flex; flex-direction: column; gap: 8px; }
 .seerr-title { font-size: 14px; line-height: 1.3; margin: 0; }

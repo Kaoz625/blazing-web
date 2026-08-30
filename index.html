@@ -152,6 +152,20 @@
            styles.css. Every card already carries the backdrop/metadata/synopsis
            markup needed to expand on focus; only a row-hero ancestor makes that
            visible, so buildCard() itself needed no per-row branching. -->
+      <!-- Every other view opens with an eyebrow + <h1> + one line: Library,
+           Emby, Comics, Manga, Games, Requests, Trailers, Education, Roadmaps
+           and Admin all do. Home/Movies/Shows/Anime are the SAME section with
+           the rows filtered (applyRowFilter), so all four inherited one
+           headless top and were the only browse screens with no title on them.
+           This is NOT the standalone hero banner the comment above rules out —
+           it is the small heading the other ten already carry, retitled per
+           route by showRoute(). Markus, 2026-08-30: "all tabs and sections
+           should have more or less the same things." -->
+      <div class="page-heading">
+        <p class="eyebrow" id="browse-eyebrow">Browse</p>
+        <h1 id="browse-title">Home</h1>
+        <p id="browse-blurb">Everything on the household&rsquo;s shelves.</p>
+      </div>
       <div id="rows" class="rows"></div>
     </section>
 
@@ -259,13 +273,26 @@
       <!-- Its own panel, a SIBLING of the activity one. It was opened inside
            `admin-activity` and before that panel's own heading, so the upscale
            queue rendered nested in "Currently Watching". -->
+      <!-- These two say so. Admin was the ONE view in the app that rendered a
+           heading over blank space and no message at all: Library says "Open a
+           title and use My list to save it here", a failed Comics/Manga/Games
+           fetch says "Could not reach…", and these said nothing, so an empty
+           panel was indistinguishable from a broken one. The copy is honest
+           about WHY it is empty rather than inventing a source it does not
+           have — see the note above on admin.js. -->
       <div id="admin-upscale" class="admin-panel">
         <h2>4K Upscale Requests</h2>
-        <div id="admin-upscale-list" class="grid-list"></div>
+        <div id="admin-upscale-list" class="grid-list">
+          <p class="empty-copy">Nothing to show &mdash; this panel has no data
+             source yet. It is not an outage.</p>
+        </div>
       </div>
       <div id="admin-activity" class="admin-panel">
         <h2>Currently Watching</h2>
-        <div id="admin-activity-list" class="grid-list"></div>
+        <div id="admin-activity-list" class="grid-list">
+          <p class="empty-copy">Nothing to show &mdash; this panel has no data
+             source yet. It is not an outage.</p>
+        </div>
       </div>
     </section>
 

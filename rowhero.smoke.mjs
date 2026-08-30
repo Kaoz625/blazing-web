@@ -272,7 +272,12 @@ if (heroEls.length >= 2) {
       const widest = boxes.reduce((a, x) => (x.width > a.width ? x : a), boxes[0]);
       return {
         row: r.getBoundingClientRect().height,
-        below: b ? b.getBoundingClientRect().top : 0,
+        // DOCUMENT-relative, not viewport-relative. This check is about layout:
+        // does the next row get pushed down. getBoundingClientRect().top also
+        // moves when the PAGE scrolls, and hovering a card can scroll it into
+        // view — so on its own it reported a 30px "shift" for a row that had not
+        // moved at all, the moment a heading above it made the page taller.
+        below: b ? b.getBoundingClientRect().top + window.scrollY : 0,
         cardW: widest.width, cardH: widest.height,
       };
     }, { r: row, c: card });
