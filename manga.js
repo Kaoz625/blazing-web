@@ -336,6 +336,66 @@
     dlist.replaceChildren(...list.map((c) => chapterRow(manga, c)));
   }
 
+  /**
+   * Open only the chapter range the fleet mapped to one selected anime
+   * episode. The full chapter list is deliberately not fetched here: the
+   * episode-map response is the boundary, and its exact flag owns the wording.
+   */
+  async function openEpisode(context) {
+    if (!allowed()) return;
+    const title = plainText(context && context.title);
+    const episode = Math.floor(Number(context && context.episode));
+    if (!title || episode < 1) return;
+    const { dialog, dtitle, dmeta, ddesc, dstatus, dlist, dart } = refs();
+    if (!dialog) return;
+    const request = (state.episodeRequest = (state.episodeRequest || 0) + 1);
+    dtitle.textContent = title;
+    dmeta.textContent = `Season ${Math.floor(Number(context.season) || 1)}  ·  Episode ${episode}`;
+    ddesc.textContent = plainText(context.episodeTitle, 'Manga chapters for this episode.');
+    dstatus.textContent = 'Matching this episode to manga chapters…';
+    dlist.replaceChildren();
+    setBackground(dart, '');
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+
+    const query = new URLSearchParams();
+    const put = (key, value) => {
+      if (value !== undefined && value !== null && String(value).trim() !== '') query.set(key, String(value));
+    };
+    put('title', title);
+    put('animeId', context.animeId);
+    put('season', context.season || 1);
+    put('episode', episode);
+    put('absoluteEpisode', context.absoluteEpisode || episode);
+    put('episodeTitle', context.episodeTitle);
+    put('episodeCount', context.episodeCount);
+    put('mangaId', context.mangaId);
+    const data = await fetchJSON(`${FLEET_BASE}/manga/episode-map?${query.toString()}`, CHAPTERS_TIMEOUT_MS);
+    if (request !== state.episodeRequest) return;
+    if (!allowed()) { closeChapters(); return; }
+    if (!data || !data.mapping || !data.manga || !Array.isArray(data.chapters) || !data.chapters.length) {
+      dstatus.textContent = plainText(data && data.error, 'No readable manga chapters matched this episode.');
+      return;
+    }
+
+    const manga = normalizeManga({
+      ...data.manga,
+      id: data.manga.id,
+      title: data.manga.title || title,
+    });
+    if (!manga) {
+      dstatus.textContent = 'The mapped manga record was not usable.';
+      return;
+    }
+    dtitle.textContent = manga.title;
+    const mapping = data.mapping;
+    const start = mapping.chapterStart;
+    const end = mapping.chapterEnd;
+    const range = start == null ? ''
+      : (String(start) === String(end) ? `chapter ${start}` : `chapters ${start}–${end}`);
+    dstatus.textContent = `${mapping.exact === true ? 'Exact match' : 'Estimated match'}${range ? ` · ${range}` : ''}`;
+    dlist.replaceChildren(...data.chapters.map((chapter) => chapterRow(manga, chapter)));
+  }
+
   function closeChapters() {
     const { dialog } = refs();
     if (dialog && dialog.open) dialog.close();
@@ -458,5 +518,5 @@
     if (state.mounted) renderGate();
   });
 
-  window.BlazingManga = { mount };
+  window.BlazingManga = { mount, openEpisode };
 })();

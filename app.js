@@ -162,8 +162,29 @@ function youtubeTrailerId(raw) {
   return '';
 }
 
+function safeEpisodes(raw) {
+  const list = raw && Array.isArray(raw.videos) ? raw.videos : [];
+  return list.map((video, index) => {
+    if (!video || !video.id) return null;
+    const id = plainText(video.id).slice(0, 160);
+    const parts = id.split(':');
+    const season = Math.max(1, Math.floor(Number(video.season || parts[parts.length - 2]) || 1));
+    const episode = Math.floor(Number(video.episode || parts[parts.length - 1]) || 0);
+    if (!id || episode < 1) return null;
+    return {
+      id,
+      season,
+      episode,
+      absoluteEpisode: Math.max(1, Math.floor(Number(video.absoluteEpisode || video.number) || index + 1)),
+      title: plainText(video.title || video.name).slice(0, 180),
+    };
+  }).filter(Boolean).sort((a, b) =>
+    a.season - b.season || a.episode - b.episode || a.absoluteEpisode - b.absoluteEpisode);
+}
+
 function safeMeta(raw) {
   if (!raw || typeof raw !== 'object' || !raw.id) return null;
+  const genres = Array.isArray(raw.genres) ? raw.genres.slice(0, 4).map((g) => plainText(g).slice(0, 24)).filter(Boolean) : [];
   return {
     id: plainText(raw.id),
     type: plainText(raw.type, 'movie'),
@@ -194,7 +215,11 @@ function safeMeta(raw) {
     // so the profile cap has something to judge; the web app has no kids gate
     // yet, and this is the field it will need when it gets one.
     contentRating: plainText(raw.contentRating).slice(0, 12),
-    genres: Array.isArray(raw.genres) ? raw.genres.slice(0, 4).map((g) => plainText(g).slice(0, 24)).filter(Boolean) : [],
+    genres,
+    videos: safeEpisodes(raw),
+    isAnime: raw.isAnime === true || raw._isAnime === true
+      || /^(?:kitsu:|mal-|al-)/i.test(String(raw.id || ''))
+      || genres.some((genre) => /anime/i.test(genre)),
   };
 }
 
@@ -225,6 +250,7 @@ function readList() {
 const state = {
   catalogs: [],
   selected: null,
+  selectedEpisode: null,
   route: 'home',
   myList: readList(),
   // The rating cap of the connected profile, or null when nobody has connected
@@ -1015,12 +1041,12 @@ const DWELL_MS = 550;                 // fill the text in early
 const HOVER_TRAILER_MS = 1400;        // the video comes later, after real intent
 const fullMetaCache = new Map();
 
-async function fetchFullMeta(meta) {
-  const key = `${meta.type}:${meta.id}`;
+async function fetchFullMeta(meta, forDetail = false) {
+  const key = `${forDetail ? 'detail' : 'preview'}:${meta.type}:${meta.id}`;
   if (fullMetaCache.has(key)) return fullMetaCache.get(key);
   // Emby titles are not in the addon catalog, so /meta/ is a guaranteed 404 for
   // them - the same reason openDetail skips /stream/ for an embyId.
-  if (meta.embyId || !/^tt\d+$/.test(String(meta.id))) {
+  if (meta.embyId || (!forDetail && !/^tt\d+$/.test(String(meta.id)))) {
     fullMetaCache.set(key, null);
     return null;
   }
@@ -1038,6 +1064,8 @@ function mergeFullMeta(meta, full) {
     if (!meta[k] && full[k]) meta[k] = full[k];
   }
   if ((!meta.genres || !meta.genres.length) && full.genres && full.genres.length) meta.genres = full.genres;
+  if ((!meta.videos || !meta.videos.length) && full.videos && full.videos.length) meta.videos = full.videos;
+  if (full.isAnime) meta.isAnime = true;
   return meta;
 }
 
@@ -1296,7 +1324,10 @@ function buildCard(meta) {
   }
 
   attachHoverTrailer(card, meta);
-  card.addEventListener('click', () => openDetail(meta));
+  card.addEventListener('click', () => {
+    if (state.route === 'anime') meta.isAnime = true;
+    openDetail(meta);
+  });
   return card;
 }
 
@@ -1749,8 +1780,78 @@ async function requestUpscale() {
   }
 }
 
+function clearEpisodeControls() {
+  const select = $('#detail-episode-select');
+  const mangaButton = $('#detail-manga');
+  if (select) select.remove();
+  if (mangaButton) mangaButton.remove();
+}
+
+function episodeContext(meta) {
+  const episode = state.selectedEpisode;
+  if (!meta || !episode) return null;
+  return {
+    title: meta.name,
+    animeId: meta.id,
+    season: episode.season,
+    episode: episode.episode,
+    absoluteEpisode: episode.absoluteEpisode,
+    episodeTitle: episode.title,
+    episodeCount: Array.isArray(meta.videos) ? meta.videos.length : 0,
+  };
+}
+
+function renderEpisodeControls(meta) {
+  clearEpisodeControls();
+  const episodes = Array.isArray(meta && meta.videos) ? meta.videos : [];
+  if (meta.type !== 'series' || !episodes.length) {
+    state.selectedEpisode = null;
+    return;
+  }
+  if (!state.selectedEpisode || !episodes.some((episode) => episode.id === state.selectedEpisode.id)) {
+    state.selectedEpisode = episodes[0];
+  }
+
+  const select = document.createElement('select');
+  select.id = 'detail-episode-select';
+  select.className = 'quality-select';
+  select.setAttribute('aria-label', 'Episode');
+  for (const episode of episodes) {
+    const option = document.createElement('option');
+    option.value = episode.id;
+    option.textContent = `S${episode.season} E${episode.episode}${episode.title ? ` · ${episode.title}` : ''}`;
+    option.selected = episode.id === state.selectedEpisode.id;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => {
+    state.selectedEpisode = episodes.find((episode) => episode.id === select.value) || episodes[0];
+    detailStatus.textContent = `Finding sources for S${state.selectedEpisode.season} E${state.selectedEpisode.episode}…`;
+    loadStreams(meta);
+  });
+  detailPlay.insertAdjacentElement('afterend', select);
+
+  // Manga is a Mature section everywhere. Hide the action entirely when this
+  // profile cannot enter the reader, and never make an episode-map request.
+  if (meta.isAnime && ratingAllowed('mature') && window.BlazingManga) {
+    const button = document.createElement('button');
+    button.id = 'detail-manga';
+    button.className = 'secondary-button';
+    button.type = 'button';
+    button.textContent = 'Read manga';
+    button.addEventListener('click', () => {
+      const context = episodeContext(meta);
+      if (!context) return showToast('Choose an episode first.', 'error');
+      closeDetail();
+      window.BlazingManga.openEpisode(context);
+    });
+    select.insertAdjacentElement('afterend', button);
+  }
+}
+
 function openDetail(meta) {
   state.selected = meta;
+  state.selectedEpisode = null;
+  clearEpisodeControls();
   detailTitle.textContent = meta.name;
   detailYear.textContent = meta.releaseInfo;
   detailCopy.textContent = meta.description || 'Open this title to check available streams.';
@@ -1781,14 +1882,16 @@ function openDetail(meta) {
   // poster - without dwelling on it first - showed "Open this title to check
   // available streams." and no trailer. Same cached fetch the card uses; if the
   // dialog moved on in the meantime the result is dropped.
-  fetchFullMeta(meta).then((full) => {
+  const fullMeta = fetchFullMeta(meta, meta.type === 'series').then((full) => {
     if (!full || state.selected !== meta) return;
     const hadTrailer = Boolean(meta.trailerYt || meta.trailerUrl);
     mergeFullMeta(meta, full);
     if (meta.description) detailCopy.textContent = meta.description;
     setBackground(detailArt, meta.background || meta.poster);
     renderRatingChips(meta);
+    renderEpisodeControls(meta);
     if (!hadTrailer) startDetailTrailer(meta);
+    return full;
   });
   telemetry('nav_action', { action: 'open_detail', from: state.route || 'home' });
 
@@ -1798,6 +1901,13 @@ function openDetail(meta) {
   if (meta.embyId) {
     $('#detail-streams').innerHTML = '';
     detailStatus.textContent = 'On the Emby server. Press Play.';
+  } else if (!sourceOnly && meta.type === 'series') {
+    detailStatus.textContent = 'Loading episodes…';
+    fullMeta.finally(() => {
+      if (state.selected !== meta) return;
+      renderEpisodeControls(meta);
+      loadStreams(meta);
+    });
   } else if (!sourceOnly) {
     loadStreams(meta);
   } else {
@@ -1810,6 +1920,8 @@ function closeDetail() {
   else detailDialog.removeAttribute('open');
   stopDetailTrailer();
   state.selected = null;
+  state.selectedEpisode = null;
+  clearEpisodeControls();
   $('#detail-streams').innerHTML = '';
 }
 
@@ -1884,7 +1996,11 @@ async function loadStreams(meta) {
 
   detailStatus.textContent = 'Loading streams...';
   try {
-    const streams = await resolveStreams(meta);
+    const contentId = state.selected === meta && state.selectedEpisode
+      ? state.selectedEpisode.id : meta.id;
+    const streams = await resolveStreams(meta, contentId);
+    if (state.selected !== meta) return;
+    if (state.selectedEpisode && state.selectedEpisode.id !== contentId) return;
     if (!streams.length) {
       detailStatus.textContent = 'No compatible stream available.';
       return;
@@ -1966,9 +2082,9 @@ async function loadStreams(meta) {
   }
 }
 
-async function resolveStreams(meta) {
+async function resolveStreams(meta, contentId = meta.id) {
   const data = await fetchJSON(
-    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`
+    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json`
   );
   return Array.isArray(data.streams) ? data.streams : [];
 }
@@ -2004,7 +2120,8 @@ async function playSelected() {
   }
   detailStatus.textContent = 'Checking direct streams…';
   try {
-    const streams = await resolveStreams(meta);
+    const contentId = state.selectedEpisode ? state.selectedEpisode.id : meta.id;
+    const streams = await resolveStreams(meta, contentId);
     const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
     const getPenalty = (s) => {
       if (deadLinks.includes(s.url)) return 1000;

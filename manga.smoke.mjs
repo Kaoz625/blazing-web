@@ -181,7 +181,7 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
   // --- 5: a readable chapter opens the reader and pages turn ------------------
   await page.click('#manga-chapters-list .stream-row >> nth=0');
   await page.waitForFunction(() => !document.getElementById('manga-reader').hidden, null, { timeout: 5000 });
-  await page.waitForFunction(() => document.querySelector('#manga-reader .comic-page').getAttribute('src'), null, { timeout: 5000 });
+  await page.waitForSelector('#manga-reader .comic-page[src]', { timeout: 10000 });
   const firstSrc = await page.locator('#manga-reader .comic-page').getAttribute('src');
   check('the first page is the fleet-relative path, absolute-ised', firstSrc === 'https://fleet.lyreosai.com/manga/image?ch=c1&p=1', firstSrc);
   check('the counter reads 1 / 3', (await page.locator('#manga-reader .comic-counter').textContent()) === '1 / 3');
