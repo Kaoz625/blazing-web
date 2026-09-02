@@ -40,6 +40,12 @@
     pendingProfile: null,
     // True while the pad is asking for the OWNER PIN rather than a profile PIN.
     ownerMode: false,
+    // Where the owner pad was opened from: 'gate' or 'pending'. Back on the pad
+    // used to call showProfiles() whatever the answer, and from the gate that
+    // is an EMPTY rail — no profiles, no owner or invite hatch (those are only
+    // unhidden by a 403 from /profiles), and the gate itself gone. The owner
+    // was stranded on a blank screen for pressing Back.
+    padFrom: '',
     pinDigits: [],
     unlockToken: null,
     unlockExpiresAt: 0,
@@ -59,6 +65,11 @@
     // a loop, and only after this browser has passed its own gate.
     approverDone: false,
     approveCode: '',
+    // The approver opened with NO code — the help line sends a phone to
+    // blazingstream.lyreosai.com/pair, and the site answers that with
+    // /app/?pair= (an empty value). The sheet then offers a six-character box
+    // for the code read aloud from the TV, and peeks once the six are in.
+    approveEntry: false,
   };
 
   const ui = {};
@@ -370,6 +381,10 @@
          reads as decoration rather than a field. */
       .bp-email .bp-input, .bp-signup .bp-input { text-align: left; }
       .bp-approve-question { margin: 6px 0 0; color: #fff; font-size: 18px; font-weight: 800; line-height: 1.4; }
+      /* The typed pairing code: the same size and spacing the code is shown at
+         on the other screen, so the two can be compared by eye. */
+      .bp-approve-code { text-align: center; font-size: 26px; font-weight: 900; letter-spacing: .22em; text-transform: uppercase; }
+      .bp-approve-code[hidden] { display: none; }
     `;
     document.head.appendChild(style);
   }
@@ -392,12 +407,17 @@
   const BUSY_CONTROLS = [
     'connect', 'refresh', 'close', 'back',
     'pillQr', 'pillCode', 'gateEmail', 'gateOwner', 'owner', 'gateRecheck',
+    // inviteFromPending fell out of this list in the gate rewrite. It sits in
+    // the footer next to Refresh, so it was live during an in-flight
+    // /profiles request — and the invite screen it opens was torn down under
+    // the viewer the moment that request answered.
+    'inviteFromPending',
     'inviteBack', 'inviteInput', 'inviteSubmit',
     'createBack', 'createName', 'createKids', 'createSubmit',
     'qrBack', 'qrRetry',
     'signupBack', 'signupName', 'signupEmail', 'signupPassword', 'signupSubmit',
     'emailBack', 'emailAddress', 'emailPassword', 'emailSubmit',
-    'approveBack', 'approveYes', 'approveNo',
+    'approveBack', 'approveInput', 'approveYes', 'approveNo',
   ];
 
   function setBusy(busy) {
@@ -638,6 +658,9 @@
     if (!active) return;
     const length = pinLength();
     ui.pinName.textContent = state.ownerMode ? 'Owner PIN' : profile.name;
+    // "Choose another profile" is a lie on the owner pad: from the gate there
+    // are no profiles to choose from yet, and Back goes to the gate.
+    ui.back.textContent = state.ownerMode ? 'Back' : 'Choose another profile';
     ui.dots.replaceChildren();
     for (let index = 0; index < length; index += 1) {
       const dot = element('span', 'bp-dot');
@@ -676,8 +699,10 @@
    * the gate. The server does the deciding — this only collects the digits and
    * posts them — and it needs this browser's device token, so the PIN alone is
    * not enough from somewhere else.
+   *
+   * `from` ('gate' | 'pending') is where Back and a refused fleet go afterwards.
    */
-  function openOwnerPin() {
+  function openOwnerPin(from = 'pending') {
     if (state.busy) return;
     if (!state.credentials) {
       setStatus('This browser has no connection to approve yet. Select Refresh profiles first.', 'error');
@@ -685,6 +710,7 @@
     }
     state.pendingProfile = null;
     state.ownerMode = true;
+    state.padFrom = from;
     clearPinEntry();
     hideAllScreens();
     ui.owner.hidden = true;
@@ -715,7 +741,26 @@
     }
     // registerDevice() already put the reason in the status line.
     if (!credentials) return;
-    openOwnerPin();
+    openOwnerPin('gate');
+  }
+
+  /**
+   * Leave the owner pad for the screen it was opened from. From the gate that
+   * is the gate — showProfiles() there is an empty rail with the door shut
+   * behind it (see state.padFrom). From the pending screen it is the rail,
+   * where Refresh profiles brings the hatches back.
+   */
+  function leaveOwnerPad(message, type = 'info') {
+    const from = state.padFrom;
+    state.ownerMode = false;
+    state.padFrom = '';
+    clearPinEntry();
+    if (from === 'gate') {
+      showGate(message, type);
+      return;
+    }
+    showProfiles();
+    if (message) setStatus(message, type);
   }
 
   async function verifyOwnerPin() {
@@ -736,9 +781,7 @@
       if (result.status === 503) {
         // Said plainly rather than as "wrong PIN", because the two need different
         // actions and confusing them sends the owner hunting for a typo.
-        state.ownerMode = false;
-        showProfiles();
-        setStatus('Owner approval is not switched on for this fleet. Approve this browser in the Blazing dashboard instead.', 'error');
+        leaveOwnerPad('Owner approval is not switched on for this fleet. Approve this browser in the Blazing dashboard instead.', 'error');
         return;
       }
       if (result.status === 429) {
@@ -755,6 +798,7 @@
       // Approved. Go straight back and load the profiles it can now see, so the
       // owner is not left to work out that a second button press is needed.
       state.ownerMode = false;
+      state.padFrom = '';
       showProfiles();
       setStatus('This browser is approved.', 'info');
       await connectProfiles();
@@ -840,6 +884,10 @@
   const showWelcome = showGate;
 
   function showInvite() {
+    // Every other "show X" that a button reaches checks this. Without it a
+    // click that slipped through while /profiles was in flight opened the
+    // invite box, and applyProfileList() tore it down a moment later.
+    if (state.busy) return;
     hideAllScreens();
     setPanelView('gate');
     ui.invite.hidden = false;
@@ -884,6 +932,19 @@
     ui.qr.hidden = false;
     ui.kicker.textContent = 'Scan QR';
     ui.heading.textContent = 'Pair this browser';
+    // Start empty. Re-entering this sheet used to show the PREVIOUS code and
+    // QR while the new one was fetched — measured in a browser: AAA111 stayed
+    // on screen until BBB222 arrived — and a phone that scanned in that window
+    // scanned a code the fleet had already retired. state.pairCode goes too:
+    // startPairing() starts the poll on it, so a stale one would have polled
+    // for a code this sheet no longer shows.
+    state.pairCode = '';
+    ui.pairCode.hidden = true;
+    ui.pairCode.textContent = '';
+    ui.pairImage.hidden = true;
+    ui.pairImage.removeAttribute('src');
+    ui.pairHelp.hidden = true;
+    ui.qrRetry.hidden = true;
     setStatus(message || 'Getting a code…', type);
   }
 
@@ -911,6 +972,18 @@
     setStatus(message, 'error');
   }
 
+  /**
+   * The OLD SERVER. fleet.lyreosai.com has no /pair/* routes until Markus
+   * approves a deploy, and answers 404 to every one of them today; a proxy or
+   * an older build can also say 405 or 501. None of those is "the code could
+   * not be had, try again" — a retry asks the same absent route. It means this
+   * browser is a plain pending device, and the pending screen is the honest
+   * one. Roku and Fire TV already fall back this way; the web did not.
+   */
+  function oldServer(result) {
+    return result.status === 404 || result.status === 405 || result.status === 501;
+  }
+
   async function startPairing() {
     if (state.busy) return;
     showQr();
@@ -928,6 +1001,12 @@
         headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
         body: JSON.stringify({ deviceId: credentials.id }),
       });
+      if (oldServer(result)) {
+        // No QR, no code, no poll: the screen the old fleet can actually act
+        // on, with "I am the owner" and the invite code as the ways forward.
+        showPendingApproval(credentials);
+        return;
+      }
       if (!result.ok) {
         showPairRetry(result.status === 429
           ? 'Too many codes were asked for. Wait a few minutes, then try again.'
@@ -960,6 +1039,13 @@
     // A poll that lands after the viewer walked away is answering a question
     // nobody asked any more.
     if (!state.pairTimer) return;
+    if (oldServer(result)) {
+      // /pair/start answered but /pair/status does not: a fleet mid-deploy, or
+      // a proxy that knows one route and not the other. Same answer as above.
+      stopPairPolling();
+      showPendingApproval(credentials);
+      return;
+    }
     if (!result.ok) {
       showPairRetry(result.timeout || result.status === 0
         ? 'The profile server stopped answering. Check the connection.'
@@ -1116,11 +1202,37 @@
 
   // ── APPROVER MODE (?pair=CODE, opened from the QR on another screen) ───────
 
-  function pairParamCode() {
+  // A pairing code is six of A-Z and 2-9 — the alphabet the fleet mints from,
+  // with the four characters a code read aloud gets wrong (0/O, 1/I) left out.
+  const PAIR_CODE_LENGTH = 6;
+  const PAIR_CODE_CHARS = /[^A-Z2-9]/g;
+  const PAIR_PATH = /^\/pair\/([A-Z2-9]{6})$/i;
+
+  function normalizePairCode(value) {
+    return String(value || '').toUpperCase().replace(PAIR_CODE_CHARS, '').slice(0, PAIR_CODE_LENGTH);
+  }
+
+  /**
+   * Was this page opened to approve a device, and with which code?
+   *
+   * Two spellings. The QR encodes blazingstream.lyreosai.com/pair/<CODE>, and
+   * the help line under it sends a phone to blazingstream.lyreosai.com/pair to
+   * type the code — the site turns both into /app/?pair=<CODE> and /app/?pair=
+   * (an EMPTY value). The approver used to read only a non-empty ?pair=, so
+   * the address the help line promises opened the app and asked nothing. Now
+   * `present` with no `code` opens the sheet with a box for the six characters.
+   * The bare /pair/<CODE> path is read too, belt and braces, in case a rewrite
+   * ever hands the app the path instead of the query.
+   */
+  function pairParam() {
     try {
-      return text(new URLSearchParams(window.location.search).get('pair') || '').toUpperCase().slice(0, 12);
+      const url = new URL(window.location.href);
+      const fromPath = PAIR_PATH.exec(url.pathname);
+      if (fromPath) return { present: true, code: fromPath[1].toUpperCase() };
+      if (!url.searchParams.has('pair')) return { present: false, code: '' };
+      return { present: true, code: normalizePairCode(url.searchParams.get('pair')) };
     } catch {
-      return '';
+      return { present: false, code: '' };
     }
   }
 
@@ -1140,13 +1252,26 @@
     }
   }
 
-  function showApprove() {
+  /**
+   * The approver sheet. With a code in hand it says "Checking…" and waits for
+   * the peek; opened to TYPE one (`entry`) it shows the six-character box and
+   * nothing else until the six are in.
+   */
+  function showApprove(entry = false) {
     hideAllScreens();
     setPanelView('gate');
     ui.approve.hidden = false;
     ui.kicker.textContent = 'Approve Device';
     ui.heading.textContent = 'Approve a device';
     ui.approveActions.hidden = true;
+    ui.approveQuestion.textContent = '';
+    ui.approveInput.hidden = !entry;
+    if (entry) {
+      ui.approveInput.value = '';
+      setStatus('Type the six-character code shown on the other screen.', 'info');
+      window.setTimeout(() => ui.approveInput.focus(), 0);
+      return;
+    }
     setStatus('Checking that code…', 'info');
   }
 
@@ -1158,36 +1283,100 @@
    */
   async function maybeShowApprover() {
     if (state.approverDone) return;
-    const code = pairParamCode();
-    if (!code || !state.activeProfile || !state.credentials) return;
+    const param = pairParam();
+    if (!param.present || !state.activeProfile || !state.credentials) return;
     state.approverDone = true;
-    state.approveCode = code;
     openPanel();
+    if (!param.code) {
+      state.approveEntry = true;
+      showApprove(true);
+      return;
+    }
+    state.approveEntry = false;
     showApprove();
-    const result = await request(`/pair/peek?code=${encodeURIComponent(code)}`, {
-      headers: { 'X-Device-Token': state.credentials.token },
-    });
-    if (result.status === 404) {
-      setStatus('No device is waiting on that code.', 'error');
+    await peekPairCode(param.code);
+  }
+
+  /**
+   * Ask the fleet which device is behind a code, and put the question up.
+   *
+   * `deviceId` goes with the code: the contract makes it required (400 'need
+   * deviceId') because the approver has to be a bound, active device itself.
+   * This call sent only ?code= — so against the real route the sheet could
+   * never reach Approve. /pair/status and /pair/approve already sent it.
+   */
+  async function peekPairCode(code) {
+    if (state.busy || !state.credentials) return;
+    state.approveCode = code;
+    // Busy for the round trip: the box is in BUSY_CONTROLS, so a seventh
+    // keystroke cannot start a second peek under the first.
+    setBusy(true);
+    let result;
+    try {
+      result = await request(
+        `/pair/peek?code=${encodeURIComponent(code)}&deviceId=${encodeURIComponent(state.credentials.id)}`,
+        { headers: { 'X-Device-Token': state.credentials.token } },
+      );
+    } finally {
+      setBusy(false);
+    }
+    // A dead code typed by hand is a typo until proven otherwise: keep the box
+    // and let the viewer fix it. A dead code from a link is dead — drop it so a
+    // refresh does not ask again.
+    const dead = (message) => {
+      state.approveCode = '';
+      setStatus(message, 'error');
+      if (state.approveEntry) {
+        ui.approveInput.value = '';
+        window.setTimeout(() => ui.approveInput.focus(), 0);
+        return;
+      }
       clearPairParam();
+    };
+    if (result.status === 404) {
+      dead('No device is waiting on that code.');
       return;
     }
     if (result.status === 410) {
-      setStatus('That code expired. Ask the other screen for a new one.', 'error');
-      clearPairParam();
+      dead('That code expired. Ask the other screen for a new one.');
       return;
     }
     if (!result.ok) {
+      state.approveCode = '';
       setStatus(serverError(result, result.timeout
         ? 'The profile server did not answer in time. Try the link again.'
         : 'Could not check that pairing code.'), 'error');
       return;
     }
     const model = text(result.body && (result.body.model || result.body.label), 'that device');
+    ui.approveInput.hidden = true;
     ui.approveQuestion.textContent = `Approve ${model} as a device on your account?`;
     ui.approveActions.hidden = false;
     setStatus('Only approve a screen you can see right now.', 'info');
     window.setTimeout(() => ui.approveYes.focus(), 0);
+  }
+
+  /**
+   * The typed code. Upper-cased and filtered to the code alphabet as it is
+   * typed — a phone keyboard offers lower case and the viewer should not have
+   * to fight it — and peeked the moment the sixth character lands, so there is
+   * no button to find. Enter does the same for a keyboard.
+   */
+  function onApproveInput() {
+    const code = normalizePairCode(ui.approveInput.value);
+    if (ui.approveInput.value !== code) ui.approveInput.value = code;
+    if (code.length === PAIR_CODE_LENGTH) submitApproveCode();
+  }
+
+  function submitApproveCode() {
+    if (state.busy || !state.approveEntry) return;
+    const code = normalizePairCode(ui.approveInput.value);
+    if (code.length !== PAIR_CODE_LENGTH) {
+      setStatus(`The code is ${PAIR_CODE_LENGTH} characters.`, 'error');
+      return;
+    }
+    setStatus('Checking that code…', 'info');
+    peekPairCode(code);
   }
 
   async function approvePairedDevice() {
@@ -1210,6 +1399,7 @@
       ui.approveQuestion.textContent = 'That device is now on your account.';
       setStatus('That device is now on your account.', 'info');
       state.approveCode = '';
+      state.approveEntry = false;
       clearPairParam();
     } finally {
       setBusy(false);
@@ -1218,6 +1408,7 @@
 
   function dismissApprover() {
     state.approveCode = '';
+    state.approveEntry = false;
     clearPairParam();
     // Nothing was approved and this browser is already through its own gate, so
     // the honest next screen is the app it was using.
@@ -1316,17 +1507,23 @@
     setBusy(true);
     setStatus('Creating this profile…', 'info');
     try {
-      const result = await request(`/profiles?deviceId=${encodeURIComponent(state.credentials.id)}`, {
+      const create = (credentials) => request(`/profiles?deviceId=${encodeURIComponent(credentials.id)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
         body: JSON.stringify({ name, isKids: !!ui.createKids.checked }),
       });
+      let result = await create(state.credentials);
       if (shouldRepairCredentials(result)) {
-        clearStoredCredentials();
-        state.credentials = null;
-        showWelcome();
-        setStatus('This browser connection is no longer valid. Start again.', 'error');
-        return;
+        const repaired = await repairCredentials(state.credentials);
+        if (!repaired) {
+          // repairCredentials() said why. A browser left with no identity at
+          // all belongs at the gate; one that kept its identity stays here.
+          if (!state.credentials) showGate(ui.status.textContent, 'error');
+          return;
+        }
+        // A repaired identity that turned out to be a NEW one is pending, and
+        // the retry's 403 below puts the pending screen up.
+        result = await create(repaired);
       }
       if (result.status === 403) {
         applyProfileList(result);
@@ -1422,42 +1619,105 @@
     return detail ? `Profile server: ${detail}` : fallback;
   }
 
-  async function registerDevice() {
-    const payload = JSON.stringify({
+  /**
+   * POST /agent/register. With `existing` credentials it is a RECLAIM: the
+   * stored deviceId goes in the body and the stored token in X-Device-Token,
+   * which is how every TV client re-registers (tvOS 7142fd5 is the shape). The
+   * fleet answers a reclaim with the SAME deviceId and NO deviceToken — it
+   * never re-issues a token it has already handed out — so the old token is
+   * kept. Without the pair, the fleet mints a fresh pending identity.
+   */
+  async function postRegister(existing) {
+    const body = {
       model: 'Blazing Web',
       fireOs: 'web',
       abi: 'web',
       appVersions: { web: DEVICE_VERSION },
       label: 'Blazing Web',
-    });
-    const result = await request('/agent/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-    });
-    if (!result.ok) {
-      if (result.status === 429) {
-        setStatus('Profile registration is temporarily limited. Wait, then select Connect profile again.', 'error');
-      } else {
-        setStatus(serverError(result, result.timeout
-          ? 'The profile server did not answer in time. Try again.'
-          : 'Could not register this browser with the profile server.'), 'error');
-      }
-      return null;
+    };
+    const headers = { 'Content-Type': 'application/json' };
+    if (existing) {
+      body.deviceId = existing.id;
+      headers['X-Device-Token'] = existing.token;
     }
+    return request('/agent/register', { method: 'POST', headers, body: JSON.stringify(body) });
+  }
+
+  /** The identity a 2xx register answer amounts to, or null when it has none. */
+  function credentialsFrom(result, existing) {
     const id = text(result.body && result.body.deviceId);
-    const token = text(result.body && result.body.deviceToken);
-    if (!id || !token) {
-      setStatus('The profile server did not return a browser connection. Nothing was selected.', 'error');
-      return null;
+    let token = text(result.body && result.body.deviceToken);
+    // A reclaim: same id back, no token in the body. The one we sent still stands.
+    if (!token && existing && id === existing.id) token = existing.token;
+    return id && token ? { id, token } : null;
+  }
+
+  function registerFailed(result) {
+    if (result.status === 429) {
+      setStatus('Profile registration is temporarily limited. Wait, then select Connect profile again.', 'error');
+      return;
     }
-    const credentials = { id, token };
+    setStatus(serverError(result, result.timeout
+      ? 'The profile server did not answer in time. Try again.'
+      : 'Could not register this browser with the profile server.'), 'error');
+  }
+
+  function keepCredentials(credentials) {
     if (!saveCredentials(credentials)) {
       setStatus('Browser storage is blocked. This browser cannot keep its profile connection.', 'error');
       return null;
     }
     state.credentials = credentials;
     return credentials;
+  }
+
+  async function registerDevice(existing = null) {
+    const result = await postRegister(existing);
+    if (!result.ok) {
+      registerFailed(result);
+      return null;
+    }
+    const credentials = credentialsFrom(result, existing);
+    if (!credentials) {
+      setStatus('The profile server did not return a browser connection. Nothing was selected.', 'error');
+      return null;
+    }
+    return keepCredentials(credentials);
+  }
+
+  /**
+   * A 401, or a 404 'unknown device', on a device route. Three call sites used
+   * to answer that by clearing the stored identity and registering a brand-new
+   * one. That is how tvOS minted 21 pending "Apple TV" phantoms in one
+   * afternoon (7142fd5): the fleet had only lost the record, or a proxy had
+   * dropped the header, and the APPROVED identity was thrown away for it —
+   * orphaned on the dashboard, and the viewer sent back to wait for approval
+   * they already had.
+   *
+   * So: reclaim first, with the id and token this browser holds. A 2xx that
+   * echoes the id keeps the identity (a fresh id with a token is the fleet
+   * saying it has already replaced the lost record, and that is kept too).
+   * Only a refusal — the fleet itself saying 401 or 'unknown device' to the
+   * reclaim — clears anything. A timeout, a 429, a 5xx keep the identity and
+   * say so; a bad minute of network must not cost an approval.
+   */
+  async function repairCredentials(existing) {
+    setStatus('Checking this browser connection…', 'info');
+    const reclaim = await postRegister(existing);
+    if (reclaim.ok) {
+      const credentials = credentialsFrom(reclaim, existing);
+      if (credentials) return keepCredentials(credentials);
+      setStatus('The profile server did not return a browser connection. Try again.', 'error');
+      return null;
+    }
+    if (!shouldRepairCredentials(reclaim)) {
+      registerFailed(reclaim);
+      return null;
+    }
+    clearStoredCredentials();
+    state.credentials = null;
+    setStatus('This browser connection is no longer valid. Registering a new browser connection…', 'info');
+    return registerDevice();
   }
 
   async function listProfiles(credentials) {
@@ -1472,24 +1732,39 @@
     return result.status === 404 && detail.startsWith('unknown device');
   }
 
+  /**
+   * The pending screen: this browser has an identity, and the fleet has not
+   * bound it to an account. Reached by a 403 from /profiles, and by the OLD
+   * fleet answering 404 to /pair/start (see oldServer()).
+   *
+   * The first eight characters of the deviceId are in the sentence because
+   * every browser registers as "Blazing Web": without them the owner cannot
+   * tell this one from the others on the dashboard. The televisions show the
+   * same eight.
+   */
+  function showPendingApproval(credentials) {
+    state.profiles = [];
+    state.approved = false;
+    state.activeProfile = null;
+    clearUnlock();
+    updateConnectButton();
+    showProfiles();
+    const id = text(credentials && credentials.id).slice(0, 8);
+    setStatus(`This browser is waiting for approval${id ? ` (device ${id})` : ''}. Approve it in the Blazing dashboard, use "I am the owner" below, or enter an invite code.`, 'pending');
+    // THE OWNER MUST NEVER BE LOCKED OUT. Approval is an admin action, and since
+    // this gate became mandatory a pending browser cannot be used at all — so
+    // without a way in from the pending screen itself, a new phone away from home
+    // is simply locked out of the household's own service. An invite code is the
+    // same escape hatch for a household member who is not the owner.
+    if (ui.owner) ui.owner.hidden = false;
+    if (ui.inviteFromPending) ui.inviteFromPending.hidden = false;
+  }
+
   function applyProfileList(result) {
     if (ui.owner) ui.owner.hidden = true;
     if (ui.inviteFromPending) ui.inviteFromPending.hidden = true;
     if (result.status === 403) {
-      state.profiles = [];
-      state.approved = false;
-      state.activeProfile = null;
-      clearUnlock();
-      updateConnectButton();
-      showProfiles();
-      setStatus('This browser is waiting for approval. Approve it in the Blazing dashboard, use "I am the owner" below, or enter an invite code.', 'pending');
-      // THE OWNER MUST NEVER BE LOCKED OUT. Approval is an admin action, and since
-      // this gate became mandatory a pending browser cannot be used at all — so
-      // without a way in from the pending screen itself, a new phone away from home
-      // is simply locked out of the household's own service. An invite code is the
-      // same escape hatch for a household member who is not the owner.
-      if (ui.owner) ui.owner.hidden = false;
-      if (ui.inviteFromPending) ui.inviteFromPending.hidden = false;
+      showPendingApproval(state.credentials);
       return;
     }
     if (!result.ok) {
@@ -1544,10 +1819,7 @@
       state.credentials = credentials;
       let result = await listProfiles(credentials);
       if (shouldRepairCredentials(result)) {
-        clearStoredCredentials();
-        state.credentials = null;
-        setStatus('This browser connection is no longer valid. Registering a new browser connection…', 'info');
-        credentials = await registerDevice();
+        credentials = await repairCredentials(credentials);
         if (!credentials) return;
         result = await listProfiles(credentials);
       }
@@ -1591,11 +1863,24 @@
       return;
     }
     if (shouldRepairCredentials(result)) {
-      clearStoredCredentials();
-      state.credentials = null;
       clearUnlock();
-      showProfiles();
-      setStatus('This browser connection is no longer valid. Select Refresh profiles to register a new browser connection.', 'error');
+      setBusy(true);
+      try {
+        const repaired = await repairCredentials(state.credentials);
+        if (!repaired) {
+          showProfiles();
+          return;
+        }
+        // The PIN digits are gone (cleared before the request, on purpose), so
+        // the viewer picks the profile again — from a list this identity can
+        // actually see, which is the pending screen if the repair minted a new one.
+        applyProfileList(await listProfiles(repaired));
+        if (state.approved) setStatus('This browser connection was repaired. Choose the profile again.', 'info');
+      } finally {
+        setBusy(false);
+        renderPin();
+        renderProfileList();
+      }
       return;
     }
     if (!result.ok) {
@@ -1930,6 +2215,15 @@
     ui.approve.id = 'bp-approve';
     ui.approve.hidden = true;
     const approveTop = sheetTop('approveBack', 'bp-approve-back', 'Approve a device');
+    // The six-character box, for a phone sent here by the help line with no
+    // code in the address (see pairParam()). Hidden whenever a code came in
+    // the address. Plain `text`, not `tel`: the alphabet is letters and digits.
+    ui.approveInput = input('bp-approve-input', 'text', 'Code from the other screen', 'off');
+    ui.approveInput.classList.add('bp-approve-code');
+    ui.approveInput.maxLength = PAIR_CODE_LENGTH;
+    ui.approveInput.autocapitalize = 'characters';
+    ui.approveInput.inputMode = 'text';
+    ui.approveInput.hidden = true;
     ui.approveQuestion = element('p', 'bp-approve-question');
     ui.approveQuestion.id = 'bp-approve-question';
     ui.approveActions = element('div', 'bp-form-actions');
@@ -1938,7 +2232,7 @@
     ui.approveYes = button('bp-verify', 'Approve', 'bp-approve-yes');
     ui.approveNo = button('bp-secondary', 'Not now', 'bp-approve-no');
     ui.approveActions.append(ui.approveYes, ui.approveNo);
-    ui.approve.append(approveTop, ui.approveQuestion, ui.approveActions);
+    ui.approve.append(approveTop, ui.approveInput, ui.approveQuestion, ui.approveActions);
 
     // Invite-code redemption. Reachable from the welcome screen (no identity
     // yet) AND from the pending-approval screen (identity exists, waiting on
@@ -2048,7 +2342,7 @@
       connectProfiles();
     });
     ui.refresh.addEventListener('click', connectProfiles);
-    ui.owner.addEventListener('click', () => openOwnerPin());
+    ui.owner.addEventListener('click', () => openOwnerPin('pending'));
     ui.inviteFromPending.addEventListener('click', () => showInvite());
     // The gate. ui.enterCode / ui.requestAccess are aliases of pillCode /
     // gateRecheck (see buildUi), so they get no listener of their own — a
@@ -2067,6 +2361,8 @@
     ui.signupSubmit.addEventListener('click', () => submitSignup());
     ui.signupPassword.addEventListener('keydown', enterSubmits(submitSignup));
     ui.approveBack.addEventListener('click', () => dismissApprover());
+    ui.approveInput.addEventListener('input', onApproveInput);
+    ui.approveInput.addEventListener('keydown', enterSubmits(submitApproveCode));
     ui.approveYes.addEventListener('click', () => approvePairedDevice());
     ui.approveNo.addEventListener('click', () => dismissApprover());
     ui.inviteBack.addEventListener('click', () => {
@@ -2095,7 +2391,16 @@
     ui.close.addEventListener('click', closePanel);
     keepBrowsing.addEventListener('click', closePanel);
     backdrop.addEventListener('click', closePanel);
-    ui.back.addEventListener('click', () => showProfiles('Choose who is watching.'));
+    ui.back.addEventListener('click', () => {
+      // Back goes to where the pad was opened from. The owner pad opened from
+      // the gate returns to the gate; showProfiles() there is an empty rail
+      // with no hatch and no way back (see state.padFrom).
+      if (state.ownerMode) {
+        leaveOwnerPad(state.padFrom === 'gate' ? undefined : 'Choose who is watching.');
+        return;
+      }
+      showProfiles('Choose who is watching.');
+    });
     ui.clear.addEventListener('click', clearPinEntry);
     ui.delete.addEventListener('click', deleteDigit);
     ui.digitButtons.forEach((button) => button.addEventListener('click', () => addDigit(button.dataset.digit || '')));

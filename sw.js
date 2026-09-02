@@ -31,7 +31,13 @@
 // email sign-in, the ?pair= approver — replaced the first-run welcome. A PWA
 // still holding the v19 profile.js has the gate's logic but none of the
 // elements it addresses, and fails with a TypeError on the first click.
-const CACHE = 'blazing-shell-v20';
+// v21: the gate against the LIVE fleet (profile.js). A v20 profile.js asks
+// /pair/peek without deviceId (the route answers 400, so a phone can never
+// approve), answers the old fleet's 404 to /pair/start with "Could not get a
+// pairing code" and a Try again that asks the same absent route instead of the
+// pending screen, and clears an APPROVED identity on the first 401 instead of
+// reclaiming it — the tvOS 7142fd5 orphan bug, in the browser.
+const CACHE = 'blazing-shell-v21';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
