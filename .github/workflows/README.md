@@ -80,6 +80,13 @@ Both python checks were run on python 3.9.6, 3.11.15, 3.12.13 and 3.14.3 —
 exit 0 on all four, so whichever python3 the ubuntu image carries will do.
 `shellcheck` was 0.11.0 and node was 25.9.0.
 
+**Confirmed on real runners.** PR #1, 2 Sep 2026, runner image 20260819.586:
+all five lanes green on the first run, no retries. Wall clock including
+checkout — `assets` 4 s, `manifests` 6 s, `syntax` 9 s, `python` 4 s, `shell`
+5 s, so `timeout-minutes: 5` is roughly 30x the slowest. The assets lane
+printed the same numbers there as here: 61 tracked files, 15 refs, 11 scripts,
+15 rsync excludes, 0 failures and the same 4 warnings.
+
 The assets lane was also proven **against mutations**, because a check that
 has quietly stopped matching passes for free. Each of these turned exit 0 into
 exit 1 with a named FAIL line, and reverting restored exit 0: a `<script>` tag
@@ -237,5 +244,7 @@ root. There is no CI-only wrapper to drift away from what people actually run.
    it is not forgotten.
 7. **shellcheck's version differs between here and the runner.** The severity
    table in `shell.yml` was measured on 0.11.0; the runner image ships an
-   older one (firetv's proven lane records 0.9.0). SC2027 exists in both. The
-   first real run is the proof.
+   older one (firetv's proven lane records 0.9.0). SC2027 exists in both, and
+   the first real run confirmed it — 0 findings, exit 0. Kept here because the
+   next person to change that `--severity`/`--exclude` pair should know the two
+   versions are not the same.

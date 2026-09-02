@@ -100,10 +100,12 @@ jobs:
         # If SC2027 ever needs to fire for real, fix line 87 or annotate it
         # with `# shellcheck disable=SC2027` and delete the --exclude here.
         #
-        # HONESTY NOTE: the runner's shellcheck is older than the 0.11.0
-        # measured here (firetv's proven lane says 0.9.0). SC2027 has existed
-        # for years and the five results above should hold, but the first real
-        # run is the proof, not this comment.
+        # The runner's shellcheck is older than the 0.11.0 measured here
+        # (firetv's proven lane records 0.9.0 on that image). SC2027 has
+        # existed for years, so the table above was expected to hold — and the
+        # first real run CONFIRMED it: PR #1, run 33649779132 on runner image
+        # 20260819.586, this exact command, 0 findings, exit 0, 5 s including
+        # checkout. No longer a pending question.
         #
         # Discovered with `git ls-files` rather than a hardcoded list, so a
         # script added anywhere is checked without anyone remembering to come
