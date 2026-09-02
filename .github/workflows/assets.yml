@@ -1,0 +1,152 @@
+# Nothing the app loads has gone missing, and nothing that ships drops it.
+#
+# WHY THIS LANE EARNS ITS MINUTES, and it is the lane worth the most in this
+# repo. blazing-web has no bundler and no build step, so NOTHING anywhere
+# resolves a reference. index.html names eleven scripts as plain strings.
+# sw.js names fifteen shell files as plain strings. The PWA manifest names four
+# icons as plain strings. build-tvs.sh decides by an rsync exclude list which
+# of them reach a television. Rename or delete a file and every one of those
+# strings goes on looking perfectly correct.
+#
+# Each of the five things this lane asserts is a failure that has already
+# happened in this repo, and all five are recorded in the repo's own comments:
+#
+#   * sw.js's SHELL list: emby.js sat outside it while index.html loaded it,
+#     "reaching devices through the HTTP cache alone". sw.js's install()
+#     comment records where that road ends: on blazingstream "a fresh
+#     index.html sat above a four-hour-old app.js and the app went on calling
+#     the wrong host".
+#   * build-tvs.sh's header: two releases packaged the wrong set of files
+#     because its exclude list and reality had drifted. The second one put
+#     .claude/ and .omc/ — agent session state and internal engineering notes,
+#     an 18 KB mission-state.json among them — onto a television.
+#   * GitHub Pages serves this directory verbatim, so a reference to a file
+#     that is not there is a plain 404 on the live site.
+#   * admin.js is dead code that imports a getConfig locker.js does not export.
+#     build-tvs.sh strips it. If index.html ever loaded it, the website would
+#     work and every TV package would not.
+#   * the same exclude-list bug a THIRD time, caught on this branch before it
+#     shipped: `--exclude '.git'` is an exact basename and does not match
+#     `.github`, so this very CI directory was being packaged onto a TV until
+#     build-tvs.sh was fixed here. The check now asserts that exclude.
+#
+# It is a python standard-library read of four files (index.html, sw.js,
+# manifest.webmanifest, build-tvs.sh) plus one `git ls-files`. No pip install,
+# no network. RE-MEASURED 2 Sep 2026 on a clean export of this branch's
+# tree: 0.36 s idle, 0.86 s with three browser harnesses running beside it
+# on 4 cores. Exit 0 on python 3.9.6, 3.11.15, 3.12.13 and 3.14.3.
+name: assets
+
+on:
+  # Broad on purpose, and this is the one lane where broad is correct: the
+  # check is about REFERENCES, and a reference breaks when the file at the
+  # other end is renamed or deleted. So any .js, any icon, the HTML, the
+  # worker, the manifest and the packaging script all have to be in the filter.
+  #
+  # blazing-web is a PUBLIC repo (verified 2 Sep 2026 with
+  # `gh repo view Kaoz625/blazing-web --json visibility`), so Actions minutes
+  # on ubuntu-latest cost nothing. The filter is still a filter, for a reason
+  # that is not money: a run that cannot change its answer is noise — a queue
+  # slot taken, a log nobody reads, a superseded run cancelled for nothing.
+  # A change to a .md, a .py or a *.smoke.mjs does not start this.
+  pull_request:
+    paths:
+      - '**/*.js'
+      - 'index.html'
+      - 'manifest.webmanifest'
+      - 'build-tvs.sh'
+      - '**/*.png'
+      - '**/*.svg'
+      - '**/*.css'
+      - '.github/checks/assets.py'
+      - '.github/workflows/assets.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.js'
+      - 'index.html'
+      - 'manifest.webmanifest'
+      - 'build-tvs.sh'
+      - '**/*.png'
+      - '**/*.svg'
+      - '**/*.css'
+      - '.github/checks/assets.py'
+      - '.github/workflows/assets.yml'
+  workflow_dispatch:
+
+# A superseded run on the same branch is cancelled. Not to save money — there
+# is none to save on a public repo — but so the tick on a PR is the tick for
+# the commit that is actually there, not an older one that finished later.
+concurrency:
+  group: assets-${{ github.ref }}
+  cancel-in-progress: true
+
+# READ-ONLY, and this repo needs it more than most. GitHub Pages is LIVE on
+# this repo — build_type "legacy", source branch main, path "/", serving
+# https://kaoz625.github.io/blazing-web/ (verified 2 Sep 2026 with
+# `gh api repos/Kaoz625/blazing-web/pages`). EVERY PUSH TO MAIN REPUBLISHES
+# THAT SITE. So no lane here writes to the repo, and none has a deploy or a
+# Pages step; the checks say yes or no and stop. A pull request from a fork
+# runs with a read-only token and NO secrets, which costs nothing here because
+# nothing references secrets.* in the first place.
+#
+# And because the repo is public, EVERY LINE OF EVERY LOG IS WORLD-READABLE —
+# not "anyone signed in", anyone. No step here prints an environment, lists a
+# HOME, runs curl with headers, or echoes anything that could carry a
+# credential. This one prints tracked file names and counts, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: asset reference checks
+    runs-on: ubuntu-latest
+    # Measured 0.36 s idle, 0.86 s under load. 5 minutes covers runner and
+    # image startup and still stops a hung step from sitting on the 6-hour
+    # default.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth is left at the default. The check reads `git ls-files`,
+        # which is the index of the checked-out tree — a shallow clone answers
+        # it exactly the same, and no history is read anywhere.
+
+      - name: assets
+        # MEASURED on a clean `git archive` export of this branch's tree,
+        # 2 Sep 2026, python 3.14.3:
+        #   61 tracked files (53 app files + 8 under .github/)
+        #   index.html: 15 relative refs, 11 scripts
+        #   sw.js SHELL: 15 named files
+        #   build-tvs.sh: 15 rsync excludes
+        #   0 failures, 4 warnings, exit code 0, 0.36-0.86 s
+        # The same exit 0 on python 3.9.6, 3.11.15 and 3.12.13, so whichever
+        # python3 the ubuntu image carries will do.
+        #
+        # The 4 warnings are dpad.js, games.js, manga.js and tv-comics-reader.js
+        # — loaded by index.html and not precached by sw.js. They are the
+        # emby.js bug, four times over, and they are PINNED in
+        # .github/checks/assets.py rather than warned about generically, so a
+        # FIFTH script left out of SHELL tomorrow is a HARD FAILURE from day
+        # one. The pinned list can only shrink: the check also fails if a name
+        # is still pinned after it has been fixed.
+        #
+        # PROVEN WITH MUTATIONS, not just on the green case. On the same
+        # export, 2 Sep 2026, each of these turned exit 0 into exit 1 with a
+        # named FAIL line, and reverting restored exit 0:
+        #   a new <script src="./brandnew.js"> in index.html      -> exit 1
+        #   './dpad.js' added to sw.js SHELL while still pinned   -> exit 1
+        #   --exclude 'manga.js' added to build-tvs.sh's rsync    -> exit 1
+        #   --exclude '.github' removed from build-tvs.sh         -> exit 1
+        #   --exclude '__pycache__' removed from build-tvs.sh     -> exit 1
+        #   every <script tag in index.html mangled               -> exit 1
+        # The last one is the silent-no-op guard: the regex finding nothing is
+        # itself a failure, not a pass.
+        #
+        # The last two guard a bug this CI itself introduced and this branch
+        # fixes. `--exclude '.git'` is an exact basename and does NOT match
+        # `.github`, so adding this directory put all seven of its files into
+        # every TV package — measured with `rsync --dry-run --itemize-changes`
+        # before the fix. See build-tvs.sh and the README's trap list.
+        #
+        # The same command a human runs locally, on purpose.
+        run: python3 .github/checks/assets.py
