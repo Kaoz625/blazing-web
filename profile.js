@@ -20,6 +20,13 @@
   // IIFE — so the first reference threw ReferenceError and took the whole pad
   // with it. The pad was not rejecting a wrong length; it was not working.
   const OWNER_PIN_LENGTH = 7;
+  // Pairing. 3 s is the interval the design contract names for GET /pair/status,
+  // and it is the same number every TV client polls at, so a code that looks
+  // dead on one screen is dead on all of them rather than dead on one.
+  const PAIR_POLL_MS = 3000;
+  // Minimum password length for an account. The server rejects shorter; saying
+  // so here means the viewer finds out before a round trip.
+  const MIN_PASSWORD = 8;
 
   const state = {
     credentials: null,
@@ -38,6 +45,20 @@
     unlockExpiresAt: 0,
     unlockTimer: 0,
     busy: false,
+    // ── the gate ──────────────────────────────────────────────────────────
+    // The live pairing request: its code, its poll timer, and whether the ONE
+    // free automatic restart on expiry has already been spent. A second silent
+    // restart would be a page that mints codes for ever with nobody watching.
+    pairCode: '',
+    pairTimer: 0,
+    pairRestarted: false,
+    // An account-invite code that /accounts/invite/check said was real. Held
+    // only long enough to post it back with the signup form.
+    inviteCode: '',
+    // The approver sheet (?pair=CODE) is offered once per page load, never on
+    // a loop, and only after this browser has passed its own gate.
+    approverDone: false,
+    approveCode: '',
   };
 
   const ui = {};
@@ -260,6 +281,95 @@
         .bp-profile:focus-visible { transform: none; }
       }
       @media (prefers-reduced-motion: reduce) { .bp-profile, .bp-digit, .bp-action { transition: none; } }
+
+      /* ── THE GATE ────────────────────────────────────────────────────────
+         Markus, 1 Sep 2026: the root of blazingstream must open on the same
+         shape of screen movieboxpro.app shows a logged-out visitor — one
+         centred column on a near-black page, a door, PRIVATE CLUB, and three
+         identical pills. None of their art or their words are here: the door
+         is drawn in this file, the copy is ours.
+
+         It is the SAME panel, not a second one. data-view="gate" widens the
+         420px rail to the whole viewport and centres it; every other screen
+         leaves the rail exactly as it was. Building a separate full-screen
+         element would have meant a second gate to keep in step with this one,
+         which is the drift navparity.smoke.mjs exists to catch elsewhere. */
+      .bp-layer[data-view="gate"] { background: var(--bg, #0A0A0A); }
+      /* The per-profile art belongs to the rail. On the gate there is no
+         profile yet, so there is nothing honest to show behind it. */
+      .bp-layer[data-view="gate"] .bp-art { display: none; }
+      .bp-layer[data-view="gate"] .bp-panel {
+        width: 100%;
+        justify-content: center;
+        align-items: center;
+        border-right: 0;
+        padding: calc(24px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
+        text-align: center;
+        background: var(--bg, #0A0A0A);
+      }
+      .bp-layer[data-view="gate"] .bp-kicker, .bp-layer[data-view="gate"] .bp-copy { display: none; }
+      /* NOT display:none. The panel is aria-labelledby="bp-heading", so the
+         heading has to keep existing for a screen reader even while the gate
+         draws its own title. */
+      .bp-layer[data-view="gate"] .bp-heading {
+        position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+        overflow: hidden; white-space: nowrap; clip-path: inset(50%);
+      }
+      .bp-layer[data-view="gate"] .bp-welcome, .bp-layer[data-view="gate"] .bp-invite,
+      .bp-layer[data-view="gate"] .bp-qr, .bp-layer[data-view="gate"] .bp-signup,
+      .bp-layer[data-view="gate"] .bp-email, .bp-layer[data-view="gate"] .bp-approve,
+      .bp-layer[data-view="gate"] .bp-pin, .bp-layer[data-view="gate"] .bp-status {
+        width: 100%; max-width: 360px;
+      }
+      /* Refresh / Keep browsing belong to the rail. The gate offers its own
+         small links instead, so the footer would only be a second row of
+         buttons saying the same things. */
+      .bp-layer[data-view="gate"] .bp-footer { display: none; }
+      .bp-qr[hidden], .bp-signup[hidden], .bp-email[hidden], .bp-approve[hidden] { display: none; }
+
+      .bp-gate-mark { display: block; width: min(272px, 62vw); height: auto; margin: 0 auto; }
+      .bp-gate-title { margin: 20px 0 0; color: #fff; font-size: clamp(23px, 5.4vw, 30px); font-weight: 900; letter-spacing: .2em; text-transform: uppercase; }
+      .bp-gate-sub { margin: 10px 0 0; color: var(--muted, #a3a3aa); font-size: clamp(15px, 3.6vw, 18px); }
+      .bp-gate-key { display: block; width: 46px; height: 18px; margin: 18px auto 0; }
+      .bp-gate-pills { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: 24px; }
+      /* One pill shape for all three, which is the whole point of the
+         reference screen: no option is dressed up as the important one. */
+      .bp-pill {
+        display: flex; align-items: center; gap: 14px;
+        width: min(320px, 100%); min-height: 56px;
+        border: 1px solid rgba(255,255,255,.12); border-radius: 999px;
+        padding: 8px 22px; color: var(--text, #f7f7f8); background: transparent;
+        font: inherit; text-align: left;
+        transition: border-color .15s, background .15s;
+      }
+      .bp-pill:hover:not(:disabled), .bp-pill:focus-visible:not(:disabled) { border-color: rgba(255,61,71,.85); background: rgba(255,61,71,.12); }
+      /* Visibly off, and it stays off while busy toggles around it — Google
+         sign-in is not built, and a pill that looks live is a promise. */
+      .bp-pill:disabled { opacity: .42; }
+      .bp-pill-icon { flex: 0 0 auto; width: 22px; height: 22px; }
+      .bp-pill-copy { min-width: 0; flex: 1; }
+      .bp-pill-label { display: block; font-size: 13px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+      .bp-pill-sub { display: block; margin-top: 2px; color: var(--muted, #a3a3aa); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
+      .bp-gate-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 16px; }
+      .bp-gate-link { min-height: 44px; border: 0; border-radius: 999px; padding: 8px 13px; color: var(--muted, #a3a3aa); background: transparent; font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+      .bp-gate-link:hover, .bp-gate-link:focus-visible { color: var(--text, #f7f7f8); }
+      .bp-sheet-title { margin: 0 0 4px; color: #fff; font-size: 20px; font-weight: 900; letter-spacing: .04em; }
+      .bp-sheet-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+      /* Big enough to read across a room and off a photograph of the screen. */
+      .bp-paircode { margin: 16px 0 0; color: #fff; font-size: clamp(38px, 11vw, 56px); font-weight: 900; letter-spacing: .18em; line-height: 1.05; }
+      /* White plate under the QR on purpose: a QR inverted on a near-black
+         ground is unreadable to a lot of phone cameras. */
+      .bp-pairqr { display: block; width: 188px; height: 188px; margin: 18px auto 0; border-radius: 14px; padding: 9px; background: #fff; }
+      .bp-pairhelp { max-width: 330px; margin: 16px auto 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.5; }
+      .bp-input { width: 100%; min-height: 52px; margin-top: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 16px; font-weight: 700; }
+      .bp-form-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+      /* Both set display themselves, which beats the UA's [hidden] rule. */
+      .bp-pairqr[hidden], .bp-form-actions[hidden] { display: none; }
+      .bp-gate-key { color: var(--muted, #a3a3aa); }
+      /* The gate centres everything; an email address centred in its box
+         reads as decoration rather than a field. */
+      .bp-email .bp-input, .bp-signup .bp-input { text-align: left; }
+      .bp-approve-question { margin: 6px 0 0; color: #fff; font-size: 18px; font-weight: 800; line-height: 1.4; }
     `;
     document.head.appendChild(style);
   }
@@ -269,23 +379,36 @@
     ui.status.dataset.state = type;
   }
 
+  /**
+   * Every control the busy flag owns, by ui key. A list rather than a wall of
+   * assignments because the gate roughly doubled the number of them, and the
+   * old form threw a TypeError the moment one of the named controls was not
+   * built — which is exactly the class of failure pinpad.smoke.mjs exists for.
+   * A missing key is skipped, not thrown on.
+   *
+   * The Google pill is deliberately absent: it is disabled for good, and
+   * setBusy(false) would switch it back on.
+   */
+  const BUSY_CONTROLS = [
+    'connect', 'refresh', 'close', 'back',
+    'pillQr', 'pillCode', 'gateEmail', 'gateOwner', 'owner', 'gateRecheck',
+    'inviteBack', 'inviteInput', 'inviteSubmit',
+    'createBack', 'createName', 'createKids', 'createSubmit',
+    'qrBack', 'qrRetry',
+    'signupBack', 'signupName', 'signupEmail', 'signupPassword', 'signupSubmit',
+    'emailBack', 'emailAddress', 'emailPassword', 'emailSubmit',
+    'approveBack', 'approveYes', 'approveNo',
+  ];
+
   function setBusy(busy) {
     state.busy = busy;
-    ui.connect.disabled = busy;
-    ui.refresh.disabled = busy;
-    ui.close.disabled = busy;
-    ui.verify.disabled = busy || state.pinDigits.length !== 4;
-    ui.back.disabled = busy;
-    ui.requestAccess.disabled = busy;
-    ui.enterCode.disabled = busy;
-    ui.inviteFromPending.disabled = busy;
-    ui.inviteBack.disabled = busy;
-    ui.inviteInput.disabled = busy;
-    ui.inviteSubmit.disabled = busy;
-    ui.createBack.disabled = busy;
-    ui.createName.disabled = busy;
-    ui.createKids.disabled = busy;
-    ui.createSubmit.disabled = busy;
+    BUSY_CONTROLS.forEach((key) => {
+      if (ui[key]) ui[key].disabled = busy;
+    });
+    // pinLength(), not a hard 4: in owner mode the pad wants seven, and the old
+    // literal left Verify disabled after every setBusy(false) until renderPin()
+    // happened to run again.
+    if (ui.verify) ui.verify.disabled = busy || state.pinDigits.length !== pinLength();
     document.querySelectorAll('.bp-profile, .bp-digit, .bp-action').forEach((button) => {
       button.disabled = busy;
     });
@@ -540,6 +663,7 @@
     state.pendingProfile = profile;
     clearPinEntry();
     hideAllScreens();
+    setPanelView('');
     ui.pin.hidden = false;
     setStatus('Enter four digits, then select Verify. A failed check uses one server attempt.', 'info');
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
@@ -548,9 +672,10 @@
   /**
    * Ask for the owner PIN so this browser can approve itself.
    *
-   * Only reachable from the pending screen. The server does the deciding — this
-   * only collects six digits and posts them — and it needs this browser's device
-   * token, so the PIN alone is not enough from somewhere else.
+   * Reachable from the pending screen and, through openOwnerPinFromGate(), from
+   * the gate. The server does the deciding — this only collects the digits and
+   * posts them — and it needs this browser's device token, so the PIN alone is
+   * not enough from somewhere else.
    */
   function openOwnerPin() {
     if (state.busy) return;
@@ -566,6 +691,31 @@
     ui.pin.hidden = false;
     setStatus('Enter the seven-digit owner PIN to approve this browser. Attempts are limited.', 'info');
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
+  }
+
+  /**
+   * "I am the owner" on the GATE. openOwnerPin() refuses without a device
+   * token, because the PIN is posted WITH that token — and a first-visit
+   * browser has none yet. So this mints the identity first, then opens the
+   * pad. It is the one gate control that registers before it shows anything,
+   * and only because the pad it opens is useless without the identity.
+   *
+   * The panel stays in gate view on purpose: the gate CSS already lays
+   * `.bp-pin` out as a centred column, and the owner is still at the gate.
+   */
+  async function openOwnerPinFromGate() {
+    if (state.busy) return;
+    setBusy(true);
+    setStatus('Preparing this browser…', 'info');
+    let credentials = null;
+    try {
+      credentials = await ensureDevice();
+    } finally {
+      setBusy(false);
+    }
+    // registerDevice() already put the reason in the status line.
+    if (!credentials) return;
+    openOwnerPin();
   }
 
   async function verifyOwnerPin() {
@@ -619,6 +769,7 @@
     state.ownerMode = false;
     clearPinEntry();
     hideAllScreens();
+    setPanelView('');
     ui.profiles.hidden = false;
     ui.kicker.textContent = 'Profiles';
     ui.heading.textContent = 'Who is watching?';
@@ -633,39 +784,456 @@
    * to hide profiles and pin, and it was easy to leave two visible at once.
    */
   function hideAllScreens() {
+    // Leaving this screen stops the pairing poll. Without it, walking back to
+    // the gate from the QR screen left a timer asking /pair/status every three
+    // seconds for the rest of the session, and a late 'approved' would have
+    // yanked whoever was reading the screen into the profile rail.
+    stopPairPolling();
     ui.welcome.hidden = true;
     ui.invite.hidden = true;
     ui.createProfile.hidden = true;
     ui.pin.hidden = true;
     ui.profiles.hidden = true;
+    if (ui.qr) ui.qr.hidden = true;
+    if (ui.signup) ui.signup.hidden = true;
+    if (ui.email) ui.email.hidden = true;
+    if (ui.approve) ui.approve.hidden = true;
   }
 
   /**
-   * The first screen a browser with no stored device identity ever sees.
-   * Nothing is registered yet — that only happens once "Request Access" or
-   * an invite code is actually submitted, so a visitor who closes the tab
-   * here has created no pending device for Markus to see on the dashboard.
+   * The panel is one element wearing two shapes. '' is the 420px profile rail
+   * it has always been; 'gate' is the full-viewport centred column. See the
+   * data-view block in addStyle().
    */
-  function showWelcome() {
+  function setPanelView(view) {
+    if (ui.layer) ui.layer.dataset.view = view;
+  }
+
+  /**
+   * THE GATE — the first screen anyone sees, and the screen a browser that is
+   * not paired keeps seeing.
+   *
+   * Nothing is registered by showing it. A device record is minted only when a
+   * viewer actually picks a way in (Scan QR, Type code, Sign in, I am the
+   * owner), so a visitor who closes the tab here leaves nothing behind on the
+   * dashboard. That rule is pinned by pinpad.smoke.mjs.
+   *
+   * `.bp-welcome` is still on the section on purpose: it is the same first-run
+   * screen, wearing the new shape, and the existing hide rule and the existing
+   * smoke test both address it by that name.
+   */
+  function showGate(message, type = 'info') {
     hideAllScreens();
+    setPanelView('gate');
     ui.welcome.hidden = false;
     ui.kicker.textContent = 'Get Access';
-    ui.heading.textContent = 'New to Blazing?';
-    setStatus('Choose how you want to get in.', 'info');
+    ui.heading.textContent = 'Private club';
+    // Offered only once this browser has an identity to re-check. On a first
+    // visit there is nothing to check again, and a button that can only say
+    // "nothing happened" is worse than no button.
+    if (ui.gateRecheck) ui.gateRecheck.hidden = !(state.credentials || storedCredentials());
+    setStatus(message || 'Choose how you want to get in.', type);
   }
+
+  // Kept as a name because four call sites and one smoke test know it. The
+  // gate IS the welcome screen now.
+  const showWelcome = showGate;
 
   function showInvite() {
     hideAllScreens();
+    setPanelView('gate');
     ui.invite.hidden = false;
     ui.kicker.textContent = 'Invite Code';
     ui.heading.textContent = 'Enter your code';
     ui.inviteInput.value = '';
-    setStatus('Enter the invite code you were given.', 'info');
+    setStatus('Type the code you were given.', 'info');
     window.setTimeout(() => ui.inviteInput.focus(), 0);
+  }
+
+  /**
+   * A device identity, made only when one is actually needed. Every gate flow
+   * except "type an invite code with an existing identity" needs a deviceId and
+   * a token before it can ask the fleet anything.
+   */
+  async function ensureDevice() {
+    const existing = state.credentials || storedCredentials();
+    if (existing) {
+      state.credentials = existing;
+      return existing;
+    }
+    const created = await registerDevice();
+    if (created) state.credentials = created;
+    return created;
+  }
+
+  // ── SCAN QR TO LOGIN ───────────────────────────────────────────────────────
+  // This browser is the NEW device. It shows a short code and the QR of the
+  // same code, then asks the fleet every three seconds whether somebody has
+  // approved it from a screen that is already signed in.
+
+  function stopPairPolling() {
+    if (state.pairTimer) {
+      window.clearInterval(state.pairTimer);
+      state.pairTimer = 0;
+    }
+  }
+
+  function showQr(message, type = 'info') {
+    hideAllScreens();
+    setPanelView('gate');
+    ui.qr.hidden = false;
+    ui.kicker.textContent = 'Scan QR';
+    ui.heading.textContent = 'Pair this browser';
+    setStatus(message || 'Getting a code…', type);
+  }
+
+  function renderPairCode(code) {
+    state.pairCode = code;
+    ui.pairCode.textContent = code;
+    ui.pairCode.hidden = false;
+    // The fleet renders the QR, so the app carries no QR library and the image
+    // a phone photographs is the same one every TV client shows.
+    ui.pairImage.src = `${FLEET_BASE}/pair/qr/${encodeURIComponent(code)}.png`;
+    ui.pairImage.hidden = false;
+    ui.pairHelp.hidden = false;
+    ui.qrRetry.hidden = true;
+  }
+
+  function showPairRetry(message) {
+    stopPairPolling();
+    ui.pairCode.hidden = true;
+    ui.pairImage.hidden = true;
+    ui.pairHelp.hidden = true;
+    ui.qrRetry.hidden = false;
+    // A sentence and a button, never a spinner that spins for ever. A pairing
+    // screen with nothing on it reads as a broken app rather than a bad minute
+    // of network.
+    setStatus(message, 'error');
+  }
+
+  async function startPairing() {
+    if (state.busy) return;
+    showQr();
+    setBusy(true);
+    let credentials = null;
+    try {
+      credentials = await ensureDevice();
+      if (!credentials) {
+        // registerDevice() already said why in the status line.
+        showPairRetry(ui.status.textContent || 'Could not reach the profile server.');
+        return;
+      }
+      const result = await request('/pair/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
+        body: JSON.stringify({ deviceId: credentials.id }),
+      });
+      if (!result.ok) {
+        showPairRetry(result.status === 429
+          ? 'Too many codes were asked for. Wait a few minutes, then try again.'
+          : serverError(result, result.timeout
+            ? 'The profile server did not answer in time.'
+            : 'Could not get a pairing code.'));
+        return;
+      }
+      const code = text(result.body && result.body.code).toUpperCase();
+      if (!code) {
+        showPairRetry('The profile server did not return a pairing code.');
+        return;
+      }
+      renderPairCode(code);
+      setStatus('Waiting for approval…', 'pending');
+    } finally {
+      setBusy(false);
+    }
+    if (credentials && state.pairCode) {
+      state.pairTimer = window.setInterval(() => pollPairStatus(credentials), PAIR_POLL_MS);
+    }
+  }
+
+  async function pollPairStatus(credentials) {
+    if (state.busy || !state.pairTimer) return;
+    const result = await request(
+      `/pair/status?deviceId=${encodeURIComponent(credentials.id)}`,
+      { headers: { 'X-Device-Token': credentials.token } },
+    );
+    // A poll that lands after the viewer walked away is answering a question
+    // nobody asked any more.
+    if (!state.pairTimer) return;
+    if (!result.ok) {
+      showPairRetry(result.timeout || result.status === 0
+        ? 'The profile server stopped answering. Check the connection.'
+        : serverError(result, 'The profile server refused the pairing check.'));
+      return;
+    }
+    const pairState = text(result.body && result.body.state).toLowerCase();
+    if (pairState === 'approved') {
+      stopPairPolling();
+      setStatus('This browser is approved. Loading profiles…', 'info');
+      // connectProfiles() is what puts the normal profile rail up, and picking
+      // a profile there is what fires blazing-profile-selected — the ONE event
+      // app.js listens for to leave BrightMinds safe mode. Skipping it would
+      // leave a paired browser looking at the kids catalogue.
+      await connectProfiles();
+      return;
+    }
+    if (pairState === 'expired') {
+      stopPairPolling();
+      if (!state.pairRestarted) {
+        state.pairRestarted = true;
+        setStatus('That code expired. Here is a new one.', 'pending');
+        await startPairing();
+        return;
+      }
+      showPairRetry('That code expired again. Select Try again when you are ready.');
+    }
+  }
+
+  // ── HAVE AN EMAIL LOGIN? SIGN IN ───────────────────────────────────────────
+
+  function showEmail() {
+    hideAllScreens();
+    setPanelView('gate');
+    ui.email.hidden = false;
+    ui.kicker.textContent = 'Sign In';
+    ui.heading.textContent = 'Sign in';
+    ui.emailPassword.value = '';
+    setStatus('Sign in with the email and password on your account.', 'info');
+    window.setTimeout(() => ui.emailAddress.focus(), 0);
+  }
+
+  /**
+   * The three refusals the contract names, each in its own sentence. A single
+   * "login failed" sends a suspended account hunting for a typo.
+   */
+  function accountErrorMessage(result, fallback) {
+    if (result.status === 401) return 'That email or password is not right.';
+    if (result.status === 429) return 'Too many tries. Wait a few minutes.';
+    if (result.status === 403) {
+      const detail = text(result.body && result.body.error).toLowerCase();
+      if (detail === 'account suspended') return 'This account is suspended. Ask the owner.';
+      if (detail === 'account pending approval') return 'This account is waiting for the owner to approve it.';
+      return 'This account cannot sign in yet. Ask the owner.';
+    }
+    return serverError(result, result.timeout
+      ? 'The profile server did not answer in time. Try again.'
+      : fallback);
+  }
+
+  async function submitEmailLogin() {
+    if (state.busy) return;
+    const email = (ui.emailAddress.value || '').trim().toLowerCase();
+    const password = ui.emailPassword.value || '';
+    if (!email || !password) {
+      setStatus('Enter both the email address and the password.', 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Signing in…', 'info');
+    try {
+      const credentials = await ensureDevice();
+      if (!credentials) return;
+      const result = await request('/accounts/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, deviceId: credentials.id }),
+      });
+      if (!result.ok) {
+        setStatus(accountErrorMessage(result, 'Could not sign in.'), 'error');
+        return;
+      }
+      ui.emailPassword.value = '';
+      setStatus('Signed in. Loading profiles…', 'info');
+      setBusy(false);
+      await connectProfiles();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ── TYPE CODE → an ACCOUNT invite → sign up ────────────────────────────────
+
+  function showSignup(name) {
+    hideAllScreens();
+    setPanelView('gate');
+    ui.signup.hidden = false;
+    ui.kicker.textContent = 'New Account';
+    ui.heading.textContent = 'Make your account';
+    ui.signupName.value = name || '';
+    ui.signupPassword.value = '';
+    setStatus('That code opens a new account. Fill this in and you are in.', 'info');
+    window.setTimeout(() => ui.signupName.focus(), 0);
+  }
+
+  async function submitSignup() {
+    if (state.busy) return;
+    const name = (ui.signupName.value || '').trim();
+    const email = (ui.signupEmail.value || '').trim().toLowerCase();
+    const password = ui.signupPassword.value || '';
+    if (!name) {
+      setStatus('Enter a name for the account.', 'error');
+      return;
+    }
+    if (!email) {
+      setStatus('Enter an email address.', 'error');
+      return;
+    }
+    if (password.length < MIN_PASSWORD) {
+      setStatus(`Use at least ${MIN_PASSWORD} characters for the password.`, 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Making the account…', 'info');
+    try {
+      const credentials = await ensureDevice();
+      if (!credentials) return;
+      const result = await request('/accounts/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: state.inviteCode, email, password, name, deviceId: credentials.id }),
+      });
+      if (!result.ok) {
+        if (result.status === 409) {
+          setStatus('That email already has an account. Sign in instead.', 'error');
+        } else if (result.status === 410) {
+          setStatus('That code has expired. Ask for a new one.', 'error');
+        } else if (result.status === 404) {
+          setStatus('That code was not recognized. Check it and try again.', 'error');
+        } else {
+          setStatus(accountErrorMessage(result, 'Could not make that account.'), 'error');
+        }
+        return;
+      }
+      ui.signupPassword.value = '';
+      state.inviteCode = '';
+      setStatus('Account made. Loading profiles…', 'info');
+      setBusy(false);
+      await connectProfiles();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ── APPROVER MODE (?pair=CODE, opened from the QR on another screen) ───────
+
+  function pairParamCode() {
+    try {
+      return text(new URLSearchParams(window.location.search).get('pair') || '').toUpperCase().slice(0, 12);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Take ?pair= off the address bar so a refresh, a bookmark or a shared link
+   * does not ask the same question again — the code is single use and the
+   * second ask can only fail.
+   */
+  function clearPairParam() {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('pair')) return;
+      url.searchParams.delete('pair');
+      window.history.replaceState(null, '', url.pathname + (url.search || '') + url.hash);
+    } catch {
+      // An address bar we cannot rewrite is not worth failing the approval for.
+    }
+  }
+
+  function showApprove() {
+    hideAllScreens();
+    setPanelView('gate');
+    ui.approve.hidden = false;
+    ui.kicker.textContent = 'Approve Device';
+    ui.heading.textContent = 'Approve a device';
+    ui.approveActions.hidden = true;
+    setStatus('Checking that code…', 'info');
+  }
+
+  /**
+   * The approver half of the QR flow. It runs only AFTER this browser has come
+   * through the gate and a profile has actually been picked — approving a
+   * device is an account action, and until a profile is chosen there is nobody
+   * here to take it.
+   */
+  async function maybeShowApprover() {
+    if (state.approverDone) return;
+    const code = pairParamCode();
+    if (!code || !state.activeProfile || !state.credentials) return;
+    state.approverDone = true;
+    state.approveCode = code;
+    openPanel();
+    showApprove();
+    const result = await request(`/pair/peek?code=${encodeURIComponent(code)}`, {
+      headers: { 'X-Device-Token': state.credentials.token },
+    });
+    if (result.status === 404) {
+      setStatus('No device is waiting on that code.', 'error');
+      clearPairParam();
+      return;
+    }
+    if (result.status === 410) {
+      setStatus('That code expired. Ask the other screen for a new one.', 'error');
+      clearPairParam();
+      return;
+    }
+    if (!result.ok) {
+      setStatus(serverError(result, result.timeout
+        ? 'The profile server did not answer in time. Try the link again.'
+        : 'Could not check that pairing code.'), 'error');
+      return;
+    }
+    const model = text(result.body && (result.body.model || result.body.label), 'that device');
+    ui.approveQuestion.textContent = `Approve ${model} as a device on your account?`;
+    ui.approveActions.hidden = false;
+    setStatus('Only approve a screen you can see right now.', 'info');
+    window.setTimeout(() => ui.approveYes.focus(), 0);
+  }
+
+  async function approvePairedDevice() {
+    if (state.busy || !state.approveCode || !state.credentials) return;
+    setBusy(true);
+    setStatus('Approving…', 'info');
+    try {
+      const result = await request('/pair/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        body: JSON.stringify({ code: state.approveCode, deviceId: state.credentials.id }),
+      });
+      if (!result.ok) {
+        if (result.status === 404) setStatus('No device is waiting on that code.', 'error');
+        else if (result.status === 410) setStatus('That code expired before it was approved.', 'error');
+        else setStatus(serverError(result, 'Could not approve that device.'), 'error');
+        return;
+      }
+      ui.approveActions.hidden = true;
+      ui.approveQuestion.textContent = 'That device is now on your account.';
+      setStatus('That device is now on your account.', 'info');
+      state.approveCode = '';
+      clearPairParam();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function dismissApprover() {
+    state.approveCode = '';
+    clearPairParam();
+    // Nothing was approved and this browser is already through its own gate, so
+    // the honest next screen is the app it was using.
+    if (state.activeProfile) {
+      ui.approve.hidden = true;
+      setPanelView('');
+      ui.profiles.hidden = false;
+      closePanel();
+      return;
+    }
+    showGate();
   }
 
   function showCreateProfile() {
     hideAllScreens();
+    setPanelView('');
     ui.createProfile.hidden = false;
     ui.kicker.textContent = 'New Profile';
     ui.heading.textContent = 'Create a profile';
@@ -698,6 +1266,20 @@
       });
       if (!result.ok) {
         if (result.status === 404) {
+          // Not a household invite. The same six characters may be an ACCOUNT
+          // invite from the owner — the kind that opens a NEW account rather
+          // than joining an existing one — and the viewer was never told which
+          // kind they were handed. Ask before calling it unknown.
+          const invite = await request(`/accounts/invite/check?code=${encodeURIComponent(code)}`);
+          if (invite.ok && invite.body && invite.body.valid === true) {
+            state.inviteCode = code;
+            showSignup(text(invite.body.name));
+            return;
+          }
+          if (invite.status === 410) {
+            setStatus('That code has expired or has already been used. Ask for a new one.', 'error');
+            return;
+          }
           setStatus('That code was not recognized. Check it and try again.', 'error');
         } else if (result.status === 409) {
           setStatus('That code has already been used. Ask for a new one.', 'error');
@@ -787,6 +1369,9 @@
     // way. Leaving the panel up made the user close a dialog they had just
     // finished with — and while it was the gate, that read as "it did not work".
     closePanel();
+    // AFTER closePanel(), not after the dispatch: the approver sheet reopens
+    // the panel, and closePanel() would have shut it again a line later.
+    maybeShowApprover();
   }
 
   const pinLength = () => (state.ownerMode ? OWNER_PIN_LENGTH : 4);
@@ -1052,6 +1637,7 @@
     dispatchProfileSelection(profile);
     setStatus(`${profile.name} is selected. Its unlock stays only in this browser session.`, 'info');
     closePanel();
+    maybeShowApprover();
   }
 
   /**
@@ -1108,6 +1694,96 @@
     ui.connect.focus();
   }
 
+  // ── THE GATE'S ART. Drawn here, not fetched: no image request that can
+  // fail on a bad connection, and nothing borrowed — the door, the flame and
+  // the key are this file's own lines. #FF3D47 is the accent every Blazing
+  // client uses; #0A0A0B is the page.
+  const DOOR_MARK = `
+    <svg class="bp-gate-mark" viewBox="0 0 272 200">
+      <rect width="272" height="200" rx="28" fill="#0A0A0B"/>
+      <path d="M84 178V96a52 52 0 0 1 104 0v82" fill="none" stroke="#FF3D47" stroke-width="10" stroke-linecap="round"/>
+      <path d="M60 178h152" fill="none" stroke="#FF3D47" stroke-width="6" stroke-linecap="round" opacity=".55"/>
+      <path d="M136 152c-22 0-34-15-30-33 3-12 12-18 12-32 8 8 12 16 12 24 5-10 3-22 10-38 5 18 22 28 26 48 4 20-8 31-30 31z" fill="#FF3D47"/>
+      <path d="M136 150c-11 0-17-9-14-19 2-7 9-11 8-20 8 7 14 15 14 24 0 8-3 15-8 15z" fill="#FFB36B"/>
+    </svg>`;
+  const KEY_GLYPH = `
+    <svg class="bp-gate-key" viewBox="0 0 46 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="8" cy="9" r="6"/>
+      <path d="M14 9h30M36 9v5M42 9v4"/>
+    </svg>`;
+  const ICON_GOOGLE = `
+    <svg class="bp-pill-icon" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M19 11a8 8 0 1 1-2.4-5.7M11 11h8"/>
+    </svg>`;
+  const ICON_QR = `
+    <svg class="bp-pill-icon" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="13" y="3" width="6" height="6" rx="1"/><rect x="3" y="13" width="6" height="6" rx="1"/>
+      <path d="M13 13h2v2h-2zM17 13h2M13 17h2M17 17h2v2"/>
+    </svg>`;
+  const ICON_CODE = `
+    <svg class="bp-pill-icon" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="6" width="18" height="11" rx="2"/>
+      <path d="M6 10h1M10 10h1M14 10h1M7 13.5h8"/>
+    </svg>`;
+
+  /** Inline SVG from markup. Decorative, always — the words sit next to it. */
+  function svg(markup) {
+    const template = document.createElement('template');
+    template.innerHTML = markup.trim();
+    const node = template.content.firstElementChild;
+    node.setAttribute('aria-hidden', 'true');
+    node.setAttribute('focusable', 'false');
+    return node;
+  }
+
+  /**
+   * Every gate control gets an id starting `bp-`, because gate.smoke.mjs
+   * drives the screen by id rather than by label text — labels are copy, and
+   * copy changes.
+   */
+  function button(className, label, id) {
+    const node = element('button', className, label);
+    node.type = 'button';
+    node.id = id;
+    return node;
+  }
+
+  /** One pill shape for all three ways in; see the .bp-pill comment in addStyle(). */
+  function pill(id, icon, label, sub) {
+    const node = button('bp-pill', undefined, id);
+    const copy = element('span', 'bp-pill-copy');
+    copy.append(element('span', 'bp-pill-label', label), element('span', 'bp-pill-sub', sub));
+    node.append(svg(icon), copy);
+    return node;
+  }
+
+  function input(id, type, label, autocomplete) {
+    const node = document.createElement('input');
+    node.type = type;
+    node.id = id;
+    node.className = 'bp-input';
+    node.autocomplete = autocomplete;
+    node.placeholder = label;
+    node.spellcheck = false;
+    node.setAttribute('aria-label', label);
+    return node;
+  }
+
+  /** Back button + title, the top row of every gate sheet. */
+  function sheetTop(backKey, backId, title) {
+    const top = element('div', 'bp-sheet-top');
+    ui[backKey] = button('bp-back', 'Back', backId);
+    top.append(ui[backKey], element('strong', 'bp-sheet-title', title));
+    return top;
+  }
+
+  /** Enter in a text field does what its submit button does. */
+  const enterSubmits = (submit) => (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    submit();
+  };
+
   function buildUi() {
     addStyle();
     const topbar = document.querySelector('.topbar');
@@ -1150,20 +1826,119 @@
     ui.status.setAttribute('aria-live', 'polite');
     ui.profiles = element('div', 'bp-profiles');
 
-    // First-run screen: no stored device identity yet. Neither button here
-    // touches the network on its own — "Request Access" hands off to the
-    // existing connectProfiles() (which registers), "I Have an Invite Code"
-    // just switches screens.
+    // THE GATE. Same section, same `.bp-welcome` class and `ui.welcome` key,
+    // because showGate(), hideAllScreens() and pinpad.smoke.mjs all address it
+    // by that name — only what is inside changed. Nothing here touches the
+    // network on its own: a pill is a choice, and the device record is minted
+    // by the flow it starts, never by looking at the screen.
     ui.welcome = element('section', 'bp-welcome');
+    ui.welcome.id = 'bp-gate';
     ui.welcome.hidden = true;
-    const welcomeCopy = element('p', 'bp-copy', 'New here? Request access, or enter an invite code from someone in your household.');
-    ui.requestAccess = element('button', 'bp-verify', 'Request Access');
-    ui.requestAccess.type = 'button';
-    ui.enterCode = element('button', 'bp-secondary', 'I Have an Invite Code');
-    ui.enterCode.type = 'button';
-    const welcomeActions = element('div', 'bp-welcome-actions');
-    welcomeActions.append(ui.requestAccess, ui.enterCode);
-    ui.welcome.append(welcomeCopy, welcomeActions);
+    const gateTitle = element('h2', 'bp-gate-title', 'Private Club');
+    gateTitle.id = 'bp-gate-title';
+    const gateSub = element('p', 'bp-gate-sub', 'Blazing Stream is invite only.');
+    gateSub.id = 'bp-gate-sub';
+    // Google is a real pill so the row reads as three equal choices, and it is
+    // disabled for good — the route behind it answers 501. It is NOT in
+    // BUSY_CONTROLS, or setBusy(false) would switch it on.
+    ui.pillGoogle = pill('bp-pill-google', ICON_GOOGLE, 'Login with Google', 'Coming soon');
+    ui.pillGoogle.disabled = true;
+    ui.pillGoogle.setAttribute('aria-disabled', 'true');
+    ui.pillQr = pill('bp-pill-qr', ICON_QR, 'Scan QR to login', 'Show a code for a signed-in phone');
+    ui.pillCode = pill('bp-pill-code', ICON_CODE, 'Type code to open', 'Invite or pairing code');
+    const pills = element('div', 'bp-gate-pills');
+    pills.id = 'bp-gate-pills';
+    pills.append(ui.pillGoogle, ui.pillQr, ui.pillCode);
+    ui.gateEmail = button('bp-gate-link', 'Have an email login? Sign in', 'bp-gate-email');
+    // A SECOND "I am the owner", not the footer's. The footer one (ui.owner)
+    // belongs to the pending screen and is what pinpad.smoke.mjs clicks; the
+    // footer is display:none in gate view, so the gate needs its own. This
+    // one also has to mint an identity first — see openOwnerPinFromGate().
+    ui.gateOwner = button('bp-gate-link', 'I am the owner', 'bp-gate-owner');
+    // Hidden until showGate() finds stored credentials to re-check with.
+    ui.gateRecheck = button('bp-gate-link', 'Check again', 'bp-gate-recheck');
+    ui.gateRecheck.hidden = true;
+    const gateLinks = element('div', 'bp-gate-links');
+    gateLinks.id = 'bp-gate-links';
+    gateLinks.append(ui.gateEmail, ui.gateOwner, ui.gateRecheck);
+    ui.welcome.append(svg(DOOR_MARK), gateTitle, gateSub, svg(KEY_GLYPH), pills, gateLinks);
+    // The two first-run buttons this screen used to carry, kept as KEYS so the
+    // code that knows them still finds an element. "I Have an Invite Code" is
+    // the Type-code pill; "Request Access" was connectProfiles(), which is
+    // exactly what Check again does.
+    ui.enterCode = ui.pillCode;
+    ui.requestAccess = ui.gateRecheck;
+
+    // SCAN QR TO LOGIN — this browser is the new device. Code, QR of the same
+    // code, one line of help, and a retry that only appears when a code could
+    // not be had. startPairing()/renderPairCode()/showPairRetry() own the
+    // hidden flags.
+    ui.qr = element('section', 'bp-qr');
+    ui.qr.id = 'bp-qr';
+    ui.qr.hidden = true;
+    const qrTop = sheetTop('qrBack', 'bp-qr-back', 'Pair this browser');
+    ui.pairCode = element('p', 'bp-paircode');
+    ui.pairCode.id = 'bp-pair-code';
+    ui.pairCode.hidden = true;
+    ui.pairCode.setAttribute('aria-label', 'Pairing code');
+    ui.pairImage = document.createElement('img');
+    ui.pairImage.className = 'bp-pairqr';
+    ui.pairImage.id = 'bp-pair-image';
+    ui.pairImage.alt = 'Pairing QR code';
+    ui.pairImage.decoding = 'async';
+    ui.pairImage.hidden = true;
+    ui.pairHelp = element('p', 'bp-pairhelp', 'On a phone that is already signed in, scan this or open blazingstream.lyreosai.com/pair and enter the code.');
+    ui.pairHelp.id = 'bp-pair-help';
+    ui.pairHelp.hidden = true;
+    ui.qrRetry = button('bp-secondary', 'Try again', 'bp-qr-retry');
+    ui.qrRetry.hidden = true;
+    ui.qr.append(qrTop, ui.pairCode, ui.pairImage, ui.pairHelp, ui.qrRetry);
+
+    // HAVE AN EMAIL LOGIN? SIGN IN — email + password, binds this browser.
+    // autocomplete=username on the address is what lets a password manager
+    // pair the two fields.
+    ui.email = element('section', 'bp-email');
+    ui.email.id = 'bp-email';
+    ui.email.hidden = true;
+    const emailTop = sheetTop('emailBack', 'bp-email-back', 'Sign in');
+    ui.emailAddress = input('bp-email-address', 'email', 'Email address', 'username');
+    ui.emailPassword = input('bp-email-password', 'password', 'Password', 'current-password');
+    const emailActions = element('div', 'bp-form-actions');
+    ui.emailSubmit = button('bp-verify', 'Sign in', 'bp-email-submit');
+    emailActions.append(ui.emailSubmit);
+    ui.email.append(emailTop, ui.emailAddress, ui.emailPassword, emailActions);
+
+    // TYPE CODE → an ACCOUNT invite → make the account. Reached only from
+    // redeemInviteCode(), which holds the code in state.inviteCode.
+    ui.signup = element('section', 'bp-signup');
+    ui.signup.id = 'bp-signup';
+    ui.signup.hidden = true;
+    const signupTop = sheetTop('signupBack', 'bp-signup-back', 'Make your account');
+    ui.signupName = input('bp-signup-name', 'text', 'Your name', 'name');
+    ui.signupEmail = input('bp-signup-email', 'email', 'Email address', 'email');
+    ui.signupPassword = input('bp-signup-password', 'password', `Password (${MIN_PASSWORD}+ characters)`, 'new-password');
+    ui.signupPassword.minLength = MIN_PASSWORD;
+    const signupActions = element('div', 'bp-form-actions');
+    ui.signupSubmit = button('bp-verify', 'Create account', 'bp-signup-submit');
+    signupActions.append(ui.signupSubmit);
+    ui.signup.append(signupTop, ui.signupName, ui.signupEmail, ui.signupPassword, signupActions);
+
+    // APPROVE A DEVICE — the ?pair=CODE sheet. The question and the two
+    // buttons appear only after /pair/peek names the device; until then, and
+    // when the code is dead, Back is the way out of this sheet.
+    ui.approve = element('section', 'bp-approve');
+    ui.approve.id = 'bp-approve';
+    ui.approve.hidden = true;
+    const approveTop = sheetTop('approveBack', 'bp-approve-back', 'Approve a device');
+    ui.approveQuestion = element('p', 'bp-approve-question');
+    ui.approveQuestion.id = 'bp-approve-question';
+    ui.approveActions = element('div', 'bp-form-actions');
+    ui.approveActions.id = 'bp-approve-actions';
+    ui.approveActions.hidden = true;
+    ui.approveYes = button('bp-verify', 'Approve', 'bp-approve-yes');
+    ui.approveNo = button('bp-secondary', 'Not now', 'bp-approve-no');
+    ui.approveActions.append(ui.approveYes, ui.approveNo);
+    ui.approve.append(approveTop, ui.approveQuestion, ui.approveActions);
 
     // Invite-code redemption. Reachable from the welcome screen (no identity
     // yet) AND from the pending-approval screen (identity exists, waiting on
@@ -1263,7 +2038,7 @@
     ui.keepBrowsing.type = 'button';
     const keepBrowsing = ui.keepBrowsing;
     footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing);
-    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.createProfile, ui.profiles, ui.pin, footer);
+    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.profiles, ui.pin, footer);
     // Art FIRST, so the close-catcher and the rail both paint over it.
     ui.layer.append(ui.art, backdrop, panel);
     document.body.appendChild(ui.layer);
@@ -1274,15 +2049,33 @@
     });
     ui.refresh.addEventListener('click', connectProfiles);
     ui.owner.addEventListener('click', () => openOwnerPin());
-    ui.requestAccess.addEventListener('click', connectProfiles);
-    ui.enterCode.addEventListener('click', () => showInvite());
     ui.inviteFromPending.addEventListener('click', () => showInvite());
+    // The gate. ui.enterCode / ui.requestAccess are aliases of pillCode /
+    // gateRecheck (see buildUi), so they get no listener of their own — a
+    // second one on the same element fired every handler twice.
+    ui.pillQr.addEventListener('click', () => startPairing());
+    ui.pillCode.addEventListener('click', () => showInvite());
+    ui.gateEmail.addEventListener('click', () => showEmail());
+    ui.gateOwner.addEventListener('click', () => openOwnerPinFromGate());
+    ui.gateRecheck.addEventListener('click', () => connectProfiles());
+    ui.qrBack.addEventListener('click', () => showGate());
+    ui.qrRetry.addEventListener('click', () => startPairing());
+    ui.emailBack.addEventListener('click', () => showGate());
+    ui.emailSubmit.addEventListener('click', () => submitEmailLogin());
+    ui.emailPassword.addEventListener('keydown', enterSubmits(submitEmailLogin));
+    ui.signupBack.addEventListener('click', () => showInvite());
+    ui.signupSubmit.addEventListener('click', () => submitSignup());
+    ui.signupPassword.addEventListener('keydown', enterSubmits(submitSignup));
+    ui.approveBack.addEventListener('click', () => dismissApprover());
+    ui.approveYes.addEventListener('click', () => approvePairedDevice());
+    ui.approveNo.addEventListener('click', () => dismissApprover());
     ui.inviteBack.addEventListener('click', () => {
-      // Route back to wherever this screen was reached from: a browser that
-      // already has an identity (pending or approved) belongs on the normal
-      // profile screen, a true first-timer belongs back on the welcome screen.
-      if (state.credentials || storedCredentials()) showProfiles();
-      else showWelcome();
+      // Back goes to the screen that fits what this browser IS: one that has
+      // listed profiles belongs on the rail, anything else — never registered,
+      // or registered and still unpaired — belongs at the gate. It used to key
+      // on stored credentials, which sent a pending browser to an empty rail.
+      if (state.approved) showProfiles();
+      else showGate();
     });
     ui.inviteSubmit.addEventListener('click', redeemInviteCode);
     ui.inviteInput.addEventListener('keydown', (event) => {

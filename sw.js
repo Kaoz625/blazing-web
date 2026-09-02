@@ -27,7 +27,11 @@
 // owner actually types (profile.js). MUST be bumped: an installed PWA sitting on
 // v16 holds the app.js whose boot() is never called — it would keep serving an
 // EMPTY HOME, with no error, which is exactly the failure this release fixes.
-const CACHE = 'blazing-shell-v19';
+// v20: the gate (profile.js). The private-club screen — Scan QR, Type code,
+// email sign-in, the ?pair= approver — replaced the first-run welcome. A PWA
+// still holding the v19 profile.js has the gate's logic but none of the
+// elements it addresses, and fails with a TypeError on the first click.
+const CACHE = 'blazing-shell-v20';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
