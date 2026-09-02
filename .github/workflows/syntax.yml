@@ -1,0 +1,115 @@
+# Every tracked .js and .mjs still parses.
+#
+# WHY THIS LANE EARNS ITS MINUTES. blazing-web has NO bundler, NO package.json
+# and NO transpile step. index.html loads eleven <script> tags straight off the
+# disk that GitHub Pages serves (and that blazing-site's build.sh copies into
+# its dist/app/ for blazingstream.lyreosai.com/app/). So nothing between an
+# editor and a television ever reads these files until a TV reads them, and a
+# stray brace in app.js (139 KB) or profile.js (110 KB) is a BLANK SCREEN with
+# one line in a console nobody is looking at. There is no compiler here. This
+# lane is the compiler.
+#
+# It is also the cheapest lane in the repo per file: 32 files, no install
+# step, no dependency. RE-MEASURED 2 Sep 2026 on a clean export of this
+# branch's tree, node 25.9.0: 32 files, exit 0, 6.9 s wall clock with three
+# browser harnesses running beside it on 4 cores.
+#
+# What it does NOT catch: anything that is valid syntax and wrong at runtime.
+# `ui.pairCode.textContent = code` against an element buildUi() never created
+# passed `node --check` for a whole build. That class of bug belongs to the
+# *.smoke.mjs harnesses, and those cannot run on a runner today — see
+# .github/workflows/README.md, "Deliberately not here".
+name: syntax
+
+on:
+  pull_request:
+    paths:
+      # The broad glob on purpose: the step discovers files with `git ls-files`,
+      # so a new .js added anywhere is checked without anyone remembering to
+      # come back here. The filter has to be just as broad or the new file
+      # would be checked only by accident.
+      - '**/*.js'
+      - '**/*.mjs'
+      - '.github/workflows/syntax.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.js'
+      - '**/*.mjs'
+      - '.github/workflows/syntax.yml'
+  workflow_dispatch:
+
+# blazing-web is a PUBLIC repo (verified 2 Sep 2026 with
+# `gh repo view Kaoz625/blazing-web --json visibility`), so Actions minutes on
+# ubuntu-latest are free. A superseded run on the same branch is still
+# cancelled — not to save money, but so the tick on a PR belongs to the commit
+# that is actually there, and so a stale run's log is not the one someone
+# opens.
+concurrency:
+  group: syntax-${{ github.ref }}
+  cancel-in-progress: true
+
+# READ-ONLY, and this repo needs that more than most. GitHub Pages is LIVE on
+# this repo — build_type "legacy", branch main, path "/", serving
+# https://kaoz625.github.io/blazing-web/ (verified 2 Sep 2026 with
+# `gh api repos/Kaoz625/blazing-web/pages`). EVERY PUSH TO MAIN REPUBLISHES
+# THE SITE, so anything in CI that wrote to the repo would republish it as a
+# side effect of a lint. Nothing here writes to GitHub, publishes a package,
+# pushes an image, uploads an artifact or deploys, and there is no Pages step.
+# A pull request from a fork runs with a read-only token and no secrets;
+# nothing here references secrets.*.
+#
+# Public repo, so EVERY LINE OF EVERY LOG IS WORLD-READABLE — anyone, not
+# "anyone signed in". This step prints nothing at all on success and a parse
+# error with a file path on failure. No environment, no HOME, no curl.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: node --check
+    # ubuntu-latest ONLY, everywhere in this repo. On a public repo the
+    # minutes are free on every OS, but macOS and Windows runners queue
+    # longer and boot slower, nothing here needs either, and the other
+    # Blazing repos are private — where macOS bills at 10x and Windows at 2x
+    # — so it is one rule for all of them.
+    runs-on: ubuntu-latest
+    # Measured 6.9 s for 32 files beside three browser harnesses. 5 minutes
+    # is roughly 40x that and still stops a hung step from sitting on the
+    # 6-hour default.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # There is no package.json anywhere in this repo (checked:
+          # `git ls-files | grep package.json` finds nothing), so there is no
+          # "engines" field to honour and no lockfile to cache. Node 24 is the
+          # Active LTS. Proven locally on Node 25.9.0; `node --check` is a
+          # parse, and none of these files use syntax newer than ES2022
+          # (checked 2 Sep 2026: optional chaining and ?? in 12 files, and
+          # top-level await in the 17 .mjs harnesses, are the newest
+          # constructs — ES2020 and ES2022, all Node 14.8+; no regex v flag,
+          # no import attributes, no `using`, no decorators), so the two
+          # agree. Pinning keeps a runner Node bump from arriving as a
+          # surprise red build.
+          node-version: '24'
+
+      - name: node --check every tracked .js and .mjs
+        # MEASURED on a clean `git archive` export of this branch's tree,
+        # 2 Sep 2026, node 25.9.0:
+        #   files checked   32
+        #   exit code        0
+        #   wall clock       6.9 s, with three browser harnesses running
+        #                    beside it on 4 cores
+        #
+        # Discovered with `git ls-files`, never a hardcoded list. -r stops
+        # xargs running node with no arguments if the glob ever matches
+        # nothing, and xargs propagates the non-zero exit of any failing
+        # node --check.
+        #
+        # -n1 is deliberate: node --check only reports the FIRST file it
+        # chokes on, so one file per process means the log names the file that
+        # is actually broken instead of the first of a batch.
+        run: git ls-files '*.js' '*.mjs' | xargs -r -n1 node --check

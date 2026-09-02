@@ -6,3 +6,6 @@
 
 # TV packages. Rebuild with ./build-tvs.sh — do not commit binaries.
 dist/
+
+# Bytecode from running the patch_*.py scripts. Not app code, and build-tvs.sh does not exclude it.
+__pycache__/

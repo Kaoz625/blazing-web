@@ -1,0 +1,91 @@
+# The three shipping manifests are well formed and platform-complete.
+#
+# WHY THIS LANE EARNS ITS MINUTES. config.xml (Samsung Tizen), appinfo.json
+# (LG webOS) and manifest.webmanifest (the PWA) are hand-edited data files, and
+# no tool in this repo reads them until the moment a package is being built for
+# a television. There is no schema, no linter and no test. A missing key is
+# discovered as "ares-package refused it" or "the TV rejected the .wgt",
+# minutes before an install, with no line number.
+#
+# WHAT IT CATCHES that nothing else here can: the Tizen <access> element.
+# Tizen refuses a request to any origin the widget config does not name, and it
+# refuses it SILENTLY — no error, no console line, an app that just shows
+# nothing. That failure is invisible to every browser and every simulator, so
+# a static assertion on the config file is the only place it can be caught at
+# all. This repo has ZERO <access> elements today, which is why the check
+# currently warns rather than fails; see the long comment in
+# .github/checks/manifests.py and the README.
+#
+# It is a python standard-library parse of three small files. No pip install,
+# no network. RE-MEASURED 2 Sep 2026 on a clean export of this branch's
+# tree: 0.28 s wall clock. Exit 0 on python 3.9.6, 3.11.15, 3.12.13 and
+# 3.14.3, so whichever python3 the ubuntu image carries will do.
+name: manifests
+
+on:
+  # A narrow filter on purpose. These three files change rarely, and a change
+  # to app.js has no bearing on whether appinfo.json is complete.
+  #
+  # blazing-web is a PUBLIC repo (verified 2 Sep 2026 with `gh repo view`), so
+  # the minutes are free and the filter is not about money. It is about noise:
+  # a run that cannot change its answer is a queue slot taken and a log nobody
+  # reads.
+  pull_request:
+    paths:
+      - 'config.xml'
+      - 'appinfo.json'
+      - 'manifest.webmanifest'
+      - '.github/checks/manifests.py'
+      - '.github/workflows/manifests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'config.xml'
+      - 'appinfo.json'
+      - 'manifest.webmanifest'
+      - '.github/checks/manifests.py'
+      - '.github/workflows/manifests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: manifests-${{ github.ref }}
+  cancel-in-progress: true
+
+# READ-ONLY. GitHub Pages is LIVE on this repo, publishing branch main at "/"
+# to https://kaoz625.github.io/blazing-web/ (verified 2 Sep 2026 with
+# `gh api repos/Kaoz625/blazing-web/pages`), so every push to main already
+# republishes the site and a job with write access could do the same as a side
+# effect of a check. No deploy step, no Pages step, anywhere in this CI. A
+# pull request from a fork runs with a read-only token and no secrets; nothing
+# here references secrets.*.
+#
+# The repo is public, so EVERY LINE OF EVERY LOG IS WORLD-READABLE. No step
+# prints an environment, a HOME listing, a curl with headers, or anything that
+# could carry a credential. This one prints the values of appinfo.json and
+# config.xml — which are themselves public files in a public repo.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: manifest checks
+    runs-on: ubuntu-latest
+    # Measured 0.28 s. 5 minutes covers runner and image startup.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # No setup-python. ubuntu-latest already ships a python3, the script is
+      # standard library only, and setup-python is another 10-20 seconds of
+      # wall clock for nothing. The script was proven locally on 3.11.15,
+      # 3.12.13 and 3.14.3; its newest constructs are `list[str]` annotations
+      # (3.9), so any python3 an ubuntu image ships will do.
+      - name: manifests
+        # MEASURED on a clean `git archive` export of this branch's tree,
+        # 2 Sep 2026, python 3.14.3 (same exit 0 on 3.9.6, 3.11.15, 3.12.13):
+        #   0 failures, 1 warning, exit code 0, 0.28 s
+        # The one warning is the missing Tizen <access> element.
+        #
+        # The same command a human runs locally, on purpose — no CI-only
+        # wrapper to drift out of step with what people actually type.
+        run: python3 .github/checks/manifests.py

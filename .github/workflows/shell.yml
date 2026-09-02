@@ -1,0 +1,114 @@
+# build-tvs.sh — the script that packages the app for a television.
+#
+# WHY THIS LANE EARNS ITS MINUTES. build-tvs.sh is the only shell script in
+# this repo and it is the whole TV release process: it rsyncs a staged copy,
+# runs ares-package for LG webOS and `tizen package` for Samsung. It has
+# already shipped the wrong thing twice, both recorded in its own header —
+# once packaging `.` so the smoke tests and patch scripts went onto a TV, once
+# missing the dotfiles so `.claude/` and `.omc/` (agent session state, internal
+# engineering notes, an 18 KB mission-state.json, one absolute /Users path)
+# went onto a TV. Those were exclude-list bugs, not syntax bugs — the assets
+# lane guards the exclude list — but they say what this file is: a quoting
+# slip in it is a broken release, or the wrong files on a television, not a
+# lint nit.
+#
+# shellcheck is preinstalled on the ubuntu runner image (the firetv repo's
+# shell lane, green on real runners, records 0.9.0 there), so this lane needs
+# no install step. RE-MEASURED 2 Sep 2026 on a clean export of this branch's
+# tree, shellcheck 0.11.0: 0.30 s wall clock, 0 findings, exit 0 — including
+# the two new --exclude lines this branch adds to build-tvs.sh.
+name: shell
+
+on:
+  pull_request:
+    paths:
+      # Broad glob because the step discovers scripts with `git ls-files`.
+      # There is exactly one today; a second one is covered automatically.
+      - '**/*.sh'
+      - '.github/workflows/shell.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.sh'
+      - '.github/workflows/shell.yml'
+  workflow_dispatch:
+
+# blazing-web is a PUBLIC repo (verified 2 Sep 2026 with `gh repo view`), so
+# minutes are free; the paths filter and the cancel are about noise, not money.
+concurrency:
+  group: shell-${{ github.ref }}
+  cancel-in-progress: true
+
+# READ-ONLY. GitHub Pages is LIVE on this repo from branch main at "/"
+# (https://kaoz625.github.io/blazing-web/, verified 2 Sep 2026 with
+# `gh api repos/Kaoz625/blazing-web/pages`). Every push to main already
+# republishes the site; a lint with write access could do it as a side effect.
+# No deploy step, no Pages step. A pull request from a fork runs with a
+# read-only token and no secrets; nothing here references secrets.*.
+#
+# Public repo, so EVERY LOG IS WORLD-READABLE. shellcheck prints source lines
+# from build-tvs.sh — a public file — and nothing else. No environment, no
+# HOME, no curl.
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    # Measured 0.30 s for one 4.7 KB script. 5 minutes covers image startup.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        # THE SEVERITY AND THE EXCLUDE ARE BOTH MEASURED, NOT TASTE.
+        # Run against build-tvs.sh on a clean `git archive` export of this
+        # branch's tree — the fixed build-tvs.sh, with the two new --exclude
+        # lines — 2 Sep 2026, shellcheck 0.11.0, findings counted with
+        # `-f gcc | wc -l`:
+        #
+        #   --severity=error                          exit 0   0 findings
+        #   --severity=warning                        exit 1   1 finding
+        #   --severity=info                           exit 1   4 findings
+        #   --severity=style                          exit 1   4 findings
+        #   --severity=warning --exclude=SC2027       exit 0   0 findings
+        #
+        # So plain --severity=warning lands this lane RED on day one, over ONE
+        # line, and a CI that is red on arrival is a CI everyone learns to
+        # scroll past.
+        #
+        # The one warning is SC2027 at line 87, column 49 ("the surrounding
+        # quotes actually unquote this"):
+        #
+        #   echo "           $TIZEN install -n \$(basename "$OUT"/*.wgt) -- $OUT"
+        #
+        # That line does not run anything. It PRINTS a command for Markus to
+        # copy into his own shell, and the `\$(...)` is escaped precisely so it
+        # is not expanded here. shellcheck is right about the mechanics and
+        # wrong about the intent, and the intent is the point of the line.
+        #
+        # SC2027 is excluded rather than dropping to --severity=error, because
+        # warning is where shellcheck's real teeth are: every genuine quoting,
+        # word-splitting and unset-variable bug it knows about is error or
+        # warning level. Dropping to error would have thrown all of that away
+        # to silence one deliberate echo. The three remaining info findings —
+        # SC2012 (`ls` instead of `find`) on the echo lines 59 and 74, and
+        # SC2086 at the same column of line 87 — stay out of scope at this
+        # severity.
+        #
+        # If SC2027 ever needs to fire for real, fix line 87 or annotate it
+        # with `# shellcheck disable=SC2027` and delete the --exclude here.
+        #
+        # The runner's shellcheck is older than the 0.11.0 measured here
+        # (firetv's proven lane records 0.9.0 on that image). SC2027 has
+        # existed for years, so the table above was expected to hold — and the
+        # first real run CONFIRMED it: PR #1, run 33649779132 on runner image
+        # 20260819.586, this exact command, 0 findings, exit 0, 5 s including
+        # checkout. No longer a pending question.
+        #
+        # Discovered with `git ls-files` rather than a hardcoded list, so a
+        # script added anywhere is checked without anyone remembering to come
+        # back here. -r stops shellcheck running with no arguments, and xargs
+        # propagates its non-zero exit.
+        run: git ls-files '*.sh' | xargs -r shellcheck --severity=warning --exclude=SC2027

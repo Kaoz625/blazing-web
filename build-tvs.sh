@@ -43,12 +43,23 @@ mkdir -p "$OUT"
 # them — checked — but none of it is app code and none of it belongs on a TV
 # or in a public deploy. The *.md excludes drop README/DESIGN/PRODUCT for the
 # same reason. A dotfile is not excluded just because its parent looks tidy.
+#
+# 2 Sep 2026: the same bug a THIRD time, and this one was caught before it
+# shipped. `--exclude '.git'` is an exact name and does NOT match `.github`,
+# so the moment this repo gained a CI directory the staged copy gained seven
+# files of workflow yaml and check python. Measured with `rsync --dry-run
+# --itemize-changes` before the fix: `.github/checks/*.py` and
+# `.github/workflows/*.yml` were all copied in. `*.md` hid half of it by
+# dropping the workflows README, which is exactly how this keeps being missed.
+# `__pycache__/` is the same shape — untracked, invisible in `git status`
+# since it is now gitignored, and copied straight in by `rsync -a`.
+# .github/checks/assets.py asserts both of these names stay in this list.
 rsync -a \
   --exclude '.git' --exclude '.wrangler' --exclude 'node_modules' \
   --exclude 'dist' --exclude '*.smoke.mjs' --exclude 'patch*.py' \
   --exclude 'build-tvs.sh' --exclude '.DS_Store' --exclude 'admin.js' \
   --exclude '.claude' --exclude '.omc' --exclude '.gitignore' \
-  --exclude '*.md' \
+  --exclude '*.md' --exclude '.github' --exclude '__pycache__' \
   "$ROOT"/ "$STAGE"/
 
 echo "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"
