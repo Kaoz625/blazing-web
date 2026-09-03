@@ -1,0 +1,13 @@
+{
+  "name": "blazing-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The Blazing Stream PWA. No bundler and no build step: index.html loads plain <script> tags off the disk that GitHub Pages serves. This package.json exists ONLY so the *.smoke.mjs harnesses have a real playwright dependency instead of an absolute path into another project on one Mac.",
+  "scripts": {
+    "test": "node scripts/run-smokes.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
+}

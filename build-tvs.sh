@@ -60,6 +60,7 @@ rsync -a \
   --exclude 'build-tvs.sh' --exclude '.DS_Store' --exclude 'admin.js' \
   --exclude '.claude' --exclude '.omc' --exclude '.gitignore' \
   --exclude '*.md' --exclude '.github' --exclude '__pycache__' \
+  --exclude 'package.json' --exclude 'package-lock.json' --exclude 'scripts' \
   "$ROOT"/ "$STAGE"/
 
 echo "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"

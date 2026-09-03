@@ -1,0 +1,247 @@
+# The gate in front of the live site, and the deploy behind it.
+#
+# WHY THIS LANE EXISTS, and it is the only lane in this directory that is
+# allowed to write anything. Until this file landed, GitHub Pages published
+# this repo with `build_type: legacy`, source branch `main`, path `/` — the
+# branch itself was the deploy. **Every push to main republished
+# https://kaoz625.github.io/blazing-web/ the moment it landed, with no check
+# in front of it at all.** The other five lanes in this directory ran and
+# reported, and the site shipped whether they were green or red. A red tick on
+# a commit that is already live is a notification, not a gate.
+#
+# So this workflow does two things in one file, in this order:
+#
+#   job "gate"    every check this repo has, including the 18 browser
+#                 harnesses that could never run here before.
+#   job "deploy"  needs: gate. It publishes. If the gate is red it never
+#                 starts, and the site keeps serving the last good commit.
+#
+# THE SWITCH THAT MAKES THIS REAL IS NOT IN THIS FILE. Pages must be moved
+# from `build_type: legacy` to `build_type: workflow`. Until someone does that
+# — `gh api -X PUT repos/Kaoz625/blazing-web/pages -f build_type=workflow` —
+# the legacy publisher is still live and still ships every push unchecked,
+# and the deploy job below will fail on `actions/configure-pages` because the
+# source is not set to Actions. Land this file, watch the gate go green, then
+# throw the switch. In that order: a switch thrown first would leave the site
+# with no publisher at all until this file exists.
+#
+# WHY THE SMOKE TESTS CAN RUN HERE NOW. The README's "Deliberately not here"
+# section named the exact blocker and the exact remedy, and this branch is
+# that remedy. All 18 harnesses used to open with an absolute import of
+# playwright out of `/Users/markususche/.hermes/…` and launch with an explicit
+# `executablePath` pointing at a **mac-x64** Chrome for Testing. Both are gone:
+# the import is a bare `import { chromium } from 'playwright'` resolved from a
+# real devDependency, and `chromium.launch()` now picks playwright's own
+# browser. `ROOT` was a hardcoded `/Users/markususche/Desktop/blazing-web` too
+# — it is `fileURLToPath(new URL('.', import.meta.url))` now, so the fixture
+# server serves whatever directory the harness was checked out into.
+name: pages
+
+on:
+  # NO paths: filter, and that is the one deliberate difference from every
+  # other lane in this directory. The other five filter because a run that
+  # cannot change its answer is noise. This one PUBLISHES THE SITE: a push
+  # that changed only a .md still has to reach Pages, or the live site silently
+  # falls behind main. Whatever lands on main gets gated and shipped.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# NOT cancel-in-progress. Everywhere else in this directory the superseded run
+# is cancelled so the tick belongs to the commit that is there. A DEPLOY is the
+# opposite case: cancelling one halfway can leave Pages holding a partial
+# upload, and "pages" is the group name GitHub's own deploy-pages action
+# expects. Two pushes in quick succession queue and both publish, in order.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# The default for the whole workflow is read-only, the same as every other
+# lane. The deploy job below raises its own permissions, and only its own.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    # The five static checks take under 10 s between them. The 18 browser
+    # harnesses are the reason this is not 5 minutes: measured locally they run
+    # tens of seconds each, `gate` alone 90 s. 30 minutes is several times the
+    # measured total and still stops a hung browser sitting on the 6-hour
+    # default.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 is the Active LTS, and it is the same pin syntax.yml
+          # already uses — one node version for the repo. There is a lockfile
+          # now, so the npm cache is worth having; it keys off
+          # package-lock.json.
+          node-version: '24'
+          cache: 'npm'
+
+      # npm ci, never npm install: it installs exactly what package-lock.json
+      # pins and fails if the lockfile and package.json disagree, so CI cannot
+      # quietly resolve a different playwright than the one proven locally.
+      - name: npm ci
+        run: npm ci
+
+      # REQUIRED, and it is not optional the way it is on Markus's Mac. npm
+      # only installs the playwright NPM PACKAGE; the browser binary is a
+      # separate download into a cache directory. Locally that cache already
+      # holds chromium_headless_shell-1217 — the revision playwright 1.59.1
+      # asks for — from some earlier project, so `npm test` works there with no
+      # install step and it is easy to believe none is needed. A runner's cache
+      # is empty. Without this step every harness dies on "Executable doesn't
+      # exist at …".
+      #
+      # --with-deps adds the shared libraries chromium needs on ubuntu (via
+      # apt), which a bare `playwright install` does not. chromium only: no
+      # harness here asks for firefox or webkit, and downloading them is
+      # minutes of wall clock for nothing.
+      - name: install chromium
+        run: npx playwright install --with-deps chromium
+
+      # ── the five checks that already existed, unchanged ──────────────────
+      #
+      # Run with the SAME commands their own workflows use, deliberately — see
+      # assets.yml, manifests.yml, syntax.yml, python.yml and shell.yml. Those
+      # five lanes still exist and still run on pull requests, where this
+      # workflow does not. Here they run again, on the push, because a gate
+      # that only ran the browser tests would let a broken manifest through.
+      #
+      # They come BEFORE npm test even though the browsers are already
+      # installed above: they take under 10 s between them and the harnesses
+      # take minutes, so a mangled index.html fails the run in seconds.
+
+      - name: assets
+        run: python3 .github/checks/assets.py
+
+      - name: manifests
+        run: python3 .github/checks/manifests.py
+
+      - name: node --check every tracked .js and .mjs
+        # Identical to syntax.yml. -n1 so the log names the file that is
+        # actually broken rather than the first of a batch.
+        #
+        # NOTE, because it is a real change in what this command means: this
+        # repo now has a package.json with "type": "module", so node reads
+        # every tracked .js as an ES module instead of guessing. That is
+        # honest — index.html loads them as modules — and it made the sweep
+        # STRICTER. It immediately found a genuine break in admin.js, two
+        # stray backslashes in front of a template literal's backticks
+        # (`return \``), left behind by a heredoc. That file had never been
+        # valid JavaScript in any mode; the old ambiguous-.js parse simply
+        # never reached line 139. It is fixed on this branch.
+        run: git ls-files '*.js' '*.mjs' | xargs -r -n1 node --check
+
+      - name: compile every tracked .py
+        # Identical to python.yml, compile() rather than py_compile so nothing
+        # writes a __pycache__ that build-tvs.sh would package onto a TV.
+        run: |
+          git ls-files '*.py' | xargs -r -n1 python3 -c '
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          compile(p.read_text(), str(p), "exec")
+          print("ok  ", p)
+          '
+
+      - name: shellcheck
+        # Identical to shell.yml, including the SC2027 exclude — build-tvs.sh
+        # line 87 PRINTS a command for a human to copy and escapes its `$(...)`
+        # on purpose.
+        run: git ls-files '*.sh' | xargs -r shellcheck --severity=warning --exclude=SC2027
+
+      # ── the 18 browser harnesses: the reason this gate is worth having ───
+      - name: smoke tests
+        # scripts/run-smokes.mjs runs every *.smoke.mjs it finds, keeps going
+        # after a failure so one broken suite does not hide the state of the
+        # rest, prints a per-file PASS/FAIL line and a tally, and exits 1 if
+        # any failed. It also fails if it finds fewer than the 18 suites that
+        # exist today, so a rename that makes the glob match nothing — or a
+        # suite quietly deleted to silence a red lane — goes red instead of
+        # passing for free.
+        #
+        # This is the class of bug nothing else in this directory can see:
+        # `ui.pairCode.textContent = code` against an element buildUi() never
+        # created passed `node --check` for a whole build.
+        run: npm test
+
+  deploy:
+    name: deploy to Pages
+    # THE GATE. Without this line the two jobs run in parallel and the deploy
+    # is decoration. `needs:` means deploy does not start until gate has
+    # finished green; a red gate leaves this job skipped and the live site
+    # serving the last good commit.
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The ONLY job in this directory with write access to anything, and it is
+    # scoped to exactly what deploy-pages needs: id-token for the OIDC token it
+    # trades for a deployment, pages to create one, contents read to check out.
+    # No contents: write anywhere — nothing here pushes a commit.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # EVERY PIN HERE WAS CHECKED, not guessed. `gh api repos/<action>/releases`
+      # on 3 Sep 2026 lists newer majors for all five — checkout v7,
+      # setup-node v7, configure-pages v6, upload-pages-artifact v5,
+      # deploy-pages v5.0.1. The choices below are deliberate:
+      #
+      #   checkout@v4, setup-node@v4   what the other five lanes in this
+      #                                directory already pin. One version for
+      #                                the repo; bumping all six files is a
+      #                                separate change.
+      #   configure-pages@v5           what GitHub's own current starter
+      #   deploy-pages@v5              workflow uses (actions/starter-workflows,
+      #                                pages/static.yml, read 3 Sep 2026).
+      #
+      # upload-pages-artifact is the ONE deliberate departure from that starter,
+      # which pins v3. See its own comment below — the reason is measured.
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          # The whole repo, because that is exactly what the legacy publisher
+          # served: source branch main, path "/". index.html and every script
+          # it names sit in the root. Anything narrower would be a different
+          # site.
+          #
+          # WHAT `path: .` DOES NOT UPLOAD, checked in the action's own
+          # action.yml at each tag rather than assumed:
+          #
+          #   v3.0.1  tar --exclude=.git --exclude=.github
+          #   v5.0.0  the same two, PLUS --exclude=.[^/]* whenever
+          #           include-hidden-files is false, which is its default.
+          #
+          # That difference is why this is v5 and not the starter's v3. This
+          # repo tracks `.claude/handoff.md` — 6.7 KB of internal engineering
+          # notes, recorded as trap 6 in the README next door. Under v3 it
+          # would be uploaded and SERVED at
+          # kaoz625.github.io/blazing-web/.claude/handoff.md. Under v5 every
+          # dotfile is left out, which is also what the legacy Jekyll build
+          # did — so this keeps the published file list the same as today's
+          # instead of quietly widening it. Nothing the app loads is a
+          # dotfile: index.html names 16 relative paths and not one begins
+          # with a dot.
+          #
+          # node_modules cannot reach the artifact either, and not by an
+          # exclude: this is a SEPARATE job on a clean runner that checks out
+          # and never runs `npm ci`. The gate job's node_modules does not
+          # exist here.
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v5

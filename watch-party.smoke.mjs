@@ -9,13 +9,13 @@
 // intercepted, so nothing real is contacted. The camera/mic are Chrome's own
 // fake devices, so RTCPeerConnection gets genuine MediaStreamTracks and the
 // real WebRTC stack runs.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -67,7 +67,6 @@ const STUBS = () => {
 };
 
 const browser = await chromium.launch({
-  executablePath: CHROME,
   args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 });
 

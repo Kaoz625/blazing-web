@@ -43,12 +43,13 @@
  *
  *   node caps-hero.smoke.mjs
  */
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = process.env.BW_DIR || '/Users/markususche/Desktop/blazing-web';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {

@@ -1,7 +1,9 @@
 # Every tracked .js and .mjs still parses.
 #
-# WHY THIS LANE EARNS ITS MINUTES. blazing-web has NO bundler, NO package.json
-# and NO transpile step. index.html loads eleven <script> tags straight off the
+# WHY THIS LANE EARNS ITS MINUTES. blazing-web has NO bundler and NO transpile
+# step. (It gained a package.json on 3 Sep 2026, but only to give the
+# *.smoke.mjs harnesses a real playwright dependency — nothing builds
+# anything.) index.html loads twelve <script> tags straight off the
 # disk that GitHub Pages serves (and that blazing-site's build.sh copies into
 # its dist/app/ for blazingstream.lyreosai.com/app/). So nothing between an
 # editor and a television ever reads these files until a TV reads them, and a
@@ -9,16 +11,21 @@
 # one line in a console nobody is looking at. There is no compiler here. This
 # lane is the compiler.
 #
-# It is also the cheapest lane in the repo per file: 32 files, no install
+# It is also the cheapest lane in the repo per file: 35 files, no install
 # step, no dependency. RE-MEASURED 2 Sep 2026 on a clean export of this
 # branch's tree, node 25.9.0: 32 files, exit 0, 6.9 s wall clock with three
-# browser harnesses running beside it on 4 cores.
+# browser harnesses running beside it on 4 cores. RE-MEASURED 3 Sep 2026 after
+# package.json landed: 35 files, exit 0, 15.0 s — the whole 18-suite smoke run
+# was going beside it on the same 4 cores, which is the worst case, not the
+# idle one.
 #
 # What it does NOT catch: anything that is valid syntax and wrong at runtime.
 # `ui.pairCode.textContent = code` against an element buildUi() never created
 # passed `node --check` for a whole build. That class of bug belongs to the
-# *.smoke.mjs harnesses, and those cannot run on a runner today — see
-# .github/workflows/README.md, "Deliberately not here".
+# *.smoke.mjs harnesses. As of 3 Sep 2026 those DO run on a runner, in
+# pages.yml's gate job — see .github/workflows/README.md. This lane stays
+# separate because it runs on pull requests, where pages.yml does not, and
+# because a 7-second parse should not wait on a 5-minute browser run.
 name: syntax
 
 on:
@@ -55,7 +62,9 @@ concurrency:
 # `gh api repos/Kaoz625/blazing-web/pages`). EVERY PUSH TO MAIN REPUBLISHES
 # THE SITE, so anything in CI that wrote to the repo would republish it as a
 # side effect of a lint. Nothing here writes to GitHub, publishes a package,
-# pushes an image, uploads an artifact or deploys, and there is no Pages step.
+# pushes an image, uploads an artifact or deploys, and there is no Pages step
+# in THIS lane. pages.yml is the one workflow that deploys, and its deploy job
+# is gated behind every check in this directory.
 # A pull request from a fork runs with a read-only token and no secrets;
 # nothing here references secrets.*.
 #
@@ -74,8 +83,9 @@ jobs:
     # Blazing repos are private — where macOS bills at 10x and Windows at 2x
     # — so it is one rule for all of them.
     runs-on: ubuntu-latest
-    # Measured 6.9 s for 32 files beside three browser harnesses. 5 minutes
-    # is roughly 40x that and still stops a hung step from sitting on the
+    # Measured 6.9 s for 32 files beside three browser harnesses, and 15.0 s
+    # for 35 files beside a full 18-suite smoke run — the worst case measured.
+    # 5 minutes is 20x that and still stops a hung step from sitting on the
     # 6-hour default.
     timeout-minutes: 5
     steps:
@@ -83,15 +93,29 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # There is no package.json anywhere in this repo (checked:
-          # `git ls-files | grep package.json` finds nothing), so there is no
-          # "engines" field to honour and no lockfile to cache. Node 24 is the
-          # Active LTS. Proven locally on Node 25.9.0; `node --check` is a
-          # parse, and none of these files use syntax newer than ES2022
-          # (checked 2 Sep 2026: optional chaining and ?? in 12 files, and
-          # top-level await in the 17 .mjs harnesses, are the newest
-          # constructs — ES2020 and ES2022, all Node 14.8+; no regex v flag,
-          # no import attributes, no `using`, no decorators), so the two
+          # CORRECTED 3 Sep 2026. This comment used to say "there is no
+          # package.json anywhere in this repo". There is one now — it was
+          # added so the *.smoke.mjs harnesses could stop importing playwright
+          # by absolute path, and it is what lets pages.yml run them. It
+          # declares no "engines" field, so there is still nothing here to
+          # honour, and this lane deliberately does NOT set `cache: 'npm'`:
+          # it never installs anything. `node --check` needs no dependency.
+          #
+          # IT DID CHANGE WHAT THIS LANE MEANS, though, and that is worth
+          # knowing before touching the pin. The manifest sets
+          # "type": "module", so node now reads every tracked .js as an ES
+          # module instead of guessing at an ambiguous one. That is honest —
+          # index.html loads them as modules — and it is STRICTER: it caught a
+          # genuine break in admin.js on the first run (two stray backslashes
+          # before a template literal's backticks, fixed in the same commit).
+          # See trap 8 in the README.
+          #
+          # Node 24 is the Active LTS. Proven locally on Node 25.9.0;
+          # `node --check` is a parse, and none of these files use syntax
+          # newer than ES2022 (checked 2 Sep 2026: optional chaining and ?? in
+          # 12 files, and top-level await in the .mjs harnesses, are the
+          # newest constructs — ES2020 and ES2022, all Node 14.8+; no regex v
+          # flag, no import attributes, no `using`, no decorators), so the two
           # agree. Pinning keeps a runner Node bump from arriving as a
           # surprise red build.
           node-version: '24'
@@ -99,7 +123,7 @@ jobs:
       - name: node --check every tracked .js and .mjs
         # MEASURED on a clean `git archive` export of this branch's tree,
         # 2 Sep 2026, node 25.9.0:
-        #   files checked   32
+        #   files checked   32  (35 as of 3 Sep 2026; see the header)
         #   exit code        0
         #   wall clock       6.9 s, with three browser harnesses running
         #                    beside it on 4 cores

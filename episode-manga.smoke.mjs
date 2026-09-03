@@ -1,11 +1,11 @@
 /** A web series detail selects real episodes and opens only their mapped manga chapters. */
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const server = createServer(async (req, res) => {
   const path = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
@@ -26,7 +26,7 @@ const ok = (value, label, extra = '') => {
 const is = (got, want, label) => ok(String(got) === String(want), label,
   String(got) === String(want) ? '' : `(got ${got}, want ${want})`);
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));

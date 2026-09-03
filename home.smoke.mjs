@@ -33,13 +33,13 @@
 //
 //   node home.smoke.mjs                 the working tree
 //   BW_DIR=/path/to/checkout node home.smoke.mjs    any other checkout
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = process.env.BW_DIR || '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -60,7 +60,7 @@ const META = (n, pre) => ({
   })),
 });
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 const ctx = await browser.newContext();
 await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));

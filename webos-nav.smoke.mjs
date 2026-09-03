@@ -8,13 +8,13 @@
 // Playwright's page.keyboard.press() dispatches real, trusted key events —
 // the same path a webOS TV's remote driver feeds the page — not a synthetic
 // DOM event a click handler could fake past.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -42,7 +42,7 @@ const META = (n, pre) => ({
   })),
 });
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));

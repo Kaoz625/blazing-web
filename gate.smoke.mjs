@@ -24,13 +24,13 @@
 // live while /profiles was in flight.
 //
 //   node gate.smoke.mjs
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = process.env.BW_DIR || '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -68,7 +68,7 @@ const STALE_DEVICE = { status: 404, body: { error: 'unknown device; register fir
 const PENDING = { status: 403, body: { error: 'device enrollment is pending admin approval' } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 
 /**
  * One browser context per way in. Every https request is answered here — the

@@ -28,14 +28,14 @@
 //   node search.smoke.mjs
 //   BW_DIR=/path/to/checkout node search.smoke.mjs
 //   BW_URL=https://blazingstream.lyreosai.com/app/ node search.smoke.mjs   # the LIVE build
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = process.env.BW_DIR || '/Users/markususche/Desktop/blazing-web';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const LIVE = process.env.BW_URL || '';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const FLEET = 'https://fleet.lyreosai.com';
 
@@ -131,7 +131,7 @@ check('fleet /search/movie answers', Array.isArray(mv) && mv.length > 0, `${mv ?
 check('fleet /search/series answers', Array.isArray(sr), `${sr ? sr.length : 'null'} metas`);
 check('fleet /emby/search answers', Array.isArray(emby), `${emby ? emby.length : 'null'} metas`);
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 // Only in local mode: send both app.js and profile.js to THIS server instead of

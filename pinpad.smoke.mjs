@@ -5,13 +5,13 @@
 // ReferenceError and the pad stopped dead — it was not "rejecting the wrong
 // length", it was broken. `node --check` passes on that file: syntax is fine and
 // the fault is at runtime. Only a browser can catch it, so this is a browser.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = process.env.BW_DIR || '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -28,7 +28,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const results = [];
 const check = (n, pass, d = '') => { results.push(pass); console.log(`${pass ? 'ok  ' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 const ctx = await browser.newContext();
 
 // A DEVICE IDENTITY, seeded before the first byte of profile.js runs.

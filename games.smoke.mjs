@@ -9,13 +9,13 @@
 //      screenshots and a working trailer button;
 //   4. a game with no trailer hides the trailer button;
 //   5. search resets to page 1 and "Load more" pages the catalogue.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -59,7 +59,7 @@ const DETAIL = {
   trailer: 'https://media.example.test/g1-trailer.mp4',
 };
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 
 async function openApp({ configured = true, onCall } = {}) {
   const ctx = await browser.newContext();

@@ -230,9 +230,21 @@ else:
 #
 # Neither directory is app code. Both are asserted here rather than trusted,
 # because the two recorded failures were both someone trusting this list.
+#
+# The last four arrived with the package.json that let the *.smoke.mjs
+# harnesses run on a runner. `node_modules` was already in the rsync list but
+# was never ASSERTED, and it is the most expensive name here by far: a
+# playwright install is over 100 MB before a browser is downloaded into it.
+# `package.json`, `package-lock.json` and `scripts` are small, and they are on
+# the list for the same reason `.github` is — none of them is app code, and a
+# television has no use for a test runner.
 for name, what in (
     ('.github', 'this CI directory — workflow yaml and check scripts'),
     ('__pycache__', 'python bytecode left in the working tree by py_compile'),
+    ('node_modules', 'the npm dependency tree — playwright, over 100 MB'),
+    ('package.json', 'the npm manifest, which exists only for the smoke tests'),
+    ('package-lock.json', 'the npm lockfile'),
+    ('scripts', 'the smoke-test runner'),
 ):
     if name not in excludes:
         bad(f'build-tvs.sh does not exclude "{name}" from its rsync, so '

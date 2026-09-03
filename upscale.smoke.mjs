@@ -25,13 +25,13 @@
 //      is then played;
 //  11. PLAYBACK: a resolver that never answers ends in a visible error, not a
 //      permanent spinner.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const TITLE = 'Dune 2';
@@ -58,9 +58,9 @@ const check = (name, cond, extra = '') => {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${extra ? ' — ' + extra : ''}`);
 };
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 
-async function openApp({ statusReply, requestReply, resolveReply, streams } = {}) {
+async function openApp({ statusReply, requestReply, resolveReply, streams, streamHang } = {}) {
   const ctx = await browser.newContext();
   const seen = { status: [], request: [], resolve: [], all: [] };
 
@@ -69,6 +69,25 @@ async function openApp({ statusReply, requestReply, resolveReply, streams } = {}
     const url = req.url();
     if (url.startsWith(base)) return route.continue();
     seen.all.push(url);
+
+    // STREAM_URL is what the <video> is handed. By default it falls through to
+    // the generic JSON reply at the bottom of this handler, which a <video>
+    // cannot decode: the `error` event fires and app.js falls back to
+    // /proxy/resolve. That is correct, and scenario 10 depends on it.
+    //
+    // Scenario 9 asserts the OPPOSITE — that nothing had resolved yet at the
+    // moment the player opened — so it was racing that error event, and losing.
+    // MEASURED 3 Sep 2026: 2 failures in 10 idle runs, and one more in a full
+    // 18-suite run, always "nothing is pre-resolved before playing — 1" with
+    // scenario 10 passing immediately afterwards. The app was never wrong; the
+    // decode failure simply landed before the assertion did, or after it,
+    // depending on the machine.
+    //
+    // `streamHang` holds the request open and never fulfils it — the same
+    // idiom `requestReply.hang` and `resolveReply.hang` already use here. The
+    // element then neither loads nor errors, so "nothing has resolved yet" is
+    // a fact rather than a coin flip. Verified 20 consecutive green runs.
+    if (streamHang && url === STREAM_URL) return;
 
     // --- upscale service --------------------------------------------------
     if (url.includes('/api/upscale/status')) {
@@ -287,13 +306,21 @@ const readToasts = (page) => page.evaluate(() => Array.from(document.querySelect
 
 // === 9: playback plays the server URL and does NOT pre-resolve ============
 {
-  const { ctx, page, seen } = await openApp({});
+  // streamHang: the <video> is handed STREAM_URL and the request is never
+  // answered, so it cannot fail and cannot trigger the /proxy/resolve
+  // fallback. Without it this scenario races that fallback — see the long note
+  // in openApp. Scenario 10 below deliberately does NOT pass it, because it
+  // wants the failure.
+  const { ctx, page, seen } = await openApp({ streamHang: true });
   await page.waitForSelector('.stream-row', { timeout: 8000 });
   await page.click('.stream-row');
   await page.waitForFunction(() => !document.querySelector('#player').hidden, null, { timeout: 5000 });
+  // Read synchronously, before the await below: the claim is about the state
+  // at the moment the player opened, not one CDP round trip later.
+  const resolvesAtPlay = seen.resolve.length;
   const src = await page.evaluate(() => document.querySelector('#video').getAttribute('src'));
   check('the player is handed the URL the server gave', src === STREAM_URL, String(src));
-  check('nothing is pre-resolved before playing', seen.resolve.length === 0, String(seen.resolve.length));
+  check('nothing is pre-resolved before playing', resolvesAtPlay === 0, String(resolvesAtPlay));
   await ctx.close();
 }
 

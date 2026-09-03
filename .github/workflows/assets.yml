@@ -122,6 +122,21 @@ jobs:
         # The same exit 0 on python 3.9.6, 3.11.15 and 3.12.13, so whichever
         # python3 the ubuntu image carries will do.
         #
+        # RE-MEASURED 3 Sep 2026 on the working tree, python 3.14.3. Every
+        # count moved, and only some of the movement is CI's:
+        #   67 tracked files (55 app + 9 under .github/ + 3 npm)
+        #   index.html: 16 relative refs, 12 scripts
+        #   sw.js SHELL: 16 named files
+        #   build-tvs.sh: 18 rsync excludes
+        #   0 failures, 4 warnings, exit code 0
+        # Commit bb376cf added caps.js before any of this — that is the +1 ref,
+        # +1 script and +1 SHELL entry. The +4 tracked files are package.json,
+        # package-lock.json, scripts/run-smokes.mjs and workflows/pages.yml.
+        # The +3 excludes are package.json, package-lock.json and scripts,
+        # added to build-tvs.sh so a test runner and an npm manifest do not
+        # ride onto a television — and all three are now ASSERTED below, as
+        # node_modules now is too. The 4 warnings are unchanged.
+        #
         # The 4 warnings are dpad.js, games.js, manga.js and tv-comics-reader.js
         # — loaded by index.html and not precached by sw.js. They are the
         # emby.js bug, four times over, and they are PINNED in

@@ -13,13 +13,13 @@
 //   5. an unreadable (licensed/redirected) chapter cannot be opened, and a
 //      readable one opens the reader and turns pages with arrow keys;
 //   6. switching to a Kids profile mid-read closes the reader immediately.
-import { chromium } from '/Users/markususche/.hermes/hermes-agent/node_modules/playwright/index.mjs';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
-const ROOT = '/Users/markususche/Desktop/blazing-web';
-const CHROME = '/Users/markususche/Library/Caches/ms-playwright/chromium-1208/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const ROOT = process.env.BW_DIR || fileURLToPath(new URL('.', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = createServer(async (req, res) => {
@@ -61,7 +61,7 @@ const CHAPTERS_OBJECT_SHAPE = {
 };
 const PAGES = { pages: ['/manga/image?ch=c1&p=1', '/manga/image?ch=c1&p=2', 'https://cdn.example.test/absolute-page.jpg'] };
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch();
 
 async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, onCall } = {}) {
   const ctx = await browser.newContext();

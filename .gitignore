@@ -9,3 +9,6 @@ dist/
 
 # Bytecode from running the patch_*.py scripts. Not app code, and build-tvs.sh does not exclude it.
 __pycache__/
+
+# playwright and its friends, for the *.smoke.mjs harnesses. npm ci restores them.
+node_modules/

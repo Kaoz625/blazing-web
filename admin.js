@@ -136,14 +136,14 @@ export async function initAdmin() {
     
     list.innerHTML = requests.map(req => {
       const users = req.requested_by || [];
-      return \`
+      return `
         <div class="card" style="padding: 1rem;">
           <h3 style="margin-top: 0;">${req.title}</h3>
           <p><strong>Type:</strong> ${req.media_type}</p>
           <p><strong>Requests:</strong> ${req.request_count || 1}</p>
           <p><strong>Users IP:</strong><br>${users.join('<br>')}</p>
         </div>
-      \`;
+      `;
     }).join('');
   }
   setInterval(fetchUpscaleRequests, 10000);
