@@ -58,9 +58,13 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 // that the hard way.
 const REGISTERED = { status: 200, body: { deviceId: 'dev-new', deviceToken: 'tok-new' } };
 const ONE_PROFILE = (name) => ({ status: 200, body: { profiles: [{ id: 'p1', name, maxRating: 'adult', hasPin: false }] } });
-// What the OLD fleet — the one live at fleet.lyreosai.com today — says to every
-// /pair/* route: it does not have them.
-const OLD_SERVER = { status: 404, body: { error: 'not found' } };
+// A fleet that does not serve /pair/* at all. Note the BODY — that is what
+// separates it from STALE_DEVICE below, and the two share a status code.
+const OLD_SERVER = { status: 404, body: { error: 'not found', path: '/pair/start' } };
+// The OTHER 404, and it means the opposite: the route RAN and rejected this
+// browser's identity. Answering it like OLD_SERVER parked an approved browser on
+// the pending wall for ever while repairCredentials sat unreached in the file.
+const STALE_DEVICE = { status: 404, body: { error: 'unknown device; register first' } };
 const PENDING = { status: 403, body: { error: 'device enrollment is pending admin approval' } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -505,6 +509,99 @@ const pendingScreen = (page) => page.evaluate(() => {
   await s.page.waitForTimeout(3500);
   check('(h2) and the poll stopped', s.calls('GET', '/pair/status').length === 1, `${s.calls('GET', '/pair/status').length} polls`);
   check('(h2) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
+// ── (h3) 404 'unknown device' from /pair/start is a STALE IDENTITY, not an old fleet ──
+// The two 404s share a status code and mean the opposite. oldServer() used to read
+// only the status, so this landed on the pending wall — on a fleet that pairs
+// perfectly, with the blame on the server, while repairCredentials() (which reclaims
+// the id + token before it will clear anything) was never called.
+//
+// No seed and no /profiles handler, exactly like (h2): a seeded identity plus a 403
+// from /profiles puts the pending wall up before the QR pill exists, and then the
+// tap does nothing and /pair/start is never reached at all.
+{
+  let starts = 0;
+  let regs = 0;
+  const s = await scenario({
+    fleet: (c) => {
+      if (c.path === '/agent/register') {
+        regs += 1;
+        // First: the enrolment. Second: the reclaim, which echoes the id back and
+        // sends NO deviceToken — exactly what the real server does (see (i)).
+        return regs === 1 ? REGISTERED : { status: 200, body: { deviceId: 'dev-new' } };
+      }
+      if (c.path === '/pair/start') {
+        starts += 1;
+        return starts === 1
+          ? STALE_DEVICE
+          : { status: 200, body: { code: 'K7M2PX', expiresAt: new Date(Date.now() + 600000).toISOString() } };
+      }
+      if (c.path === '/pair/status') return { status: 200, body: { state: 'waiting', code: 'K7M2PX' } };
+      return null;
+    },
+  });
+  await s.page.waitForTimeout(1200);
+  await tap(s.page, '#bp-pill-qr');
+  await s.page.waitForTimeout(3000);
+  const calls = s.calls('POST', '/agent/register');
+  check('(h3) it RECLAIMED — a second register carrying deviceId dev-new and its token',
+    calls.length === 2 && calls[1].body?.deviceId === 'dev-new' && calls[1].token === 'tok-new',
+    JSON.stringify(calls.map((r) => ({ deviceId: r.body?.deviceId, token: r.token }))));
+  const kept3 = await stored(s.page);
+  check('(h3) the identity was KEPT, not replaced', kept3?.id === 'dev-new' && kept3?.token === 'tok-new', JSON.stringify(kept3));
+  const code3 = await s.page.evaluate(() => document.getElementById('bp-pair-code')?.textContent);
+  check('(h3) /pair/start was asked twice and the SECOND answer produced a real code',
+    s.calls('POST', '/pair/start').length === 2 && code3 === 'K7M2PX',
+    `${s.calls('POST', '/pair/start').length} starts, code=${code3}`);
+  const pend = await pendingScreen(s.page);
+  check('(h3) and NOT the pending wall — the QR sheet is up', pend.qrHidden === false, JSON.stringify(pend));
+  check('(h3) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
+// ── (h4) the same 404 mid-poll restarts pairing ONCE, then stops ──────────────
+// The poll runs on a 3 s interval holding the old credentials in its closure, so a
+// repaired identity could never reach it — it restarts the flow instead. And it does
+// that exactly once: state.pairRepaired, the same doctrine as pairRestarted, because
+// a repair that does not stick must not become a page minting codes on a timer.
+{
+  let starts = 0;
+  let regs = 0;
+  const s = await scenario({
+    fleet: (c) => {
+      if (c.path === '/agent/register') {
+        regs += 1;
+        return regs === 1 ? REGISTERED : { status: 200, body: { deviceId: 'dev-new' } };
+      }
+      if (c.path === '/pair/start') {
+        starts += 1;
+        return { status: 200, body: { code: starts === 1 ? 'AAA222' : 'BBB333', expiresAt: new Date(Date.now() + 600000).toISOString() } };
+      }
+      if (c.path === '/pair/status') return STALE_DEVICE;   // stale, every time
+      return null;
+    },
+  });
+  await s.page.waitForTimeout(1200);
+  await tap(s.page, '#bp-pill-qr');
+  await s.page.waitForTimeout(1200);
+  check('(h4) the first code came up',
+    (await s.page.evaluate(() => document.getElementById('bp-pair-code')?.textContent)) === 'AAA222',
+    `code=${await s.page.evaluate(() => document.getElementById('bp-pair-code')?.textContent)} starts=${s.calls('POST', '/pair/start').length}`);
+  await s.page.waitForTimeout(5000);
+  const code4 = await s.page.evaluate(() => document.getElementById('bp-pair-code')?.textContent);
+  check('(h4) the stale poll restarted pairing — a SECOND code, not the pending wall',
+    s.calls('POST', '/pair/start').length === 2 && code4 === 'BBB333',
+    `${s.calls('POST', '/pair/start').length} starts, code=${code4}`);
+  await s.page.waitForTimeout(6000);
+  check('(h4) and it restarted ONCE — the second stale answer gives up instead of looping',
+    s.calls('POST', '/pair/start').length === 2,
+    `${s.calls('POST', '/pair/start').length} starts, ${s.calls('GET', '/pair/status').length} polls`);
+  check('(h4) the retry hatch is offered',
+    await s.page.evaluate(() => document.getElementById('bp-qr-retry')?.hidden === false),
+    await s.page.evaluate(() => document.querySelector('.bp-status')?.textContent));
+  check('(h4) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
   await s.ctx.close();
 }
 

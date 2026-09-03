@@ -58,6 +58,11 @@
     pairCode: '',
     pairTimer: 0,
     pairRestarted: false,
+    // The same doctrine as pairRestarted, for the other silent restart: a poll
+    // that finds this browser's identity stale repairs it and asks for one new
+    // code. Once. A repair that does not stick must not become a page minting
+    // codes on a three-second timer with nobody watching.
+    pairRepaired: false,
     // An account-invite code that /accounts/invite/check said was real. Held
     // only long enough to post it back with the signup form.
     inviteCode: '',
@@ -973,15 +978,34 @@
   }
 
   /**
-   * The OLD SERVER. fleet.lyreosai.com has no /pair/* routes until Markus
-   * approves a deploy, and answers 404 to every one of them today; a proxy or
+   * The OLD SERVER — a fleet that genuinely does not serve /pair/*. A proxy or
    * an older build can also say 405 or 501. None of those is "the code could
-   * not be had, try again" — a retry asks the same absent route. It means this
-   * browser is a plain pending device, and the pending screen is the honest
-   * one. Roku and Fire TV already fall back this way; the web did not.
+   * not be had, try again", because a retry asks the same absent route; it
+   * means this browser is a plain pending device and the pending screen is the
+   * honest answer.
+   *
+   * TWO CORRECTIONS, 2026-09-03. The comment here used to say the routes were
+   * undeployed and answered 404 "today". All five went live and answer.
+   *
+   * And this used to be `status === 404 || 405 || 501`, which is wrong, because
+   * the fleet has TWO different 404s that mean opposite things:
+   *
+   *   {"error":"unknown device; register first"}  the route RAN — our identity is stale
+   *   {"error":"not found","path":"..."}          the route does not exist
+   *
+   * Reading only the status meant a browser the fleet had forgotten was parked
+   * on the pending wall for ever, on a fleet that pairs perfectly, with the
+   * blame pointed at the server — while the fix (repairCredentials, right
+   * there in this file) was never reached. Same bug as Roku PartyApi.brs
+   * (4770fc8), the Roku heartbeat (b0e4d2f) and Fire TV (ab87abb).
+   *
+   * shouldRepairCredentials() is the other half of this test and the callers
+   * check it first, so the two never both claim the same answer.
    */
   function oldServer(result) {
-    return result.status === 404 || result.status === 405 || result.status === 501;
+    if (result.status === 405 || result.status === 501) return true;
+    if (result.status !== 404) return false;
+    return !text(result.body && result.body.error).toLowerCase().startsWith('unknown device');
   }
 
   async function startPairing() {
@@ -996,11 +1020,27 @@
         showPairRetry(ui.status.textContent || 'Could not reach the profile server.');
         return;
       }
-      const result = await request('/pair/start', {
+      const askForCode = (creds) => request('/pair/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
-        body: JSON.stringify({ deviceId: credentials.id }),
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': creds.token },
+        body: JSON.stringify({ deviceId: creds.id }),
       });
+      let result = await askForCode(credentials);
+      // The fleet says it does not know this browser. That is a stale identity,
+      // not an old server — and repairCredentials RECLAIMS it (id + token) before
+      // it will clear anything, so an approved browser stays approved. Exactly
+      // the shape createProfile() already uses below.
+      if (shouldRepairCredentials(result)) {
+        const repaired = await repairCredentials(credentials);
+        if (!repaired) {
+          // repairCredentials() already said why in the status line.
+          if (!state.credentials) showGate(ui.status.textContent, 'error');
+          else showPairRetry(ui.status.textContent || 'Could not get a pairing code.');
+          return;
+        }
+        credentials = repaired;
+        result = await askForCode(repaired);
+      }
       if (oldServer(result)) {
         // No QR, no code, no poll: the screen the old fleet can actually act
         // on, with "I am the owner" and the invite code as the ways forward.
@@ -1039,6 +1079,22 @@
     // A poll that lands after the viewer walked away is answering a question
     // nobody asked any more.
     if (!state.pairTimer) return;
+    // Checked BEFORE oldServer(), because an 'unknown device' 404 is a stale
+    // identity and the pending wall would be a dead end for it. Restart the
+    // whole flow rather than repairing in place: this poll runs on an interval
+    // holding the OLD credentials in its closure, so a repaired identity would
+    // never reach it. startPairing() re-registers and asks for a fresh code.
+    if (shouldRepairCredentials(result)) {
+      stopPairPolling();
+      if (state.pairRepaired) {
+        showPairRetry('This browser connection went stale again. Select Try again when you are ready.');
+        return;
+      }
+      state.pairRepaired = true;
+      setStatus('This browser connection went stale. Reconnecting…', 'info');
+      startPairing();
+      return;
+    }
     if (oldServer(result)) {
       // /pair/start answered but /pair/status does not: a fleet mid-deploy, or
       // a proxy that knows one route and not the other. Same answer as above.
