@@ -1,99 +1,127 @@
-# blazing-web handoff — 2026-08-30
+# blazing-web handoff — 2026-09-03
 
-Working on: poster/trailer parity, nav+section parity, and per-profile login art.
-Last action: pushed bca0bc8 — login art now reads BOTH progress stores.
-Next step: `cd /Users/markususche/Desktop/blazing-web && node profileart.smoke.mjs`
-Key files: app.js, profile.js, index.html, styles.css, *.smoke.mjs (15 files)
-Blockers: none in this repo. Two things need Markus, listed at the bottom.
+Working on: letter C (device-aware source picking) and letter B (full-bleed
+Continue Watching hero) — both landed, plus the row-hero harness that could not
+hold a pointer.
+Last action: committed on main. **NOT PUSHED — deliberately.**
+Next step: nothing runs. Markus approves the public deploy, then:
+`cd /Users/markususche/Desktop/blazing-web && git push origin main`
+Key files: caps.js (new), caps-hero.smoke.mjs (new), app.js, index.html,
+styles.css, sw.js, rowhero.smoke.mjs
+Blockers: none technical. One gate: this repo is PUBLIC and GitHub Pages serves
+the live site straight off main, so pushing republishes it. That needs Markus.
 
-## What shipped this session
+## WHY THIS IS SITTING UNPUSHED
 
-| commit | what |
+Not an oversight, and not something for the next profile to "finish" by pushing.
+`Kaoz625/blazing-web` is public and Pages builds from main, so `git push` IS the
+public deploy. The house rule is that anything reaching an audience is asked
+first. The work is committed so nothing can be lost; the push is Markus's call.
+
+## What is in the commit
+
+| what | where |
 |---|---|
-| 88c0de6 | Continue Watching never rendered for anyone; search posters never played |
-| 6beb016 | FLT-10 — nav holds on all 15 tabs, three content gaps closed |
-| dca8a5e | Login screen shows each profile's own last-watched art |
-| bca0bc8 | That art reads BOTH progress stores, not just the fleet |
+| C — probe what this browser can really decode, then filter AND rank | `caps.js` (new, `window.BlazingCaps`) |
+| C — one ranking for both the list and Play | `app.js` `loadStreams()` + `playSelected()` |
+| B — full-bleed Continue Watching band with resume bar and a fleet trailer | `index.html`, `styles.css`, `app.js` |
+| the shell can actually serve the new file | `sw.js` — `caps.js` added to SHELL, CACHE v21 → v22 |
+| 43-assertion harness for both | `caps-hero.smoke.mjs` (new) |
+| a harness that can hold a pointer | `rowhero.smoke.mjs` |
 
-## The four defects behind "embry continue watching all the posters"
+**The trailer is a plain MP4 from our own fleet**, never a YouTube iframe:
+`fleet.lyreosai.com/trailer/play/<yt>?muxed=1&c=mp4&h=<n>`. The tier comes from
+the probe. `caps-hero.smoke.mjs` asserts there is no iframe anywhere and that
+youtube.com is never contacted (0 requests). An iframe cannot run on Roku, Apple
+TV, Fire TV, webOS, Tizen or VegaOS.
 
-1. **The row never existed, for anybody.** `loadContinueWatching()` returns at
-   its first line unless `localStorage.profileId` is set, and **profile.js never
-   writes that key** — the only two writers are boot()'s legacy `#profile-picker`
-   dialog, which the modern gate never opens. A new `blazing-profile-selected`
-   listener takes the id off the event and persists it.
-2. It never called `claimHeroRow()` — the one card-building path in app.js that
-   skipped it, so its posters could not expand or play a trailer.
-3. The resume bar never drew: `safeMeta()` is an allow list and `progress` is
-   not on it, so `m.progress` was always undefined.
-4. Search results played nothing: `attachHoverTrailer` refused anything outside
-   `.row-hero`. It now admits `.search-results` too.
+**The card-hover preview still goes through the addon's `/proxy/yt-resolve`.**
+That is deliberate and `rowhero.smoke.mjs` asserts it. Only the new HERO uses the
+fleet route. Do not "unify" these.
 
-**Side effect worth knowing:** `#emby-results`, `#discover-results`,
-`#games-results`, `#requests-results` and `#edu-results` all carry
-`class="search-results"`, so five more grids gained hover previews for free on
-any card built by `buildCard()`.
+## The three bug shapes the other device lanes found — all three were already handled
 
-## Two testing traps, both cost real time — read before writing a smoke file
+1. **A 4K ceiling must come from DECODE, not screen size.** A real Apple TV 4K
+   reports its screen as 1920x1080 (the UI plane, not the output mode). `ceiling()`
+   in caps.js takes 2160 from `decodingInfo` at 3840x2160 only; the panel may
+   raise 1080→1440 and may never cap a decoder.
+2. **Language markers must be delimiter-anchored.** `/ita/` matches "DIGITAL",
+   `/rus/` matches "Rust". `marker()` anchors on non-alphanumerics, so it also
+   survives `Some_Film_2026_ITA` where `\b` finds nothing (`_` is a word char).
+3. **`\b1080\b` never matches "1080p"** — "p" is a word character, so there is no
+   boundary. Every row parsed as height 0 and the ceiling measured nothing. The
+   patterns carry a trailing `[pi]?` and the harness has a regression test.
 
-- **A Locator is not a valid `waitForFunction` argument.** It serialises to `{}`,
-  the predicate throws on its first line, and the wait "finishes" in about a
-  millisecond against an element the pointer never reached. Use
-  `await locator.elementHandle()`.
-- **`locator.hover()` fails its actionability check under the sticky top bar**,
-  and a `.catch(() => {})` swallows it silently. Scroll the element into view,
-  read its `boundingBox()`, and drive `page.mouse.move()` to its centre.
-- (Still true from before: poll on a timer, `polling: 100`, never on `raf` —
-  headless Chromium does not paint while the test sleeps.)
+## The row-hero harness was failing 2 legs out of 2, and it was NOT the feature
 
-## Running the suite
+Measured on this machine, 3 Sep 2026, four runs of the file exactly as the last
+session left it:
 
-15 loose `*.smoke.mjs`, no package.json. **One at a time, with a ~2s pause** —
-several bind fixed ports and back-to-back runs redden the next file. Under heavy
-CPU load (an Xcode build in parallel) `watch-party.smoke.mjs` can exit non-zero
-with zero FAIL lines; it is timing, re-run it on a quiet machine.
+| run | desktop | phone |
+|---|---|---|
+| suite | FAIL 158px | ok |
+| 1 | ok 316px | FAIL 280→118 |
+| 2 | FAIL 158px | FAIL 280→118 |
+| 3 | ok 316px | FAIL 280→118 |
+
+158px and 118px are the RESTING widths. Two different legs failing on alternate
+runs of identical code is a harness fault, not a feature that half works. Three
+causes, all fixed:
+
+1. **`card.hover()` cannot be trusted under a sticky bar.** It scrolls with
+   `scrollIntoViewIfNeeded`, which stops as soon as the element is technically
+   visible — and the top bar is `position: sticky`, so that includes
+   "underneath the bar". The hit-test then finds the bar, the actionability
+   check fails, and a `.catch(() => {})` swallows it. `hoverHot` now scrolls the
+   card to `block: 'center'`, reads `boundingBox()`, and drives
+   `page.mouse.move()` to its centre — no actionability check involved. The new
+   #home-hero band added 620px above these rows, which turned a rare failure
+   into a common one.
+2. **Agreeing once is not settled.** The phone leg polled until every card in the
+   row had the same width and took the first agreement. Straight after
+   `setViewportSize(390)` the row passes THROUGH a state where they all agree at
+   280 (the desktop track, not yet re-laid out), so it latched 280 as the resting
+   width, then measured the real 118 after the reflow and reported a working
+   expand as a card that SHRANK. It now needs the same number three polls
+   running, with nothing hovered.
+3. **`hoverHot` returned whether the pointer landed and both callers threw it
+   away**, so "the pointer never arrived" was reported as "the card did not
+   expand". Both legs now assert it, and say which of the two happened.
+
+After the fix: **19 passed, 0 failed, three runs running.**
+
+## Two testing traps, still true, still cost real time
+
+- **A Playwright Locator is not a valid `waitForFunction` argument.** It
+  serialises to `{}` and the predicate throws on its first line, so the wait
+  "finishes" in a millisecond against an element the pointer never reached. Use
+  `await locator.elementHandle()` — or an `ElementHandle` from `page.$()`, which
+  is what this file uses.
+- **Poll on a timer (`polling: 100`), never on `raf`.** Headless Chromium does
+  not paint while the test sleeps, so a CSS transition sits at 0% and then snaps
+  to 100%. An rAF poll is asleep for exactly as long as the thing it waits for.
+
+## Run the suite by hand — CI does not
+
+CI (`.github/workflows/`) runs assets, manifests, python, shell and syntax. It
+explicitly does NOT run the browser harnesses, and a `*.smoke.mjs` change starts
+nothing. Run them ONE AT A TIME with a pause — the 15 loose files bind fixed
+ports and a parallel run goes red for no reason:
 
 ```
 cd /Users/markususche/Desktop/blazing-web
-for f in *.smoke.mjs; do node "$f"; sleep 2; done
+node caps-hero.smoke.mjs && node home.smoke.mjs && node rowhero.smoke.mjs \
+  && node navparity.smoke.mjs && node posters.smoke.mjs \
+  && python3 .github/checks/assets.py
 ```
 
-## Needs Markus
+`assets.py` baseline is **0 failure(s), 4 warning(s)** — the 4 are pinned
+dpad/games/manga/tv-comics-reader SHELL gaps and are expected.
 
-- **DEP-8**: none of this is live. Cloudflare Pages is NOT built from git here —
-  committing blazing-web never ships it. The product is one domain built from
-  blazing-site; deploying blazing-web alone never touches
-  blazingstream.lyreosai.com/app/.
-- **Two Apple TV codebases.** Recommendation: ship `blazing-tvos`, archive
-  `firetv/apple`. blazing-tvos is older, 3x the code, and has PIN gate, Watch
-  Party, Top Shelf, Search, Live TV and a real test target that firetv/apple has
-  none of. Archiving a repo is not reversible, so it is waiting on a yes.
+## Known, not fixed, and not worth blocking on
 
----
-
-## TV packaging lane — 2026-08-30 12:37
-
-Working on: rebuilding the stale Samsung `.wgt` and LG `.ipk`.
-Last action: pushed `5c97791` — build-tvs.sh no longer stages `.claude/` or `.omc/`.
-Next step: nothing blocking. To rebuild: `cd /Users/markususche/Desktop/blazing-web && ./build-tvs.sh`
-Key files: `build-tvs.sh`, `dist/` (gitignored — packages are never committed).
-Blockers: none.
-
-Both packages were Aug 29 07:42 and contained none of today's five commits.
-Rebuilt; both are now signed, 0.27 MiB, and `index.html`/`profile.js`/`app.js`
-inside them are byte-identical md5 to the working tree.
-
-**The thing worth remembering:** every TV package this repo ever shipped
-contained `.claude/handoff.md` and `.omc/` — this file, on a television, and in
-a public deploy. `build-tvs.sh` stages with an rsync exclude list and every
-entry on it was a name you can see in `ls`, so the dotdirs walked straight past
-it. Same bug the script's own header says it fixed on 27 Aug, one layer down.
-No credential was in any of it (scanned: long quoted strings, `sk-`/`ghp_`/
-`AKIA`/`xox`/`AIza`, PEM headers, key/secret/token/password assignments — zero
-hits), so it was disclosure of internal notes, not a leak. Staged file count
-went 43 -> 24.
-
-**Unchecked, and outside this repo's script:** build-tvs.sh's own comment says
-to keep its exclude list in step with what Cloudflare Pages is given. If Pages
-is fed the repo root the same way, the live site is serving this file too.
-Worth one look by whoever owns the Pages config.
+`buildFilterNote` renders "N of TOTAL sources play on this device" where TOTAL is
+`raw.length`. Rows removed by the 1200-entry parse cap, and duplicate releases
+removed by `dedupeKey`, are counted in neither N nor the "hidden" breakdown, so
+those two numbers need not add up on a very long list. Cosmetic; the filter
+itself is correct.

@@ -146,12 +146,74 @@
   <main id="app-main">
 
     <section id="home-view" class="view">
-      <!-- No standalone hero banner. DebridStream reference: "one band does both
-           jobs" — the first row with content IS the hero, via row-hero on its
-           <section> (see claimHeroRow in app.js) and the .row-hero CSS in
-           styles.css. Every card already carries the backdrop/metadata/synopsis
-           markup needed to expand on focus; only a row-hero ancestor makes that
-           visible, so buildCard() itself needed no per-row branching. -->
+      <!-- THERE IS A STANDALONE HERO NOW, and the comment that used to sit here
+           said there deliberately was not. Read that one first — it is preserved
+           in styles.css above .card-backdrop, with the reasoning intact — because
+           this is an override of a real decision and not a discovery that it was
+           wrong.
+
+           Markus, 3 Sep 2026: "i absolutly love how on the home page the continue
+           watching fills the whole screen. all devices should look like this and
+           do this."
+
+           He is describing the Roku, which moved its hero to a 1920x1080 Video
+           node at translation [0,0] — the whole screen, because "there is exactly
+           one box that is both 16:9 and the whole screen" (HomeScreen.xml). The
+           web was the client that had no hero at all: a .hero-art band existed in
+           the stylesheet with no video element behind it and nothing on the home
+           screen ever used it.
+
+           WHAT THE OLD DECISION GOT RIGHT IS KEPT. The expand-on-focus row-hero
+           treatment is untouched and every row still does it; this band sits
+           ABOVE the rows rather than replacing them. The old comment's argument
+           was against a hero that duplicated the first row's job. This one does a
+           different job: it is Continue Watching, the thing you came back for,
+           playing. -->
+      <section id="home-hero" class="home-hero" hidden aria-labelledby="home-hero-title">
+        <!-- The artwork is the floor, not the fallback-of-last-resort: it is what
+             is on screen for the first seconds, all the time under
+             prefers-reduced-motion, and for ever when the fleet holds no trailer
+             for this title. The <video> is layered over it and only ever becomes
+             visible once it is actually playing frames, so a stalled or 404
+             trailer is invisible rather than a black rectangle. -->
+        <div class="home-hero-media">
+          <img id="home-hero-art" class="home-hero-art" alt="" decoding="async">
+          <!-- muted + playsinline are not preferences. An unmuted autoplay is
+               rejected outright by every browser and leaves a dead black box,
+               and without playsinline iOS Safari takes the video fullscreen the
+               moment it starts. preload="none" so a hero the viewer scrolls
+               straight past costs nothing. -->
+          <video id="home-hero-video" class="home-hero-video"
+                 muted loop playsinline preload="none"
+                 tabindex="-1" aria-hidden="true"></video>
+        </div>
+        <div class="home-hero-scrim" aria-hidden="true"></div>
+        <div class="home-hero-content">
+          <p class="eyebrow" id="home-hero-eyebrow">Continue watching</p>
+          <h2 class="home-hero-title" id="home-hero-title"></h2>
+          <p class="home-hero-meta" id="home-hero-meta"></p>
+          <p class="home-hero-synopsis" id="home-hero-synopsis"></p>
+          <div class="home-hero-actions">
+            <button type="button" id="home-hero-play" class="primary-button">Play</button>
+            <button type="button" id="home-hero-info" class="secondary-button">More info</button>
+          </div>
+          <div class="home-hero-progress" id="home-hero-progress" hidden>
+            <div class="home-hero-progress-fill" id="home-hero-progress-fill"></div>
+          </div>
+        </div>
+        <!-- Hidden until a trailer is genuinely playing. A mute button over a
+             still image is a control for something that is not there. -->
+        <button type="button" id="home-hero-mute" class="home-hero-mute" hidden
+                aria-label="Unmute trailer">Unmute</button>
+      </section>
+      <!-- The row-hero note that used to open this section, kept verbatim because
+           it is still true of every row below the band:
+           "One band does both jobs: no separate hero banner. The first row with
+           content IS the hero, via row-hero on its <section> (see claimHeroRow in
+           app.js) and the .row-hero CSS in styles.css. Every card already carries
+           the backdrop/metadata/synopsis markup needed to expand on focus; only a
+           row-hero ancestor makes that visible, so buildCard() itself needed no
+           per-row branching." -->
       <!-- Every other view opens with an eyebrow + <h1> + one line: Library,
            Emby, Comics, Manga, Games, Requests, Trailers, Education, Roadmaps
            and Admin all do. Home/Movies/Shows/Anime are the SAME section with
@@ -510,6 +572,11 @@
   <!-- Loaded before app.js so window.BlazingTelemetry exists by the time the
        first screen_view fires. app.js guards for it anyway. -->
   <script src="./dpad.js" defer></script>
+  <!-- Before app.js, and `defer` keeps document order, so window.BlazingCaps
+       exists by the time the first source list is asked for. app.js guards for
+       it anyway and falls back to the old ordering — a capability probe that
+       fails to load must cost the viewer a worse sort, never the whole list. -->
+  <script src="./caps.js" defer></script>
   <script src="./telemetry.js" defer></script>
   <script src="./profile.js" defer></script>
   <script src="./emby.js" defer></script>

@@ -296,7 +296,290 @@ const rowsWrap = $('#rows');
 function claimHeroRow(section, metas) {
   if (!metas?.[0]?.background) return;
   section.classList.add('row-hero');
+  // The band at the top of the home screen gets a candidate from every row that
+  // qualifies for the row-hero treatment, at the lowest priority. Continue
+  // Watching outranks all of them — see seedHomeHero.
+  seedHomeHero(metas[0], { priority: 1, eyebrow: 'Featured' });
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE FULL-BLEED HOME HERO
+
+   Markus, 3 Sep 2026: "i absolutly love how on the home page the continue
+   watching fills the whole screen. all devices should look like this and do
+   this."
+
+   He is describing the Roku, whose hero is now a 1920x1080 Video node at
+   translation [0,0]. This is the web's copy of it. The band, its scrims and the
+   reason it overrides the "no separate hero banner" decision are in styles.css;
+   this is the half that decides WHAT is in it and WHEN it moves.
+
+   THE TRAILER COMES FROM OUR FLEET AS A PLAIN VIDEO URL. Not a YouTube iframe,
+   not the YouTube API. An iframe cannot run on Roku, Apple TV, Fire TV, LG webOS,
+   Samsung Tizen or VegaOS, and every feature has to work on all six — so the
+   browser is held to what a television can do, which is: open a URL.
+
+   Verified live against the fleet, 3 Sep 2026:
+       GET /trailer/movie/tt1517268            200  {"ytId":"Y1IgAEejvqM"}
+       GET /trailer/play/<yt>?muxed=1&c=mp4&h=480   206  video/mp4  11,829,048 B
+       GET /trailer/play/<yt>?muxed=1&c=mp4&h=1080  206  video/mp4  84,426,489 B
+       ...with access-control-allow-origin: https://kaoz625.github.io on the
+       range response, so the page really is allowed to read it.
+   The tier is chosen by caps.js from what this device and this link can take —
+   see BlazingCaps.trailerHeight, and the note there about why an unattended
+   preview stops at 1080 even on a machine that would take 2160 for a film.
+
+   THREE WAYS IT DEGRADES, all of them back to the artwork:
+     - prefers-reduced-motion: the fleet is never called at all.
+     - the fleet holds no ytId for this title, or the request fails: no video.
+     - the <video> errors, stalls or has autoplay refused: `.playing` is never
+       added, so the element stays at opacity 0 over the still.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const homeHero = $('#home-hero');
+const homeHeroArt = $('#home-hero-art');
+const homeHeroVideo = $('#home-hero-video');
+const homeHeroMute = $('#home-hero-mute');
+
+/** How long the still sits before the trailer is even asked for. */
+const HERO_TRAILER_DELAY_MS = 1800;
+
+/* `priority` is what stops the last row that finishes loading from winning.
+   Continue Watching is prepended by loadContinueWatching() whenever it finishes,
+   which is a race against every catalog row — and Markus asked for CONTINUE
+   WATCHING in the band by name, so it takes 2 and a plain featured row takes 1.
+   A higher number never loses to a lower one, whatever the order they arrive
+   in. */
+let homeHeroPriority = 0;
+let homeHeroMeta = null;
+let homeHeroTimer = null;
+
+function seedHomeHero(meta, opts) {
+  if (!homeHero || !meta) return;
+  const priority = (opts && opts.priority) || 1;
+  if (priority <= homeHeroPriority) return;
+  // A band with no artwork is a black rectangle with text on it. Same guard as
+  // claimHeroRow's, and for the same reason: a Live TV channel-logo row has
+  // nothing to fill a hero with.
+  const art = safeHttpsUrl(meta.background) || safeHttpsUrl(meta.poster);
+  if (!art) return;
+
+  homeHeroPriority = priority;
+  homeHeroMeta = meta;
+  stopHomeHeroTrailer();
+
+  homeHeroArt.src = art;
+  $('#home-hero-eyebrow').textContent = (opts && opts.eyebrow) || 'Featured';
+  $('#home-hero-title').textContent = meta.name || '';
+  $('#home-hero-meta').textContent = [meta.releaseInfo, meta.type === 'series' ? 'Series' : 'Film']
+    .filter(Boolean).join('  ·  ');
+  $('#home-hero-synopsis').textContent = meta.description || '';
+
+  const progress = opts && opts.progress;
+  const bar = $('#home-hero-progress');
+  if (progress && Number(progress.duration) > 0) {
+    // A zero or missing duration is the API saying it does not know, not "0%
+    // watched" — the same trap loadContinueWatching's row bar records, where a
+    // bar of NaN width renders as a FULL one.
+    const pct = Math.max(0, Math.min(100, (Number(progress.position) / Number(progress.duration)) * 100));
+    $('#home-hero-progress-fill').style.width = `${pct}%`;
+    bar.hidden = false;
+  } else {
+    bar.hidden = true;
+  }
+
+  syncHomeHeroVisibility();
+
+  // The synopsis is usually missing from a catalog meta — 171 of the live
+  // catalog's 300 carry none — so fill the band in the same way a dwelt-on card
+  // fills its panel, from /meta/. Dropped if the band moved on meanwhile.
+  fetchFullMeta(meta).then((full) => {
+    if (!full || homeHeroMeta !== meta) return;
+    mergeFullMeta(meta, full);
+    if (meta.description) $('#home-hero-synopsis').textContent = meta.description;
+    const better = safeHttpsUrl(meta.background);
+    if (better) homeHeroArt.src = better;
+  }).catch(() => {});
+
+  clearTimeout(homeHeroTimer);
+  homeHeroTimer = setTimeout(() => startHomeHeroTrailer(meta), HERO_TRAILER_DELAY_MS);
+}
+
+/** Only on 'home'. Movies, Shows and Anime are the SAME section with the rows
+    filtered (applyRowFilter), and a Continue Watching band over a filtered
+    Anime shelf is showing the wrong thing on purpose. */
+function syncHomeHeroVisibility() {
+  if (!homeHero) return;
+  const show = state.route === 'home' && !!homeHeroMeta;
+  homeHero.hidden = !show;
+  if (!show) { stopHomeHeroTrailer(); return; }
+
+  // COMING BACK TO HOME HAS TO RE-ARM IT, and nothing else does. The branch
+  // above tears the <video> right down on the way out — src removed, timer
+  // cleared — and the only other place a trailer is ever started is
+  // seedHomeHero(), which will not run again for a title that is already
+  // seated. So without this the band plays its trailer exactly ONCE per page
+  // load: one tap on the 12-tab nav and one tap back, which is seconds, and the
+  // hero is a still picture for the rest of the session.
+  //
+  // Guarded on "nothing is running", for two callers: seedHomeHero() calls this
+  // and then arms its own timer a few lines later (that one clears whatever is
+  // set here, so they cannot double up), and a route change that leaves a
+  // trailer already playing or already failed must not restart it.
+  if (!homeHeroTimer && homeHeroVideo && !homeHeroVideo.getAttribute('src')) {
+    const meta = homeHeroMeta;
+    homeHeroTimer = setTimeout(() => startHomeHeroTrailer(meta), HERO_TRAILER_DELAY_MS);
+  }
+}
+
+/**
+ * Forget whoever the band was showing.
+ *
+ * THE PRIORITY LATCH NEVER EXPIRES, and that turned it into the exact bug the
+ * Continue Watching ROW was written to avoid. seedHomeHero() refuses anything
+ * whose priority is not HIGHER than the one already seated — that is what stops
+ * a catalog shelf that finishes late from stealing the band. But Continue
+ * Watching seats itself at 2, so the SECOND call at 2 is refused as well, and
+ * the second call at 2 is the one the blazing-profile-selected listener makes on
+ * every profile switch. The row swapped and the band did not: the previous
+ * profile's title, artwork, synopsis and resume percentage stayed on screen
+ * under the new name. The comment on that listener says in as many words that
+ * switching profile must not leave "the previous profile's history on screen
+ * under a new name"; the band it did not know about was doing precisely that.
+ *
+ * Clearing rather than overwriting, because the new profile may have nothing to
+ * continue at all — in which case an empty band is right and the old profile's
+ * film is not.
+ */
+function resetHomeHero() {
+  stopHomeHeroTrailer();
+  homeHeroPriority = 0;
+  homeHeroMeta = null;
+  if (homeHeroArt) homeHeroArt.removeAttribute('src');
+  syncHomeHeroVisibility();
+}
+
+function stopHomeHeroTrailer() {
+  clearTimeout(homeHeroTimer);
+  homeHeroTimer = null;
+  if (!homeHeroVideo) return;
+  homeHeroVideo.classList.remove('playing');
+  try { homeHeroVideo.pause(); } catch (e) {}
+  // removeAttribute then load(), not src = '': assigning the empty string makes
+  // the browser resolve it against the page URL and fetch the DOCUMENT as media,
+  // which is a guaranteed decode error in the console on every route change.
+  homeHeroVideo.removeAttribute('src');
+  try { homeHeroVideo.load(); } catch (e) {}
+  if (homeHeroMute) homeHeroMute.hidden = true;
+}
+
+/**
+ * Ask the fleet which YouTube id belongs to this title.
+ *
+ * The card-hover preview goes through the ADDON's /proxy/yt-resolve instead, and
+ * that is not an inconsistency to tidy up: it returns an HLS manifest, which is
+ * right for a 132px poster that may be replaced a second later, and rowhero
+ * .smoke.mjs asserts that path is taken. The hero wants one progressive file it
+ * can seek and loop, which is the fleet's /trailer route and needs no resolve
+ * round trip on the media itself.
+ */
+async function fleetTrailerYtId(meta) {
+  if (!meta || !meta.id) return '';
+  // The fleet indexes anime under its series metadata, exactly as Trailer.brs
+  // does on the Roku.
+  let type = meta.type === 'anime' ? 'series' : (meta.type || 'movie');
+  if (type === 'tv') type = 'series';
+  try {
+    const res = await fetch(`${FLEET_BASE}/trailer/${encodeURIComponent(type)}/${encodeURIComponent(meta.id)}`,
+      { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) return '';
+    const data = await res.json();
+    return (data && typeof data.ytId === 'string') ? data.ytId : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+async function startHomeHeroTrailer(meta) {
+  if (!homeHeroVideo || homeHeroMeta !== meta) return;
+  // Asked before anything is fetched. Under `reduce` the fleet is never called:
+  // respecting the preference by downloading 12 MB and then not showing it is
+  // not respecting it.
+  if (window.BlazingCaps && window.BlazingCaps.prefersReducedMotion()) return;
+
+  const ytId = meta.trailerYt || await fleetTrailerYtId(meta);
+  if (!ytId || homeHeroMeta !== meta) return;
+
+  const caps = window.BlazingCaps ? await window.BlazingCaps.probe() : null;
+  if (homeHeroMeta !== meta) return;
+  const url = window.BlazingCaps
+    ? window.BlazingCaps.trailerUrl(FLEET_BASE, ytId, caps)
+    : `${FLEET_BASE}/trailer/play/${encodeURIComponent(ytId)}?muxed=1&c=mp4&h=480`;
+
+  homeHeroVideo.muted = true;
+  homeHeroVideo.src = url;
+  // `once`, so a hero that is reseeded five times does not end up with five
+  // listeners each un-hiding a video the others already tore down.
+  homeHeroVideo.addEventListener('playing', () => {
+    if (homeHeroMeta !== meta) return;
+    homeHeroVideo.classList.add('playing');
+    if (homeHeroMute) homeHeroMute.hidden = false;
+    telemetry('nav_action', { action: 'hero_trailer_autoplay', from: 'home' });
+  }, { once: true });
+  homeHeroVideo.addEventListener('error', () => {
+    // Back to the artwork, silently. A hero that announces a failed trailer is
+    // telling the viewer about a problem they cannot act on.
+    homeHeroVideo.classList.remove('playing');
+    if (homeHeroMute) homeHeroMute.hidden = true;
+  }, { once: true });
+
+  const p = homeHeroVideo.play();
+  // Autoplay refused (some engines refuse even muted under strict settings).
+  // Nothing to do about it and nothing to say: the still is already correct.
+  if (p && p.catch) p.catch(() => {});
+}
+
+if (homeHeroMute) {
+  homeHeroMute.addEventListener('click', () => {
+    // Muted is not a preference, it is the only way a browser will autoplay at
+    // all. This button is how the viewer opts in to sound, which is also the
+    // gesture the browser wants before it will allow it.
+    const nowMuted = !homeHeroVideo.muted;
+    homeHeroVideo.muted = nowMuted;
+    homeHeroMute.textContent = nowMuted ? 'Unmute' : 'Mute';
+    homeHeroMute.setAttribute('aria-label', nowMuted ? 'Unmute trailer' : 'Mute trailer');
+    telemetry('nav_action', { action: nowMuted ? 'hero_mute' : 'hero_unmute', from: 'home' });
+  });
+}
+
+if ($('#home-hero-play')) {
+  $('#home-hero-play').addEventListener('click', () => {
+    if (!homeHeroMeta) return;
+    // openDetail is synchronous and sets state.selected, which playSelected
+    // reads. Going straight to playSelected without it would find no selection
+    // and return without a word.
+    openDetail(homeHeroMeta);
+    playSelected();
+  });
+}
+if ($('#home-hero-info')) {
+  $('#home-hero-info').addEventListener('click', () => {
+    if (homeHeroMeta) openDetail(homeHeroMeta);
+  });
+}
+
+/* The scrollbar width the full-bleed rule needs. See the --scrollbar note in
+   styles.css: 100vw counts the classic scrollbar and the containing block does
+   not, so without this the band overhangs by 7-17px on Windows and the page
+   grows a horizontal scrollbar. 0 on overlay-scrollbar platforms, and 0 if this
+   never runs, which is the ordinary trick's ordinary behaviour rather than a
+   broken layout. */
+function measureScrollbar() {
+  const w = window.innerWidth - document.documentElement.clientWidth;
+  document.documentElement.style.setProperty('--scrollbar', `${w > 0 ? w : 0}px`);
+}
+measureScrollbar();
+window.addEventListener('resize', measureScrollbar);
 const drawerLayer = $('#drawer-layer');
 const menuButton = $('#menu-button');
 const detailDialog = $('#detail-dialog');
@@ -848,6 +1131,12 @@ function showRoute(route) {
     $('#browse-title').textContent = title;
     $('#browse-blurb').textContent = blurb;
   }
+  // The full-bleed band belongs to 'home' alone, and it has to be told: Movies,
+  // Shows and Anime are this SAME section with the rows filtered, so hiding
+  // homeView is not enough — leave it and a Continue Watching hero sits over a
+  // filtered Anime shelf. It also stops the trailer, so a route change is not a
+  // video quietly downloading behind a screen nobody is looking at.
+  syncHomeHeroVisibility();
   searchView.hidden = route !== 'search';
   libraryView.hidden = route !== 'library';
   adminView.hidden = route !== 'admin' && route !== 'link';
@@ -1229,7 +1518,25 @@ function attachHoverTrailer(card, meta) {
       wrap.appendChild(made.video);
       card.appendChild(wrap);
       card.classList.add('card-previewing');
-      requestAnimationFrame(() => wrap && wrap.classList.add('visible'));
+      // FORCE THE STYLE, DO NOT WAIT FOR A FRAME. `.card-trailer-wrap` is
+      // opacity 0 with a 400ms transition and `.visible` is what turns it on;
+      // adding that class in the same task as the append would give the engine
+      // no `before` value to transition FROM, so it would snap. The old cure was
+      // requestAnimationFrame, and it made the fade depend on a frame actually
+      // being produced — which is not guaranteed. Reading offsetWidth flushes
+      // the pending style and layout right here, so opacity:0 is computed, and
+      // the class flip on the next line then transitions exactly as before with
+      // nothing to wait for.
+      //
+      // MEASURED: rowhero.smoke.mjs's "it is faded in, not left at opacity 0"
+      // went red once inside a back-to-back run of all 18 harnesses and green on
+      // three consecutive solo runs of the same file. The wrap was built (the
+      // <video> assertions beside it passed) and simply never got `.visible` —
+      // the rAF callback had not run yet. A viewer whose machine is that busy
+      // gets the same thing: a trailer playing at opacity 0 behind the poster,
+      // audible and invisible, for as long as the browser skips frames.
+      void wrap.offsetWidth;
+      wrap.classList.add('visible');
       const p = made.video.play();
       if (p && p.catch) p.catch(() => {});
     }, HOVER_TRAILER_MS);
@@ -1989,6 +2296,26 @@ async function resolveEduStream(id) {
  * every other value it takes from the network (safeMeta, safeHttpsUrl, plainText)
  * — writing that one straight into innerHTML was the one place that did not.
  */
+
+/**
+ * A dub in a language nobody in this house reads — the FALLBACK test, used only
+ * when caps.js did not load. caps.js has the real one (see marker() there).
+ *
+ * IT USED TO BE A BARE SUBSTRING and that was a live bug, not a tidy-up:
+ * `/rus|russian|ita|italian|latino|french/` is TRUE of any title containing
+ * "DIGITAL" — d-i-g-**ita**-l — because "ita" is in it. AMZN and iTunes WEB-DL
+ * releases say DIGITAL constantly, so a large slice of the best English rows in
+ * every list were being pushed to the bottom as foreign dubs. `/rus/` does the
+ * same to "Rust" and "Crusade".
+ *
+ * The delimiter class is spelled out rather than using `\b`, for the reason
+ * caps.js's marker() gives at length: `_` is a word character, so `\b` finds no
+ * boundary in `Some_Film_2026_ITA_1080p` and matches nothing at all there.
+ * Anything that is not a letter or a digit is a delimiter; a letter or a digit
+ * is not.
+ */
+const FOREIGN_DUB = /(?:^|[^a-z0-9])(?:rus|russian|ita|italian|latino|french|dublado|hindi|tamil|telugu)(?:[^a-z0-9]|$)/i;
+
 async function loadStreams(meta) {
   const container = $('#detail-streams');
   container.innerHTML = '';
@@ -1998,7 +2325,9 @@ async function loadStreams(meta) {
   try {
     const contentId = state.selected === meta && state.selectedEpisode
       ? state.selectedEpisode.id : meta.id;
-    const streams = await resolveStreams(meta, contentId);
+    // `let`, because the capability filter below replaces this list with the
+    // rows this device can actually decode.
+    let streams = await resolveStreams(meta, contentId);
     if (state.selected !== meta) return;
     if (state.selectedEpisode && state.selectedEpisode.id !== contentId) return;
     if (!streams.length) {
@@ -2009,12 +2338,52 @@ async function loadStreams(meta) {
     // A link marked dead by a long-press sinks to the bottom, and so does a
     // dub in a language nobody here reads.
     const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
-    const penaltyOf = (s) => {
-      if (deadLinks.includes(s.url)) return 1000;
-      const blob = `${s.name || ''} ${s.title || ''}`.toLowerCase();
-      return /rus|russian|ita|italian|latino|french/.test(blob) ? 100 : 0;
-    };
-    streams.sort((a, b) => penaltyOf(a) - penaltyOf(b));
+
+    // WHAT THIS DEVICE CAN ACTUALLY DECODE, asked at runtime, then used to
+    // filter and to order. Markus, letter C: "based on the device and what that
+    // device can handle will the selected sources play. the souce lists gets
+    // filtered based on audio/video quality mainly. always the best for that
+    // specfic device."
+    //
+    // The three lines this replaces were the entire ranking this client had:
+    // a 1000-point penalty for a dead link, a 100-point one for a foreign dub,
+    // and nothing else. So a 4K HEVC remux led the list on every browser
+    // including the ones with no HEVC decoder in them at all — measured today,
+    // headless Chromium 147 answers `supported:false` for HEVC at BOTH 1080p and
+    // 2160p — and clicking it produced a spinner that never resolved, with no
+    // error, because a <video> given a codec it cannot decode simply never
+    // reaches readyState 1. That row is now gone rather than first.
+    //
+    // BlazingCaps is a separate probe file for the same reason DeviceCaps.brs
+    // and StreamRanker.brs are separate from the Roku's screens: the rules are
+    // the same rules on all six clients, and they are easier to keep in step
+    // when each client's copy is one readable file rather than an inline sort.
+    //
+    // It degrades. caps.js may not have loaded (the service worker's SHELL list
+    // has been wrong before — see sw.js), so a missing window.BlazingCaps keeps
+    // the old dead-link/dub ordering and shows every row. A capability filter
+    // that takes the source list down when it fails is worse than no filter.
+    let ranked = null;
+    if (window.BlazingCaps) {
+      const caps = await window.BlazingCaps.probe();
+      if (state.selected !== meta) return;
+      ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks });
+      streams = ranked.streams.map((info) => info.raw);
+      if (!streams.length) {
+        // Every row was rejected. Say WHICH ceiling did it, because "no
+        // compatible stream" on a screen full of results is the message that
+        // makes someone reinstall the app.
+        detailStatus.textContent = describeAllRejected(ranked, caps);
+        return;
+      }
+    } else {
+      const penaltyOf = (s) => {
+        if (deadLinks.includes(s.url)) return 1000;
+        const blob = `${s.name || ''} ${s.title || ''}`.toLowerCase();
+        return FOREIGN_DUB.test(blob) ? 100 : 0;
+      };
+      streams.sort((a, b) => penaltyOf(a) - penaltyOf(b));
+    }
 
     detailStatus.textContent = '';
     // The dropdown is filled from the meta's streamsByQuality when the backend
@@ -2022,6 +2391,11 @@ async function loadStreams(meta) {
     // list. Deriving it is what makes the control work today: streamsByQuality
     // is part of the undeployed addon commit and is absent from every response.
     fillQualitySelect(meta, streams);
+
+    // The count, and what the device threw away. Not decoration: the list used
+    // to be the raw addon response, so a viewer who counted 400 results
+    // yesterday and 260 today needs to know a probe did that on purpose.
+    if (ranked && ranked.dropped.total) container.appendChild(buildFilterNote(ranked));
 
     for (const s of streams) {
       const row = el('div', 'stream-row');
@@ -2089,6 +2463,55 @@ async function resolveStreams(meta, contentId = meta.id) {
   return Array.isArray(data.streams) ? data.streams : [];
 }
 
+/**
+ * The one line under the source list saying what the probe removed.
+ *
+ * WHY IT IS VISIBLE AT ALL. The list was the raw addon response until today, so
+ * the number of rows is something people have already learned to read. Cutting
+ * it silently — even cutting it correctly — looks like the app got worse. The
+ * Roku picker prints the same thing ("n hidden by your filters") for the same
+ * reason, and this is the browser's copy of it.
+ *
+ * Built from nodes and textContent, never innerHTML. Nothing here is
+ * attacker-controlled today, but every other row in this panel is built that
+ * way because `s.title` comes from an arbitrary third-party Stremio addon, and
+ * a sibling that does it differently is how the exception gets copied.
+ */
+function buildFilterNote(ranked) {
+  const d = ranked.dropped;
+  const parts = [];
+  if (d.nourl) parts.push(`${d.nourl} with no direct link`);
+  if (d.res) parts.push(`${d.res} above this screen`);
+  if (d.codec || d.codec4k) parts.push(`${d.codec + d.codec4k} this browser cannot decode`);
+  if (d.size) parts.push(`${d.size} too large for this connection`);
+  const note = el('div', 'stream-note');
+  note.textContent = `${ranked.streams.length} of ${ranked.total} sources play on this device` +
+    (parts.length ? ` — hidden: ${parts.join(', ')}.` : '.');
+  return note;
+}
+
+/**
+ * Everything was rejected. Name the ceiling that did it.
+ *
+ * "No compatible stream available" was the old message and it is the one that
+ * makes somebody reinstall the app, because it reads as "there are no sources"
+ * when what happened is "there are 400 sources and every one of them is 4K HEVC
+ * and this browser has no HEVC decoder". That is a real shape, not a
+ * hypothetical: it is exactly what headless Chromium 147 reports, and Firefox on
+ * Linux answers the same.
+ */
+function describeAllRejected(ranked, caps) {
+  const d = ranked.dropped;
+  if (d.codec || d.codec4k) {
+    return `All ${ranked.total} sources for this title use a codec this browser ` +
+      `cannot decode. Safari and Edge open HEVC; Chrome and Firefox often do not.`;
+  }
+  if (d.res) return `All ${ranked.total} sources are above this screen's ${caps.maxHeight}p.`;
+  if (d.size) return `All ${ranked.total} sources are too large for this connection.`;
+  if (d.nourl) return `None of the ${ranked.total} sources carry a direct link a browser can open.`;
+  return 'No compatible stream available.';
+}
+
 async function playSelected() {
   const meta = state.selected;
   if (!meta) return;
@@ -2121,16 +2544,31 @@ async function playSelected() {
   detailStatus.textContent = 'Checking direct streams…';
   try {
     const contentId = state.selectedEpisode ? state.selectedEpisode.id : meta.id;
-    const streams = await resolveStreams(meta, contentId);
+    let streams = await resolveStreams(meta, contentId);
     const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
-    const getPenalty = (s) => {
-      if (deadLinks.includes(s.url)) return 1000;
-      let p = 0;
-      const b = (s.name + ' ' + (s.title || '')).toLowerCase();
-      if (/rus|russian|ita|italian|latino|french/.test(b)) p += 100;
-      return p;
-    };
-    streams.sort((a, b) => getPenalty(a) - getPenalty(b));
+
+    // THE SAME RANKING THE LIST USES, and that is the whole point of the change.
+    // Play and the source list were two separate sorts before this: the list
+    // ordered by dead-link and dub penalty, Play took the first row with an
+    // https url. So the row shown at the top and the row Play started could be
+    // different files, and neither was chosen for what this device can decode.
+    // StreamRanker.brs records the same bug on the Roku from the other side —
+    // 4K passed the filter on the 4K set and still ranked below 1080p, "so
+    // auto-play never chose it" — which is why the filter and the scoring have
+    // to be one function with one caller here too.
+    if (window.BlazingCaps) {
+      const caps = await window.BlazingCaps.probe();
+      streams = window.BlazingCaps.rankStreams(streams, caps, { deadLinks }).streams.map((i) => i.raw);
+    } else {
+      const getPenalty = (s) => {
+        if (deadLinks.includes(s.url)) return 1000;
+        let p = 0;
+        const b = (s.name + ' ' + (s.title || '')).toLowerCase();
+        if (FOREIGN_DUB.test(b)) p += 100;
+        return p;
+      };
+      streams.sort((a, b) => getPenalty(a) - getPenalty(b));
+    }
     const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url) && !deadLinks.includes(stream.url)) || streams.find((stream) => stream && safeHttpsUrl(stream.url));
     if (!playable) {
       detailStatus.textContent = isMwp(meta)
@@ -2515,6 +2953,21 @@ async function loadContinueWatching(explicitProfileId) {
       // in Trending, did. Markus, 2026-08-30: "embry continue watching all the
       // posters. even when you search for the movie."
       claimHeroRow(section, metas);
+
+      // AND IT IS WHAT THE BAND AT THE TOP SHOWS. Markus, 2026-09-03: "i
+      // absolutly love how on the home page the continue watching fills the
+      // whole screen." Priority 2 beats the 1 claimHeroRow hands out, so the
+      // title you were part-way through wins the band however the race between
+      // this call and the catalog shelves happens to finish — and it carries the
+      // resume position with it, which is the one thing a Featured row cannot.
+      const first = pairs[0];
+      if (first) {
+        seedHomeHero(first.meta, {
+          priority: 2,
+          eyebrow: 'Continue watching',
+          progress: first.raw && first.raw.progress,
+        });
+      }
     }
   } catch (e) {}
 }
@@ -3073,6 +3526,11 @@ document.addEventListener('blazing-profile-selected', (event) => {
   localStorage.setItem('profileId', String(id));
   const stale = rowsWrap.querySelector('[data-row-id="continue-watching"]');
   if (stale) stale.remove();
+  // The full-bleed band is the other place this profile's history is on screen,
+  // and it does not clear itself — see resetHomeHero for why the priority latch
+  // silently refuses the second seed. Same line as `stale.remove()` above, for
+  // the same reason and at the same moment.
+  resetHomeHero();
   loadContinueWatching(String(id));
 });
 

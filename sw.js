@@ -37,7 +37,14 @@
 // pairing code" and a Try again that asks the same absent route instead of the
 // pending screen, and clears an APPROVED identity on the first 401 instead of
 // reclaiming it — the tvOS 7142fd5 orphan bug, in the browser.
-const CACHE = 'blazing-shell-v21';
+// v22: caps.js joins the shell (a new file — an installed PWA holding v21 has
+// no entry for it at all and would run app.js's "no BlazingCaps" fallback for
+// ever, so this bump is what actually ships the capability filter), plus the
+// full-bleed home hero in index.html/styles.css. A v21 index.html has none of
+// the #home-hero elements the new app.js addresses; every one of those lookups
+// returns null and the hero silently never appears — the same shape as the v20
+// gate bug two entries up.
+const CACHE = 'blazing-shell-v22';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -46,6 +53,13 @@ const SHELL = [
   './index.html',
   './styles.css',
   './app.js',
+  // IN THE LIST FROM DAY ONE, unlike emby.js, dpad.js, games.js, manga.js and
+  // tv-comics-reader.js — five scripts that index.html loads and this list has
+  // never held, so they reach devices through the HTTP cache alone. caps.js
+  // decides which sources a device is offered at all: served stale beside a
+  // fresh app.js it would filter against yesterday's rules, and served not at
+  // all it silently drops the app back to the unranked list.
+  './caps.js',
   './hls.min.js',
   './telemetry.js',
   './profile.js',

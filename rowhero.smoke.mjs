@@ -233,7 +233,33 @@ async function hoverHot(page, card, settle = 0) {
   const rest = await card.evaluate((c) => { delete c.__lastW; return getComputedStyle(c).width; });
   let hot = false;
   for (let attempt = 0; attempt < 3 && !hot; attempt++) {
-    await card.hover().catch(() => {});
+    // CENTRE THE CARD IN THE VIEWPORT AND DRIVE A REAL POINTER TO IT, rather
+    // than calling card.hover().
+    //
+    // hover() scrolls with scrollIntoViewIfNeeded, which stops the moment the
+    // element is technically on screen — and the top bar is `position: sticky`,
+    // so "on screen" includes "underneath the bar". Playwright then hit-tests
+    // the card's centre, finds the bar, fails the actionability check, and the
+    // `.catch(() => {})` throws that away silently. The card never becomes
+    // :hover and the measurement below reads the RESTING width, which is
+    // indistinguishable from "the expand is broken".
+    //
+    // MEASURED, 3 Sep 2026, this file unchanged, three consecutive runs:
+    //   desktop  158px FAIL / 316px ok  / 158px FAIL     (158 = resting)
+    //   phone    ok    / 280->118 FAIL  / 280->118 FAIL
+    // Two different legs failing on alternate runs of identical code is a
+    // harness that cannot hold a pointer, not a feature that half works.
+    //
+    // It was survivable while the home page was short. The full-bleed
+    // #home-hero band (3 Sep 2026) put 620px above these rows, so the second
+    // hero row now sits at y≈1589 instead of ≈969 and every hover on it has to
+    // scroll first. `block: 'center'` puts the card in the middle of the
+    // viewport, where nothing is sticky, and mouse.move() to its measured
+    // centre needs no actionability check at all.
+    await card.evaluate((c) => c.scrollIntoView({ block: 'center', inline: 'center' }));
+    await page.waitForTimeout(150);
+    const box = await card.boundingBox();
+    if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     hot = await page.waitForFunction((c) => c.matches(':hover'), card, { timeout: 1500, polling: 100 })
       .then(() => true).catch(() => false);
     if (!hot) { await page.mouse.move(5, 5); await page.waitForTimeout(150); }
@@ -261,9 +287,19 @@ if (heroEls.length >= 2) {
   if (card) {
     const before = await page.evaluate((r) => {
       const b = r.nextElementSibling;
-      return { row: r.getBoundingClientRect().height, below: b ? b.getBoundingClientRect().top : 0 };
+      // `+ window.scrollY` so this is DOCUMENT-relative, matching `after` below.
+      // It was viewport-relative here and document-relative there, and the two
+      // were compared against each other. That only agreed because nothing had
+      // scrolled the page yet when `before` was taken, so scrollY happened to be
+      // 0 — hovering then scrolls the card into view, and `after` compensates
+      // for a scroll `before` never accounted for. Same number today, and no
+      // longer a check that quietly depends on the page being at the top.
+      return {
+        row: r.getBoundingClientRect().height,
+        below: b ? b.getBoundingClientRect().top + window.scrollY : 0,
+      };
     }, row);
-    await hoverHot(page, card);
+    const hot = await hoverHot(page, card);
     const after = await page.evaluate(({ r, c }) => {
       const b = r.nextElementSibling;
       // The widest box inside the card is what actually grew; `.card` itself may
@@ -281,7 +317,7 @@ if (heroEls.length >= 2) {
         cardW: widest.width, cardH: widest.height,
       };
     }, { r: row, c: card });
-    measured = { before, after };
+    measured = { before, after, hot };
   }
 }
 
@@ -289,6 +325,14 @@ if (!measured) {
   ok(false, 'could not measure a second expanding row');
 } else {
   const { before, after } = measured;
+  // hoverHot ALREADY returned this and both call sites threw it away, so a
+  // pointer that never reached the card was reported as "the card did not
+  // expand" — a harness fault wearing a product fault's name. Now it says which
+  // of the two happened, and the width check below is only meaningful once this
+  // one is green.
+  ok(measured.hot === true,
+    'the pointer actually reached the desktop card — :hover really is set',
+    measured.hot ? '' : '(hover never landed; the width below measures a card at rest)');
   ok(Math.abs(after.row - before.row) < 2,
     'the row does not get taller when a card expands',
     `(${before.row.toFixed(1)}px -> ${after.row.toFixed(1)}px)`);
@@ -343,22 +387,87 @@ const phone = await (async () => {
   const row = rows[0];
   const card = await row.$('.card');
   if (!card) return null;
+  // PARK THE POINTER OFF EVERY CARD, AND PROVE IT IS PARKED.
+  //
+  // (5,5) on its own is not a neutral point. It is neutral only while the page
+  // happens to be scrolled near the top, and the desktop pass above leaves it
+  // scrolled deep into the rows — hoverHot() scrolls its card into view. The
+  // shrink to 390x844 keeps that scroll offset. Once the full-bleed #home-hero
+  // band made the home page 620px taller (3 Sep 2026), the kept offset was 962
+  // instead of 30, and (5,5) landed on a `.card-label` INSIDE the first card.
+  // `before` then measured an already-expanded 280px, `after` measured the same
+  // 280px, and a card that expands exactly as it should reported as broken.
+  //
+  // Scrolling to the top first makes the park deterministic at any page height,
+  // and `resting` turns a bad measurement into a loud failure instead of a
+  // silent one: this check is only meaningful if the card starts at rest.
+  //
+  // PARKED IS NOT THE SAME AS SETTLED, and a fixed 400ms wait cannot tell them
+  // apart. Leaving the pointer removes `:hover` in the same frame, but the
+  // width is a CSS TRANSITION and keeps moving for a few hundred ms after it.
+  // Measured on this machine 3 Sep 2026, alternating between runs of the same
+  // unchanged file: `before.card` read 280px on one run — the desktop pass's
+  // expanded width, still collapsing — and 118px on the next. On the 280 runs
+  // hoverHot() then compared against 280 as if it were the resting width, saw
+  // the number settle at 118, and reported the collapse as if it were the
+  // expansion: "280px -> 118px", a red test on code that works. `:hover` was 0
+  // both times, so the parked check could not catch it.
+  //
+  // The settle signal is exact rather than timed: every card in a row is the
+  // same width at rest, and only a card mid-expand or mid-collapse differs. So
+  // wait until they all agree, and take THAT as the resting width.
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(400);
+  // AGREEING ONCE IS NOT SETTLED, and that is what made this leg fail 3 runs
+  // out of 3 with the identical "280px -> 118px".
+  //
+  // The old poll returned the width the moment every card in the row agreed.
+  // Immediately after setViewportSize(390) the row passes THROUGH a state where
+  // they all agree at 280 — the desktop track has not been re-laid out for the
+  // narrow viewport yet — so the very first poll latched 280 and called it the
+  // resting width. By the time the hover was measured the row had finished
+  // reflowing to its real resting 118, so the card was recorded as SHRINKING
+  // from 280 to 118 and a working expand reported as broken.
+  //
+  // So require three things, not one: nothing anywhere is still hovered, every
+  // card agrees, and the agreed number is the SAME for three polls running
+  // (300ms). A transient value cannot survive that; a real resting width does
+  // so on the first three polls it is asked.
+  const settled = await page.waitForFunction((r) => {
+    if (document.querySelector('.card:hover')) { r.__stable = 0; return null; }
+    const w = [...r.querySelectorAll('.card')].map((c) => c.getBoundingClientRect().width);
+    if (w.length < 2) return null;
+    if (!w.every((x) => Math.abs(x - w[0]) < 0.5)) { r.__stable = 0; return null; }
+    r.__stable = (typeof r.__lastW === 'number' && Math.abs(r.__lastW - w[0]) < 0.5)
+      ? (r.__stable || 0) + 1 : 0;
+    r.__lastW = w[0];
+    return r.__stable >= 3 ? w[0] : null;
+  }, row, { timeout: 8000, polling: 100 }).then((h) => h.jsonValue()).catch(() => null);
+  const resting = await page.evaluate(() => document.querySelectorAll('#rows .row.row-hero .card:hover').length);
   const before = await page.evaluate((r) => ({ row: r.getBoundingClientRect().height, card: r.querySelector('.card').getBoundingClientRect().width }), row);
-  await hoverHot(page, card);
+  before.settled = settled;
+  const hot = await hoverHot(page, card);
   const after = await page.evaluate((r) => {
     const c = r.querySelector('.card');
     const boxes = [c, ...c.querySelectorAll('*')].map((n) => n.getBoundingClientRect());
     const widest = boxes.reduce((a, x) => (x.width > a.width ? x : a), boxes[0]);
     return { row: r.getBoundingClientRect().height, w: widest.width, h: widest.height };
   }, row);
-  return { before, after };
+  return { before, after, resting, hot };
 })();
 
 if (!phone) {
   ok(false, 'could not measure an expanding row at phone width');
 } else {
+  ok(phone.resting === 0,
+    'the phone measurement starts from a card at REST — the pointer is off every card',
+    `(${phone.resting} card${phone.resting === 1 ? '' : 's'} still hovered, resting width ${phone.before.card.toFixed(0)}px)`);
+  ok(phone.before.settled !== null && Math.abs(phone.before.settled - phone.before.card) < 0.5,
+    'and the width has stopped moving — every card in the row agrees',
+    `(settled ${phone.before.settled === null ? 'never' : phone.before.settled.toFixed(0) + 'px'}, measured ${phone.before.card.toFixed(0)}px)`);
+  ok(phone.hot === true,
+    'the pointer actually reached the phone card — :hover really is set',
+    phone.hot ? '' : '(hover never landed; the width below measures a card at rest)');
   ok(phone.after.w > phone.before.card + 40, 'a phone expands the card too, not just a desktop',
     `(${phone.before.card.toFixed(0)}px -> ${phone.after.w.toFixed(0)}px)`);
   ok(Math.abs(phone.after.row - phone.before.row) < 2, 'and the phone row keeps its height',

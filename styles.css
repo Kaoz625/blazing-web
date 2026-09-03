@@ -200,6 +200,156 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .hero-content > p:not(.eyebrow), .page-heading > p:not(.eyebrow) { max-width: 520px; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
 .hero-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; align-items: center; }
 
+/* ── The full-bleed home hero ─────────────────────────────────────────────
+   Markus, 3 Sep 2026: "i absolutly love how on the home page the continue
+   watching fills the whole screen. all devices should look like this and do
+   this." See the long override note above .card-backdrop for what this
+   replaces and what it deliberately does not.
+
+   FULL-BLEED OUT OF A CENTRED COLUMN. #app-main is width: min(1440px, 100%)
+   with auto margins, so on any screen up to 1440px a plain width:100% is
+   already edge to edge and nothing else is needed. Above that the band has to
+   escape its own container, which is the negative-margin trick — and the
+   trick has one well-known bug worth naming, because it produces a horizontal
+   scrollbar on the exact desktops this rule is FOR:
+
+     100vw includes the classic vertical scrollbar; the containing block does
+     not. On a 1920px display with a 15px scrollbar, 100vw is 1920 while the
+     page is only 1905 wide, so the band overhangs 7.5px each side and the
+     browser grows a horizontal scrollbar to reach it.
+
+   --scrollbar is measured once in app.js (window.innerWidth minus
+   documentElement.clientWidth) and re-measured on resize. It is 0 on macOS and
+   iOS overlay scrollbars, 15-17px on Windows, and 0 if the JS never runs — in
+   which case this degrades to the ordinary trick with its ordinary overhang,
+   not to a broken layout. `overflow-x: hidden` on body was the other option
+   and was rejected: the top nav is position: sticky, and a scroll container on
+   an ancestor is what stops sticky working. */
+:root { --scrollbar: 0px; }
+.home-hero {
+  position: relative;
+  width: calc(100vw - var(--scrollbar));
+  max-width: calc(100vw - var(--scrollbar));
+  margin: 0 0 30px;
+  margin-inline: calc(50% - 50vw + var(--scrollbar) / 2);
+  /* 16:9 up to a ceiling. A hero taller than the viewport hides the first row
+     completely, and a home screen whose first scroll reveals that there ARE
+     rows is a worse home screen — the rows are the app. 74svh, not 74vh:
+     mobile Safari's vh is the tallest the toolbar ever gets, so vh alone
+     overshoots by the toolbar height on the phone this most matters on. */
+  height: min(56.25vw, 74svh, 620px);
+  min-height: 320px;
+  overflow: hidden;
+  background: linear-gradient(145deg, #18181b, #0a0a0a);
+  isolation: isolate;
+}
+.home-hero-media { position: absolute; inset: 0; z-index: 0; }
+.home-hero-art,
+.home-hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* cover, so a 16:9 trailer fills a band that is not 16:9 on a phone rather
+     than pillarboxing. Same call the Roku could not make — its Video node
+     refuses to crop, which is why HomeScreen.xml had to change the CARD to
+     1920x1080 instead. A browser can simply crop. */
+  object-fit: cover;
+  object-position: center 22%;
+}
+.home-hero-video {
+  /* Invisible until it is genuinely painting frames. app.js adds .playing on
+     the video's own `playing` event, so a trailer that 404s, stalls or is
+     refused autoplay leaves the artwork on screen instead of a black hole. */
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+.home-hero-video.playing { opacity: 1; }
+/* Two scrims, because one cannot do both jobs: the bottom one carries the text
+   over whatever the trailer is doing, the left one keeps it readable when the
+   action is on that side. Both are gradients rather than a flat wash — the
+   Roku learned that the hard way ("these grey boxes need to be removed"). */
+.home-hero-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(0deg, var(--bg) 2%, rgba(10,10,10,.78) 26%, rgba(10,10,10,.10) 62%, transparent 100%),
+    linear-gradient(90deg, rgba(10,10,10,.86) 0%, rgba(10,10,10,.34) 38%, transparent 66%);
+}
+.home-hero-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  width: min(620px, 100%);
+  padding: 0 24px 26px;
+}
+.home-hero-title {
+  margin: 0;
+  font-size: clamp(26px, 4.6vw, 54px);
+  font-weight: 900;
+  line-height: 1.02;
+  letter-spacing: -.045em;
+  text-shadow: 0 2px 18px rgba(0,0,0,.75);
+}
+.home-hero-meta { margin: 10px 0 0; color: #d0d0d4; font-size: 13px; font-weight: 750; letter-spacing: .02em; }
+.home-hero-synopsis {
+  margin: 10px 0 0;
+  max-width: 560px;
+  color: #d0d0d4;
+  font-size: 14px;
+  line-height: 1.45;
+  text-shadow: 0 1px 8px rgba(0,0,0,.8);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.home-hero-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; align-items: center; }
+.home-hero-progress { width: min(320px, 70%); height: 4px; margin-top: 16px; border-radius: 999px; background: rgba(255,255,255,.22); overflow: hidden; }
+.home-hero-progress-fill { height: 100%; border-radius: 999px; background: var(--accent); }
+.home-hero-mute {
+  position: absolute;
+  right: 20px;
+  bottom: 22px;
+  z-index: 3;
+  /* 44px, for the same reason every other button in this file is: it is under
+     a thumb as often as under a pointer. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 999px;
+  background: rgba(10,10,10,.6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  backdrop-filter: blur(6px);
+}
+.home-hero-mute:hover { background: rgba(10,10,10,.85); border-color: var(--accent); }
+
+@media (max-width: 640px) {
+  .home-hero { height: min(74svh, 460px); min-height: 300px; }
+  .home-hero-content { padding: 0 18px 20px; }
+  .home-hero-synopsis { -webkit-line-clamp: 2; font-size: 13px; }
+  .home-hero-mute { right: 14px; bottom: 16px; }
+}
+
+/* NO MOVING PICTURE AT ALL when the viewer has asked for none. This is the
+   whole rule, not a slower fade: app.js checks the same media query before it
+   ever requests a trailer, so under `reduce` the fleet is never called and the
+   <video> stays empty. The CSS half exists so the band is still correct if the
+   query flips after the page loaded — macOS toggles it live. */
+@media (prefers-reduced-motion: reduce) {
+  .home-hero-video { display: none; }
+  .home-hero-video.playing { opacity: 0; }
+}
+
 /* ── Buttons ─────────────────────────────────────────────── */
 /* 44px, not 42: every one of these was a hair under the smallest reliable
    touch target (WCAG 2.5.5 / iOS HIG both say 44), and this app is used from a
@@ -280,7 +430,27 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    invisible and the card stays plain-poster width everywhere else — only a
    .row-hero ancestor turns the expand-on-focus behaviour on. At rest a
    row-hero row is indistinguishable from any other row, which is the point:
-   neighbours stay ordinary portrait posters right up until one is focused. */
+   neighbours stay ordinary portrait posters right up until one is focused.
+
+   ─── OVERRIDDEN 3 Sep 2026, deliberately, and only in one direction ───
+   "No separate hero banner" is no longer true: .home-hero (further down this
+   file) is a full-bleed moving band above the rows on the home route.
+
+   Markus: "i absolutly love how on the home page the continue watching fills
+   the whole screen. all devices should look like this and do this." That is
+   the Roku, which now runs its hero as a 1920x1080 Video node at translation
+   [0,0]. Five of the six clients had a hero; the web had a .hero-art rule with
+   nothing behind it and a home screen that opened on a row of posters.
+
+   EVERY WORD ABOVE STILL HOLDS FOR THE ROWS, and none of it was deleted. The
+   argument it makes is against a banner that DUPLICATES the first row's job —
+   a static poster-and-blurb slab showing the same title the row below it
+   shows. .home-hero does a different job: it is the ONE title you were already
+   part-way through, playing, with a resume bar under it. Nothing about
+   .row-hero changed: claimHeroRow still runs, every qualifying row still
+   expands on focus, and a resting row-hero row is still indistinguishable
+   from any other row. If .home-hero ever finds nothing to show it stays
+   hidden and the screen is exactly what this comment describes. */
 .card-backdrop {
   position: absolute;
   inset: 0;
@@ -767,6 +937,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   box-shadow: 0 4px 16px rgba(255,61,71,.15);
 }
 .stream-row.dead { opacity: 0.4; }
+/* The line that says what the capability probe removed (buildFilterNote,
+   app.js). Quiet on purpose — it is an explanation for a count that changed,
+   not a warning. Without it a viewer who counted 400 sources yesterday and 260
+   today has no way to tell a working filter from a broken backend. */
+.stream-note {
+  padding: 6px 2px 2px;
+  color: var(--quiet);
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.4;
+}
 .stream-info { display: flex; flex-direction: column; gap: 0.25rem; }
 .stream-title { font-size: 0.85rem; color: var(--text); }
 .stream-tags { font-size: 0.75rem; color: var(--muted); }
