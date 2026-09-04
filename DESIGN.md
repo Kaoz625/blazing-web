@@ -1,16 +1,24 @@
 # DESIGN.md
 
 Extracted from the live `styles.css` — these are the tokens already in
-production across the site, not proposed ones.
+production **on this site**, not proposed ones.
+
+**This file is DERIVED, not the contract.** The one contract for every client is
+`roku channels/DESIGN.md`, and `Theme.brs` (Roku) and `Theme.swift` (Apple TV)
+are its reference implementations. When the two disagree, that file wins and this
+one is out of date. Kept in sync by hand, so re-read `styles.css` before trusting
+a value here — this section described `--surface: #141416` for ten days after the
+CSS had moved on.
 
 ## Color
 
 ```css
---bg: #0A0A0A;
---surface: #141416;
+--bg: #0A0A0B;
+--surface: #0E0A0C;        /* the "no gray" value, 24 Aug 2026 */
 --surface-focus: #1c1c1f;
 --surface-soft: #18181b;
 --text: #f7f7f8;
+--muted: rgba(255,255,255,.6);
 --accent: #FF3D47;
 --accent-strong: #E11D2B;
 --accent-glow: rgba(255,61,71, 0.35);
