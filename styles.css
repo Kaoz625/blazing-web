@@ -160,6 +160,19 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .topnav button:hover, .topnav button.active { color: #fff; background: var(--surface-focus); }
 .search-button { margin-left: auto; }
 
+/* The profile chip is the only child of .topbar with an unbounded width: it prints
+   the active profile's NAME. Logged out it reads "Connect profile" (126px); a long
+   name can exceed that without limit, which is what makes the nav breakpoint below
+   unprovable by measuring one profile. Cap it at the logged-out width so the
+   topbar's requirement is a FIXED number, then the breakpoint can be measured once
+   and stay true. See profile.js:2310, which creates this id. */
+#profile-connect-button {
+  max-width: 126px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Drawer ──────────────────────────────────────────────── */
 .drawer-layer { position: fixed; inset: 0; z-index: 40; }
 .drawer-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(0, 0, 0, .65); }
@@ -1004,18 +1017,47 @@ button:focus-visible, a:focus-visible, input:focus-visible {
      499px  old bar      909px   (so 901-908 clipped, on a 7-item bar)
      506px  canonical    916px   (so 901-915 clipped)
 
-   And the profile chip is VARIABLE WIDTH — it prints the profile's name. It is
-   57px for "Mark" and 91px for "Alexandra", which pushes the first clean width
-   from 916 to 949. A breakpoint tuned to a short name clips for a household
-   with a long one, which is the silent-failure shape this whole comment exists
-   to stop.
+   And the profile chip is VARIABLE WIDTH - it prints the profile's name. Tuning
+   the breakpoint to one name is the silent-failure shape this whole comment
+   exists to stop, and it happened: a first attempt measured 57px for "Mark" and
+   91px for "Alexandra", called 91px the worst case, and set 960px. IT MISSED THE
+   ACTUAL WORST CASE, which is the LOGGED-OUT default - the button reads "Connect
+   profile" at 126px, wider than any of the names measured, and it is what every
+   first-time visitor sees. 960 shipped a 961-1060px clipped band, and "Search"
+   read as a half-word across most laptop widths.
 
-   So: 960px, which clears the measured 949 worst case with room, and hand over
-   to the drawer below it. The drawer carries all 15 destinations (index.html),
-   including the two the bar does not — Home and Search — so handing over
-   earlier loses nothing. If you widen a chip or add one, re-measure; do not
-   assume this number still holds. */
-@media (max-width: 960px) {
+   Fixed by removing the variable instead of chasing it. #profile-connect-button
+   above now has max-width:126px with an ellipsis, so the topbar's requirement is
+   a FIXED number, and the 1200px rule below buys 68px back from chip padding
+   rather than dropping the whole bar early.
+
+   RE-MEASURED after both, in headless Comet 151.0.7922.247 on the served page,
+   logged out (the real worst case), stepping every width from 900 to 1400:
+
+     clipped widths: NONE
+     992 and below   nav hidden, drawer takes over
+     993 .. 1199     nav 438px, every chip whole   (tightened padding)
+     1200 and up     nav 506px, every chip whole
+
+   So: 992px. There is no clipped band at any width, which is the property that
+   matters - not the number. The drawer carries all 15 destinations including the
+   two the bar does not (Home and Search), so handing over loses nothing.
+
+   IF YOU ADD OR WIDEN A CHIP, RE-MEASURE. Do not reason about it: the last two
+   attempts were both arithmetic, and both were wrong. The script is
+   scratchpad/measure-topbar.mjs - it bisects for the first clean width and
+   prints every chip that overflows its nav. */
+/* Just above the handover, buy width back from the chips rather than dropping the
+   whole bar. 7 chips x 8px of padding + 6 gaps = 68px, which is the difference
+   between losing the nav at ~1060 and losing it at ~990. The drawer keeps its own
+   padding because this selector is .topnav only - the shared
+   `.topnav button, .drawer-nav button` rule above is deliberately not touched. */
+@media (max-width: 1200px) {
+  .topnav { gap: 0; }
+  .topnav button { padding-left: 6px; padding-right: 6px; }
+}
+
+@media (max-width: 992px) {
   .topnav { display: none; }
 }
 

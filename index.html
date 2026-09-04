@@ -64,7 +64,7 @@
          GAMES is here because it is the only one of the four that DOES have a
          destination: showRoute() flips #games-view and calls
          window.BlazingGames.mount(), and games.js is loaded at the foot of this
-         file. It stays in the drawer's "More" list as well — below 900px
+         file. It stays in the drawer's "More" list as well — at 992px and below
          styles.css hides this whole nav, so the drawer is the only way to reach
          it on a phone, and navparity.smoke.mjs pins the drawer at 15
          destinations.
@@ -90,7 +90,7 @@
          of .topbar. Moving it into this nav was tried: Connect profile and
          Party both threw, twice per load. So the magnifier stays exactly where
          it is, at the far right where `.search-button { margin-left: auto }`
-         puts it, and it keeps working below 900px where styles.css hides this
+         puts it, and it keeps working at 992px and below where styles.css hides this
          whole nav. Reordering the word never touches it. -->
     <nav class="topnav" aria-label="Browse">
       <button type="button" data-view="movies">Movies</button>
@@ -112,7 +112,7 @@
       <div class="drawer-heading"><span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span></div>
       <p class="drawer-copy">Find something good, fast.</p>
       <!-- These seven are NOT the top bar's seven any more, and the difference
-           is deliberate on both sides. Under 900px this drawer IS the menu —
+           is deliberate on both sides. At 992px and below this drawer IS the menu —
            styles.css hides .topnav — so it has to carry every destination,
            including the two the canonical bar has no room for or no use for:
            HOME, which is not in the canonical eleven because a Home chip while
@@ -139,7 +139,7 @@
 
            GAMES IS THE EXCEPTION AND IS INTENTIONALLY DUPLICATED. It is
            canonical, so it is also a chip up in .topnav — but .topnav is
-           display:none below 900px, so removing it from here would delete Games
+           display:none at 992px and below, so removing it from here would delete Games
            from every phone and break navparity.smoke.mjs's count of 15. -->
       <nav class="drawer-nav" aria-label="More">
         <!-- No emoji on these. The seven in the nav above have none, Admin
