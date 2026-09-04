@@ -44,7 +44,13 @@
 // the #home-hero elements the new app.js addresses; every one of those lookups
 // returns null and the hero silently never appears — the same shape as the v20
 // gate bug two entries up.
-const CACHE = 'blazing-shell-v22';
+// v23: the fleet heartbeat (profile.js). POST /agent/:id/heartbeat is the only
+// writer of the fleet's lastSeen, and nothing in this repo had ever sent one, so
+// all 19 Blazing Web records sat frozen at their enrolment second. A PWA still
+// holding the v22 profile.js has no heartbeat at all and stays frozen — a cache
+// hygiene bump, not a safety one, but the fix does not reach an installed app
+// without it.
+const CACHE = 'blazing-shell-v23';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

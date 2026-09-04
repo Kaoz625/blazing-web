@@ -1724,6 +1724,12 @@
       return null;
     }
     state.credentials = credentials;
+    // The fleet's lastSeen has exactly one writer and it is the heartbeat, so it
+    // starts at the moment an identity exists. Here for a NEWLY minted or
+    // reclaimed one; connectProfiles() covers the one already in localStorage at
+    // page load. Between them every path that can produce a credential is
+    // covered, and startFleetHeartbeat() is idempotent so the overlap is free.
+    startFleetHeartbeat();
     return credentials;
   }
 
@@ -1787,6 +1793,169 @@
     const detail = text(result.body && result.body.error).toLowerCase();
     return result.status === 404 && detail.startsWith('unknown device');
   }
+
+  /* ── the fleet heartbeat ───────────────────────────────────────────────────
+   *
+   *   POST /agent/:deviceId/heartbeat   + X-Device-Token   { appVersions }
+   *
+   * MEASURED live against fleet.lyreosai.com on 2026-09-03, all three answers:
+   *   valid id + valid token  -> 200 {"ok":true}
+   *   missing/invalid token   -> 401 {"error":"invalid or missing X-Device-Token"}
+   *   unknown device id       -> 404 {"error":"unknown device; register first"}
+   *
+   * WHY THIS EXISTS AT ALL. That route is the ONLY writer of `lastSeen` on the
+   * fleet (blazing-fleet server.js:523). Registration stamps lastSeen once at
+   * mint (server.js:463), so a client that never beats keeps firstSeen ===
+   * lastSeen for ever and reads on the fleet dashboard as a browser opened once
+   * and never used again. 31 of 47 fleet records were in exactly that state on
+   * 2026-09-03, because only Roku and Fire TV ever sent one — and all 19 Blazing
+   * Web records were among the 31. There was no code in this repo that could
+   * have sent one. Samsung Tizen (57b2064) and Apple TV (6058d25) were fixed the
+   * same day; this is the last of the four.
+   *
+   * *** A HEARTBEAT ONLY REPORTS. IT NEVER TOUCHES THE STORED CREDENTIAL. ***
+   *
+   * The Roku learned that expensively (roku channels source/lib/Fleet.brs, the
+   * note at ~170-190) and the Fire TV shipped the same fault in AgentService.kt.
+   * Their old heartbeats deleted BOTH credential keys on any 401 or any 404,
+   * which was two bugs in three lines:
+   *
+   *   1. TWO DIFFERENT 404 BODIES SHARE THE STATUS CODE, and they mean opposite
+   *      things:
+   *        {"error":"not found","path":...}            a route is missing, we are FINE
+   *        {"error":"unknown device; register first"}  the id really is dead
+   *      The old code wiped the identity on both. shouldRepairCredentials() above
+   *      already reads the BODY, which is why this reuses it rather than writing
+   *      a second test on the status code.
+   *
+   *   2. Even on a REAL "unknown device", clearing destroys the only thing that
+   *      could repair it. repairCredentials() re-sends the held deviceId WITH its
+   *      X-Device-Token, the fleet matches on both and KEEPS the previous
+   *      enrollmentStatus, so a reclaim comes back still approved. Wiping first
+   *      made the forced register mint a brand new PENDING record, and the client
+   *      lost its approval, its selected profile and its adult unlock in one tick.
+   *
+   * So a rejection sets a FLAG and nothing else. Repair belongs to
+   * repairCredentials(), which is reached from connectProfiles() and verifyPin()
+   * and is untouched by this block — no line of it, of postRegister(), of
+   * credentialsFrom() or of clearStoredCredentials() is called from here.
+   *
+   * A failed beat is also SILENT. It never calls setStatus() and never draws
+   * anything: the viewer did not do this and cannot fix it, and a red line in the
+   * gate for a missing fleet route would be a lie about their browser.
+   */
+
+  /** 300s, the Roku's cadence. lastSeen is read across the fleet as "is this
+   *  client alive right now", so a slower browser would read as a dead one. */
+  const HEARTBEAT_MS = 300000;
+
+  /** The live interval id, or 0. There is never more than one — every start
+   *  path goes through runHeartbeat(), which clears before it sets. */
+  let heartbeatTimer = 0;
+  /** True once startFleetHeartbeat() has been accepted. Separate from the timer
+   *  because a hidden tab has no timer and still wants to beat when it returns. */
+  let heartbeatWanted = false;
+  /** The fleet last said this credential is dead — 401, or a 404 that really did
+   *  say "unknown device". A REPORT. Nothing in this file acts on it, and it is
+   *  cleared by evidence (the next 200), never by hope. */
+  let heartbeatRejected = false;
+
+  /**
+   * One beat. Reads the stored credential and writes nothing back, whatever the
+   * answer. Returns { sent, ok, status, identityRejected } and never throws —
+   * request() already turns a dead network into { status: 0 }.
+   */
+  async function fleetHeartbeat() {
+    const credentials = state.credentials || storedCredentials();
+    if (!credentials) return { sent: false, ok: false, status: 0, identityRejected: false };
+    const result = await request(`/agent/${encodeURIComponent(credentials.id)}/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
+      body: JSON.stringify({ appVersions: { web: DEVICE_VERSION } }),
+    });
+    // THE ONE LINE THAT MATTERS. It reads the body, so the two 404s are told
+    // apart. A bare 404 {"error":"not found","path":...} is NOT a rejection.
+    const identityRejected = shouldRepairCredentials(result);
+    if (identityRejected) heartbeatRejected = true;
+    else if (result.ok) heartbeatRejected = false;
+    return { sent: true, ok: !!result.ok, status: result.status, identityRejected };
+  }
+
+  function heartbeatTick() {
+    // A rejected promise here would be an unhandled rejection in the console for
+    // something the viewer must never see. fleetHeartbeat() does not reject, and
+    // this is the belt to that pair of braces.
+    try {
+      Promise.resolve(fleetHeartbeat()).catch(() => {});
+    } catch {
+      // Nothing to say and nobody to say it to.
+    }
+  }
+
+  function stopHeartbeatTimer() {
+    if (!heartbeatTimer) return false;
+    window.clearInterval(heartbeatTimer);
+    heartbeatTimer = 0;
+    return true;
+  }
+
+  /** Beat now, then every HEARTBEAT_MS. ALWAYS clears first: two intervals on one
+   *  browser would double this client's beat rate for the life of the tab. */
+  function runHeartbeat() {
+    stopHeartbeatTimer();
+    heartbeatTick();
+    heartbeatTimer = window.setInterval(heartbeatTick, HEARTBEAT_MS);
+  }
+
+  /**
+   * A background tab must not keep beating. lastSeen means "somebody is using
+   * this", and a browser left open on a pinned tab for a week would report a
+   * viewer who went home on Monday. So: pause on hide, and beat IMMEDIATELY on
+   * becoming visible again rather than waiting out the rest of the 300s — coming
+   * back to the tab is exactly the event lastSeen is meant to record.
+   */
+  function onHeartbeatVisibility() {
+    if (!heartbeatWanted) return;
+    if (document.hidden) stopHeartbeatTimer();
+    else runHeartbeat();
+  }
+
+  /**
+   * Start the beat. IDEMPOTENT: connectProfiles() runs again on every Refresh
+   * press and keepCredentials() runs on every register and reclaim, and a second
+   * call must not add a beat or a timer. Returns true only when it started one.
+   */
+  function startFleetHeartbeat() {
+    if (heartbeatWanted) return false;
+    heartbeatWanted = true;
+    document.addEventListener('visibilitychange', onHeartbeatVisibility);
+    if (!document.hidden) runHeartbeat();
+    return true;
+  }
+
+  /** Stop it. Nothing in the app calls this — the tab closing is the stop — but a
+   *  test must be able to leave no timer behind. */
+  function stopFleetHeartbeat() {
+    heartbeatWanted = false;
+    document.removeEventListener('visibilitychange', onHeartbeatVisibility);
+    return stopHeartbeatTimer();
+  }
+
+  /**
+   * The same read-only shape as window.BlazingCaps and window.BlazingTelemetry.
+   * Every member REPORTS: beat() sends one and hands back what the fleet said,
+   * and nothing here can reach saveCredentials() or clearStoredCredentials().
+   */
+  window.BlazingFleetBeat = {
+    beat: fleetHeartbeat,
+    start: startFleetHeartbeat,
+    stop: stopFleetHeartbeat,
+    /** True when the fleet last rejected this identity. A flag for the register
+     *  path to read; this file never acts on it by itself. */
+    identityRejected: () => heartbeatRejected,
+    running: () => heartbeatTimer !== 0,
+    intervalMs: HEARTBEAT_MS,
+  };
 
   /**
    * The pending screen: this browser has an identity, and the fleet has not
@@ -1873,6 +2042,11 @@
         if (!credentials) return;
       }
       state.credentials = credentials;
+      // Before listProfiles(), on purpose: a browser awaiting approval still has
+      // a real identity, and an admin looking at a PENDING record wants to see a
+      // client that is switched on. Idempotent, so the Refresh press that runs
+      // this again does not stack a second timer or send a second beat.
+      startFleetHeartbeat();
       let result = await listProfiles(credentials);
       if (shouldRepairCredentials(result)) {
         credentials = await repairCredentials(credentials);
