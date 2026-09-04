@@ -11,13 +11,22 @@
    ============================================================ */
 
 :root {
-  --bg: #0A0A0A;
-  --surface: #141416;
+  --bg: #0A0A0B;
+  /* surface/muted/quiet were #141416 / #a3a3aa / #6d6d75 — the same "grey
+     plate" and blue-tinted greys Markus called out twice ("No gray. I'm
+     getting tired of seeing all this gray") and that the Roku's Theme.brs,
+     the Apple TV's Theme.swift and Fire TV's Colors.kt already carry the fix
+     for: a warm near-black surface instead of a neutral grey, and plain
+     white at reduced opacity (60%/35%) instead of a blue-tinted solid.
+     --surface-focus and --surface-soft are left as they are — they are hover
+     states and a third neutral tier this app invented on its own, with no
+     matching token on any other client to copy a corrected value from. */
+  --surface: #0E0A0C;
   --surface-focus: #1c1c1f;
   --surface-soft: #18181b;
   --text: #f7f7f8;
-  --muted: #a3a3aa;
-  --quiet: #6d6d75;
+  --muted: rgba(255,255,255,.6);
+  --quiet: rgba(255,255,255,.35);
   --accent: #FF3D47;
   --accent-strong: #E11D2B;
   --accent-glow: rgba(255,61,71, 0.35);
