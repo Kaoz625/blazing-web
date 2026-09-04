@@ -122,7 +122,12 @@ async function openApp({ credentials = true, listStatus = 200, listBody = FILES,
   await page.click('.topnav button[data-view="movies"]');
   await page.waitForTimeout(120);
   check('Movies hides the locker shelf', (await page.locator('.locker-row').isVisible()) === false);
-  await page.click('.topnav button[data-view="home"]');
+  // #brand-button, not `.topnav button[data-view="home"]`, because there is no
+  // Home chip in the top bar any more. The canonical eleven (DESIGN.md) leaves
+  // Home out on purpose — a Home chip while you are looking at Home does
+  // nothing. Home is still reachable from the brand button, which is
+  // data-view="home" and is always on screen at any width, and from the drawer.
+  await page.click('#brand-button');
   await page.waitForTimeout(120);
   check('Home shows it again', (await page.locator('.locker-row').isVisible()) === true);
 

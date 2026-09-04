@@ -39,35 +39,67 @@
     <button id="brand-button" class="brand" type="button" data-view="home" aria-label="Blazing home">
       <span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span>
     </button>
-    <!-- SEVEN top-level items, and the same seven in the same order as Roku,
-         Fire TV and tvOS. This bar carried fifteen, which is unusable on a
-         d-pad: eleven here plus Stories/Studio/Family, which only the web ever
-         got. Everything that is not one of the seven moved into the drawer.
+    <!-- SEVEN chips, and they are the CANONICAL list in the CANONICAL ORDER.
+         DESIGN.md line 74 quotes Markus verbatim:
+
+           Movies · TV Shows · Anime · Roadmaps · Library · Live TV · YouTube ·
+           Games · Adult · Search · Settings
+
+         Of those eleven this bar carries the seven that go somewhere real:
+         Movies, TV Shows, Anime, Roadmaps, Library, Games, Search — in that
+         relative order, Games between Library and Search exactly as the list
+         has it.
+
+         The four that are LEFT OUT are left out on purpose, and adding them
+         back is a regression, not a fix. Live TV, YouTube, Adult and Settings
+         have NO route in showRoute() (app.js) — grep the file, there is no
+         `route === 'live'`, `'youtube'`, `'adult'` or `'settings'` branch and
+         no #live-view / #youtube-view / #adult-view / #settings-view section in
+         this page. A chip for any of them would highlight itself, fire
+         telemetry, hide every view and leave the reader on a blank screen. A
+         chip that goes nowhere is worse than a missing chip: it is a promise
+         the app breaks on a television. Give one of them a real view and it
+         earns its place here; until then it does not.
+
+         GAMES is here because it is the only one of the four that DOES have a
+         destination: showRoute() flips #games-view and calls
+         window.BlazingGames.mount(), and games.js is loaded at the foot of this
+         file. It stays in the drawer's "More" list as well — below 900px
+         styles.css hides this whole nav, so the drawer is the only way to reach
+         it on a phone, and navparity.smoke.mjs pins the drawer at 15
+         destinations.
+
+         HOME IS DELIBERATELY NOT HERE. It is not in the canonical eleven: a
+         Home chip while you are looking at Home does nothing. Home is still
+         reachable two ways that both already existed — #brand-button below is
+         `data-view="home"`, and the drawer's Browse list still opens with it.
 
          "TV Shows", not "Shows", because that is the word the three TV apps
          print. data-view stays "shows" — it is the router key, and renaming it
          breaks navigation.
 
-         Search LEADS, as it does on the three televisions, so the word is the
-         first item in this nav.
-
-         #SEARCH-BUTTON CANNOT MOVE, and that is measured, not stylistic. Both
-         profile.js:680 and watch-party.js:954 place their own topbar entries
-         with `topbar.insertBefore(node, searchButton)`, which throws
-         "The node before which the new node is to be inserted is not a child of
-         this node" the moment that button stops being a direct child of
-         .topbar. Moving it into this nav was tried: Connect profile and Party
-         both threw, twice per load. So the magnifier stays where it is, at the
-         far right where `.search-button { margin-left: auto }` puts it, and it
-         keeps working below 700px where styles.css hides this whole nav. -->
+         SEARCH IS IN THIS NAV AS A WORD, AND ALSO SITS OUTSIDE IT AS THE
+         MAGNIFIER, AND THOSE ARE TWO DIFFERENT THINGS. The word below is the
+         canonical chip, so it moved from first to last when this bar was put in
+         canonical order. #search-button is NOT a chip — it is a fixed
+         structural anchor, and it CANNOT MOVE, which is measured rather than
+         stylistic. Both profile.js:2312 and watch-party.js:954 place their own
+         topbar entries with `topbar.insertBefore(node, searchButton)`, which
+         throws "The node before which the new node is to be inserted is not a
+         child of this node" the moment that button stops being a direct child
+         of .topbar. Moving it into this nav was tried: Connect profile and
+         Party both threw, twice per load. So the magnifier stays exactly where
+         it is, at the far right where `.search-button { margin-left: auto }`
+         puts it, and it keeps working below 900px where styles.css hides this
+         whole nav. Reordering the word never touches it. -->
     <nav class="topnav" aria-label="Browse">
-      <button type="button" data-view="search">Search</button>
-      <button type="button" data-view="home">Home</button>
       <button type="button" data-view="movies">Movies</button>
       <button type="button" data-view="shows">TV Shows</button>
       <button type="button" data-view="anime">Anime</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
       <button type="button" data-view="library">Library</button>
+      <button type="button" data-view="games">Games</button>
+      <button type="button" data-view="search">Search</button>
     </nav>
     <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" /><path d="m15.2 15.2 4.3 4.3" /></svg>
@@ -79,9 +111,18 @@
     <aside id="drawer" class="drawer" aria-label="Browse menu">
       <div class="drawer-heading"><span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span></div>
       <p class="drawer-copy">Find something good, fast.</p>
-      <!-- The same seven as the top bar, in the same order, so the phone and the
-           television read alike. Under 900px this drawer IS the menu — styles.css
-           hides .topnav — which is why Search has to appear here as a word. -->
+      <!-- These seven are NOT the top bar's seven any more, and the difference
+           is deliberate on both sides. Under 900px this drawer IS the menu —
+           styles.css hides .topnav — so it has to carry every destination,
+           including the two the canonical bar has no room for or no use for:
+           HOME, which is not in the canonical eleven because a Home chip while
+           you are looking at Home does nothing, but which a phone still needs a
+           way back to; and SEARCH, which has to appear here as a word because
+           the magnifier is the only other way in at this width.
+
+           Do not "resync" this list to the bar. navparity.smoke.mjs counts
+           `.drawer-nav [data-view]` and asserts 15, and deleting a button here
+           strands a destination on every phone. -->
       <nav class="drawer-nav" aria-label="Browse">
         <button type="button" data-view="search">Search</button>
         <button type="button" data-view="home">Home</button>
@@ -92,9 +133,14 @@
         <button type="button" data-view="library">Library</button>
       </nav>
       <p class="drawer-section">More</p>
-      <!-- The five tabs that came off the top bar, then the release windows that
-           were already here. All nine reach a view or a Discover filter; none of
-           them earns a place in a seven-item bar. -->
+      <!-- The tabs that came off the top bar, then the release windows that were
+           already here. All of them reach a view or a Discover filter; none of
+           them is in the canonical eleven, so none of them belongs in the bar.
+
+           GAMES IS THE EXCEPTION AND IS INTENTIONALLY DUPLICATED. It is
+           canonical, so it is also a chip up in .topnav — but .topnav is
+           display:none below 900px, so removing it from here would delete Games
+           from every phone and break navparity.smoke.mjs's count of 15. -->
       <nav class="drawer-nav" aria-label="More">
         <!-- No emoji on these. The seven in the nav above have none, Admin
              right here has none, and the Channels list below has none, so five

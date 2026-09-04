@@ -988,13 +988,34 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .detail-body { padding: 74px 48px 46px; }
 }
 
-/* The nav used to survive down to 700px. It does not: at 768 (iPad portrait)
-   the seven items overflow their flex box and "Roadmaps" renders as "Rc" with
-   "Library" gone entirely. .topnav is overflow-x:auto with the scrollbar hidden,
-   so there is no affordance saying the rest is off to the right — it just reads
-   as a word cut in half. The drawer already carries the identical seven in the
-   identical order (index.html), so handing over earlier loses no destination. */
-@media (max-width: 900px) {
+/* The nav used to survive down to 700px, then to 900px. Neither was far enough.
+   .topnav is overflow-x:auto with the scrollbar hidden, so there is no
+   affordance saying the rest is off to the right — an item that does not fit
+   just reads as a word cut in half ("Roadmaps" rendering as "Rc" at 768 is what
+   moved this from 700 to 900).
+
+   900 WAS STILL TOO LOW, and it was too low BEFORE the canonical bar landed.
+   MEASURED in headless Comet 151.0.7922.247 on the real page, profile connected
+   and Watch Party mounted, because .topbar's width is not just this nav —
+   profile.js and watch-party.js both insertBefore(#search-button), so the bar
+   also carries a profile chip and "Party" at runtime:
+
+     nav needs           first width that does not clip
+     499px  old bar      909px   (so 901-908 clipped, on a 7-item bar)
+     506px  canonical    916px   (so 901-915 clipped)
+
+   And the profile chip is VARIABLE WIDTH — it prints the profile's name. It is
+   57px for "Mark" and 91px for "Alexandra", which pushes the first clean width
+   from 916 to 949. A breakpoint tuned to a short name clips for a household
+   with a long one, which is the silent-failure shape this whole comment exists
+   to stop.
+
+   So: 960px, which clears the measured 949 worst case with room, and hand over
+   to the drawer below it. The drawer carries all 15 destinations (index.html),
+   including the two the bar does not — Home and Search — so handing over
+   earlier loses nothing. If you widen a chip or add one, re-measure; do not
+   assume this number still holds. */
+@media (max-width: 960px) {
   .topnav { display: none; }
 }
 

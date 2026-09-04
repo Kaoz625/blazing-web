@@ -205,17 +205,69 @@ check('delight.js is not shipped', !(await page.content()).includes('delight.js'
 check('brightminds.js is not shipped', !(await page.content()).includes('brightminds.js'));
 
 // ── One menu, matching the TVs ───────────────────────────────────────────────
-// Roku and Apple TV agree on this order already; the web app is the outlier that
-// had 15 top-level items. Labels only — a data-view value is the router key and
-// renaming one breaks navigation, so this checks the ORDER of the keys.
+// This used to pin ['search','home','movies','shows','anime','roadmaps',
+// 'library'], which is NOT the canonical list and had drifted away from it.
+// The contract lives in ~/Desktop/roku channels/DESIGN.md (the one canonical
+// copy — the blazing-web and firetv copies are derived), quoting Markus:
+//
+//   Movies · TV Shows · Anime · Roadmaps · Library · Live TV · YouTube ·
+//   Games · Adult · Search · Settings
+//
+// HOME IS DELIBERATELY ABSENT from that list and so it is absent here: a Home
+// chip while you are looking at Home does nothing. It stays reachable via
+// #brand-button (data-view="home") and the drawer, both asserted below.
+//
+// Four canonical entries are also absent, and that is the rule that outranks
+// the count: never ship a chip that does not go somewhere real. Live TV,
+// YouTube, Adult and Settings have NO branch in showRoute() and no view section
+// in index.html, so a chip for any of them would blank the screen. Give one a
+// real view and it goes in — then update this list. Do not add it first.
+//
+// Labels only — a data-view value is the router key and renaming one breaks
+// navigation, so this checks the ORDER of the keys.
 const barKeys = await page.evaluate(() => {
   const bar = document.querySelector('nav, .nav, header nav, .top-nav') || document.body;
   return [...bar.querySelectorAll('[data-view]')].map((b) => b.dataset.view);
 });
-const wanted = ['search', 'home', 'movies', 'shows', 'anime', 'roadmaps', 'library'];
+const wanted = ['movies', 'shows', 'anime', 'roadmaps', 'library', 'games', 'search'];
 const firstSeven = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, 7);
-check('bar order is Search, Home, Movies, Shows, Anime, Roadmaps, Library',
+check('bar order is Movies, TV Shows, Anime, Roadmaps, Library, Games, Search',
   JSON.stringify(firstSeven) === JSON.stringify(wanted), firstSeven.join(','));
+check('no Home chip in the bar — it is not in the canonical eleven',
+  !barKeys.includes('home'), barKeys.join(','));
+// Removing the chip must not remove the destination.
+check('Home is still reachable from the brand button',
+  await page.evaluate(() => document.getElementById('brand-button')?.dataset.view === 'home'));
+check('Home is still in the drawer',
+  (await page.locator('.drawer-nav [data-view="home"]').count()) > 0);
+// Every chip must land on a real route. A chip that goes nowhere is worse than
+// a missing one: it is a promise the app breaks on a television.
+//
+// The section each key must reveal, spelled out. NOT `#${key}-view` with a
+// fallback to #home-view — that fallback matches for every key, so the check
+// would pass for a chip with no view at all. Movies/Shows/Anime genuinely share
+// #home-view with the rows filtered; the rest own a section.
+const CHIP_VIEW = {
+  movies: 'home-view', shows: 'home-view', anime: 'home-view',
+  roadmaps: 'roadmaps-view', library: 'library-view',
+  games: 'games-view', search: 'search-view',
+};
+for (const key of wanted) {
+  await page.evaluate((k) => document.querySelector(`.topnav [data-view="${k}"]`).click(), key);
+  await page.waitForTimeout(250);
+  const shown = await page.evaluate((id) => {
+    const s = document.getElementById(id);
+    return Boolean(s) && !s.hidden && s.getBoundingClientRect().height > 0;
+  }, CHIP_VIEW[key]);
+  check(`the "${key}" chip opens #${CHIP_VIEW[key]}`, shown);
+}
+
+// The four canonical entries that were LEFT OUT. If someone adds a chip for one
+// of these before building its view, this fails — which is the point.
+for (const key of ['live', 'livetv', 'youtube', 'adult', 'settings']) {
+  check(`no "${key}" chip until it has a view`,
+    (await page.locator(`[data-view="${key}"]`).count()) === 0);
+}
 check('Shows reads "TV Shows", as it does on all three TVs',
   (await page.locator('[data-view="shows"]').first().innerText()).trim().includes('TV Shows'));
 
