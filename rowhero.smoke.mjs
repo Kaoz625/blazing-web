@@ -80,7 +80,7 @@ await ctx.route('https://addon.lyreosai.com/**', (route) => {
   // home.smoke.mjs deliberately keeps the opposite stub — a 404 — to pin the
   // fallback to the plain shelves. Between the two files both paths are covered.
   if (u.includes('/api/ui/home-config')) return route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ mode: 'blazing', appName: 'BlazeOS', theme: 'cinema_dark', homeRows: [
+    body: JSON.stringify({ mode: 'blazing', appName: 'Blazing Stream', theme: 'cinema_dark', homeRows: [
       { id: 'trending_m', type: 'card_row', catalogSlug: 'blazing-movies',      label: 'Trending Movies' },
       { id: 'kids_m',     type: 'card_row', catalogSlug: 'blazing-kids-movies', label: 'Kids Movies' },
       { id: 'trending_s', type: 'card_row', catalogSlug: 'blazing-series',      label: 'Trending Series' },

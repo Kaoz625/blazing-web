@@ -51,7 +51,7 @@ await ctx.addInitScript(() => {
 await ctx.route('https://addon.lyreosai.com/**', (route) => {
   const u = route.request().url();
   if (u.includes('/api/ui/home-config')) return route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ mode: 'blazing', appName: 'BlazeOS', theme: 'cinema_dark', homeRows: [
+    body: JSON.stringify({ mode: 'blazing', appName: 'Blazing Stream', theme: 'cinema_dark', homeRows: [
       { id: 'row_a', type: 'card_row', catalogSlug: 'blazing-movies', label: 'Row A' },
       { id: 'row_b', type: 'card_row', catalogSlug: 'blazing-series', label: 'Row B' },
     ] }) });

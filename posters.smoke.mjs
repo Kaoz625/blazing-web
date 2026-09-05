@@ -94,7 +94,7 @@ await ctx.route('https://addon.lyreosai.com/**', (route) => {
   const u = route.request().url();
   seen.push(u.replace('https://addon.lyreosai.com', ''));
   if (u.includes('/api/ui/home-config')) return route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ mode: 'blazing', appName: 'BlazeOS', theme: 'cinema_dark', homeRows: [
+    body: JSON.stringify({ mode: 'blazing', appName: 'Blazing Stream', theme: 'cinema_dark', homeRows: [
       { id: 'trending_m', type: 'card_row', catalogSlug: 'blazing-movies', label: 'Trending Movies' },
     ] }) });
   if (u.includes('/manifest.json')) return route.fulfill({ status: 200, contentType: 'application/json',
