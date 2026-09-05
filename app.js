@@ -104,6 +104,226 @@ function showToast(message, kind = 'info') {
   }, TOAST_LIFETIME_MS);
 }
 
+/**
+ * A transient message that offers ONE thing to do about itself.
+ *
+ * showToast() above is a <p> that says something happened. This is the same
+ * widget with a button in it, and it exists for exactly one reason: a gesture
+ * that changes stored state must be undoable in the moment it happens, not
+ * hours later in a settings screen.
+ *
+ * It is a real <button> in the DOM, inside the same host, which is parked in
+ * #detail-dialog's card while that dialog is open — so Tab reaches it from the
+ * source list without leaving the modal. It is NOT auto-focused: stealing focus
+ * from the row somebody is working through to put it on a button they may not
+ * want costs more than it saves.
+ */
+const UNDO_TOAST_MS = 9000;
+
+function showActionToast(message, actionLabel, onAction, lifetime = UNDO_TOAST_MS) {
+  const text = plainText(message);
+  const label = plainText(actionLabel);
+  if (!text || !label) return null;
+  const host = ensureToastHost();
+  const node = el('div', 'toast toast-action');
+  const copy = el('span', 'toast-action-copy');
+  copy.textContent = text;
+  const action = el('button', 'toast-action-button');
+  action.type = 'button';
+  action.textContent = label;
+  node.append(copy, action);
+  host.appendChild(node);
+
+  let timer = 0;
+  let spent = false;
+  const dismiss = () => {
+    if (spent) return;
+    spent = true;
+    window.clearTimeout(timer);
+    node.classList.add('toast-out');
+    window.setTimeout(() => node.remove(), 220);
+  };
+  action.addEventListener('click', () => {
+    dismiss();
+    try { onAction(); } catch (e) { /* an undo must never take the page with it */ }
+  });
+  timer = window.setTimeout(dismiss, lifetime);
+  return node;
+}
+
+/* ── Sources the viewer marked "wrong film" ──────────────────────────────────
+ *
+ * Markus, 5 Sep 2026: "i removrd a lot of llinks by pressing the wrong button
+ * i found working streams that played and now its gone"
+ *
+ * Right-clicking a source row marks it. That gesture had no confirmation, no
+ * undo and no expiry, and what it wrote was a JSON ARRAY of raw URLs that was
+ * appended to on every right-click and emptied by nothing in the whole app.
+ *
+ * IT ONLY EVER DEMOTED, which is why the streams are recoverable at all:
+ * caps.js:733-737 subtracts 100000 from the score and styles.css:1042 draws the
+ * row at 0.4 opacity. Nothing was hidden and nothing was deleted. That rule does
+ * not change here — demote, never hide, never delete.
+ *
+ * THE STORE IS THE ROKU'S, PORTED, not a second scheme invented for the web:
+ * source/lib/Store.brs DeadLinkMap / MarkDeadLink, same 86400-second window,
+ * same 80-entry cap, same evict-the-oldest-one-per-write, same key. The key
+ * matters as much as the numbers. A raw URL is not a stable identity for our own
+ * signed links — https://addon.lyreosai.com/dl/<base64url(JSON)>.<signature>
+ * carries an expiry stamped fresh on every request, so the same release is a
+ * different string on every fetch and a mark on it could never be found again.
+ * Roku fixed that by keying on the 40-hex info hash inside the token; this reads
+ * the same field out of the same token, so a source the television remembers and
+ * a source this browser remembers are the same source.
+ *
+ * THE OLD ARRAY IS DROPPED THE FIRST TIME IT IS READ. Its entries carry no
+ * timestamp, so there is no honest age to give them and no way to expire them
+ * later — and Roku's DeadLinkMap already discards any entry whose value is not
+ * a positive integer, which is that same rule. It is also the answer to the
+ * sentence at the top of this comment: the marks he did not mean to make are
+ * gone on his next load, without him touching anything.
+ */
+const DEAD_LINK_TTL_SECONDS = 86400;
+const DEAD_LINK_CAP = 80;
+const DEAD_LINKS_STORE = 'dead_links';
+
+/** base64url -> text, or '' when it is not valid base64url. */
+function decodeBase64Url(value) {
+  let text = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = text.length % 4;
+  // 1 is not a length base64 can produce; bail rather than decode rubbish.
+  if (pad === 1) return '';
+  if (pad === 2) text += '==';
+  else if (pad === 3) text += '=';
+  try {
+    return atob(text);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The info hash inside one of our own signed /dl/<token> URLs, or ''.
+ *
+ * Mirrors Roku's HashFromDlUrl and blazing-addon lib/verified.js. It reads the
+ * payload and does NOT verify the signature, deliberately: identity is all that
+ * is wanted here, and the signature is checked where the link is redeemed.
+ */
+function hashFromDlUrl(url) {
+  const value = String(url == null ? '' : url);
+  const at = value.indexOf('/dl/');
+  if (at < 0) return '';
+  const rest = value.slice(at + 4);
+  const dot = rest.indexOf('.');
+  if (dot < 1) return '';
+  const json = decodeBase64Url(rest.slice(0, dot));
+  if (!json) return '';
+  let parsed = null;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return '';
+  }
+  if (!parsed || typeof parsed !== 'object') return '';
+  const hash = String(parsed.h || '').toLowerCase();
+  // 40 hex characters and nothing else. Anything else is not a torrent hash,
+  // and keying on it would merge unrelated streams under one mark.
+  return /^[0-9a-f]{40}$/.test(hash) ? hash : '';
+}
+
+/** A stable fingerprint for one source row. Roku's DeadLinkKey, in JS. */
+function deadLinkKey(url) {
+  const value = String(url == null ? '' : url).trim();
+  if (!value) return '';
+  const hash = hashFromDlUrl(value);
+  if (hash) return `h~${hash}`;
+  const tail = value.length > 28 ? value.slice(-28) : value;
+  return `${value.length}~${tail}`;
+}
+
+/** The live marks: key -> epoch seconds, with everything expired left out. */
+function readDeadLinks() {
+  const out = Object.create(null);
+  let raw = null;
+  try {
+    raw = JSON.parse(localStorage.getItem(DEAD_LINKS_STORE) || 'null');
+  } catch {
+    raw = null;
+  }
+  // An Array is the legacy shape and it has no timestamps, so it drops whole —
+  // see the block comment above.
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  const now = Math.floor(Date.now() / 1000);
+  for (const key of Object.keys(raw)) {
+    const at = raw[key];
+    if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) continue;
+    if (now - at >= DEAD_LINK_TTL_SECONDS) continue;
+    out[key] = at;
+  }
+  return out;
+}
+
+function writeDeadLinks(map) {
+  try {
+    localStorage.setItem(DEAD_LINKS_STORE, JSON.stringify(map));
+  } catch (e) {
+    // A full or blocked localStorage costs a preference, never the player.
+  }
+}
+
+/** Mark one source. Returns the key that was written, for the undo. */
+function markDeadLink(url) {
+  const key = deadLinkKey(url);
+  if (!key) return '';
+  const map = readDeadLinks();
+  map[key] = Math.floor(Date.now() / 1000);
+  // Bounded, because localStorage is not a database. Oldest out first, one per
+  // write — Roku's exact rule, so neither client remembers more than the other.
+  const keys = Object.keys(map);
+  if (keys.length > DEAD_LINK_CAP) {
+    let oldestKey = '';
+    let oldestAt = 0;
+    for (const candidate of keys) {
+      if (!oldestAt || map[candidate] < oldestAt) {
+        oldestAt = map[candidate];
+        oldestKey = candidate;
+      }
+    }
+    if (oldestKey) delete map[oldestKey];
+  }
+  writeDeadLinks(map);
+  return key;
+}
+
+function unmarkDeadLink(key) {
+  if (!key) return false;
+  const map = readDeadLinks();
+  if (map[key] === undefined) return false;
+  delete map[key];
+  writeDeadLinks(map);
+  return true;
+}
+
+/** Empty the whole list. Returns how many marks were dropped. */
+function clearDeadLinks() {
+  const count = Object.keys(readDeadLinks()).length;
+  writeDeadLinks({});
+  return count;
+}
+
+/**
+ * One snapshot for a whole render pass, plus the test that reads it.
+ *
+ * Taken once and reused, because the alternative is parsing localStorage and
+ * base64-decoding a token for every one of up to 1200 rows.
+ */
+function deadLinkProbe() {
+  const keys = new Set(Object.keys(readDeadLinks()));
+  const test = (url) => keys.size > 0 && keys.has(deadLinkKey(url));
+  test.size = keys.size;
+  return test;
+}
+
 function safeHttpsUrl(value) {
   try {
     const url = new URL(String(value || ''));
@@ -1773,29 +1993,24 @@ async function loadContinueWatchingRow(section) {
  * no client change; until then the home is the one that works.
  */
 async function boot() {
+  // ONE PICKER. This used to build a second one: a `<dialog id="profile-picker">`
+  // in index.html, filled from GET /api/profiles with plain-text buttons, opened
+  // with showModal() over the top of profile.js's real gate. It was live, not
+  // dead — this branch fires on any browser with no `profileId` yet, which is
+  // every first visit — and it is exactly the "why does the profile picker look
+  // different?" Markus hit on the live app. Its list came from the ADD-ON, not
+  // the fleet, so it showed different profiles with no PIN, no kids flag and no
+  // avatars, and picking one skipped the gate's whole unlock path.
+  //
+  // The markup is gone from index.html. The gate opens itself on every load, so
+  // the only thing left to do here is make sure it is up when there is no
+  // profile yet, and let the `blazing-profile-selected` listener at the foot of
+  // this file persist the id it chooses.
   const profileId = localStorage.getItem('profileId');
-  if (!profileId) {
-    try {
-      const pRes = await fetch(`${API_BASE}/api/profiles`);
-      const pData = await pRes.json();
-      if (pData.profiles && pData.profiles.length > 1) {
-        const d = $('#profile-picker');
-        const l = $('#profile-list');
-        pData.profiles.forEach((p) => {
-          const b = document.createElement('button');
-          b.className = 'primary-button';
-          b.textContent = p.name;
-          b.onclick = () => { localStorage.setItem('profileId', p.id); d.close(); loadContinueWatching(); };
-          l.appendChild(b);
-        });
-        d.showModal();
-      } else if (pData.profiles && pData.profiles.length === 1) {
-        localStorage.setItem('profileId', pData.profiles[0].id);
-        loadContinueWatching();
-      }
-    } catch (e) {}
-  } else {
+  if (profileId) {
     loadContinueWatching();
+  } else if (window.BlazingProfile && !window.BlazingProfile.isOpen()) {
+    window.BlazingProfile.open();
   }
 
   rowsWrap.replaceChildren();
@@ -1843,7 +2058,26 @@ async function bootFromSDUI() {
     }
     // Applied only when the server names one. Writing `undefined` into --accent
     // is how a palette silently loses the one red every client agrees on.
-    if (uiConfig.accentColor) document.documentElement.style.setProperty('--accent', uiConfig.accentColor);
+    //
+    // ALL THREE, not just --accent. The SDUI payload names one colour, and the
+    // stylesheet has three tokens: --accent, --accent-strong (the dark end of
+    // every gradient) and --accent-glow (every focus ring's halo). Setting only
+    // the first left --accent-strong at Blazing's #E11D2B on the kids_warm
+    // shell, so `linear-gradient(var(--accent), var(--accent-strong))` painted
+    // gold fading into red on every primary button, and the focus glow stayed
+    // red around a gold ring. [data-theme="kids_warm"] in styles.css redefines
+    // --accent-glow and it did NOT redefine --accent-strong, which is how the
+    // mismatch survived: the theme block looked complete.
+    //
+    // Derived rather than asked for, because the payload has one field. srgb
+    // color-mix is the same maths the two static palettes already encode:
+    // #FF3D47 mixed 78% with black is within a shade of #E11D2B.
+    if (uiConfig.accentColor) {
+      const root = document.documentElement.style;
+      root.setProperty('--accent', uiConfig.accentColor);
+      root.setProperty('--accent-strong', `color-mix(in srgb, ${uiConfig.accentColor} 78%, #000)`);
+      root.setProperty('--accent-glow', `color-mix(in srgb, ${uiConfig.accentColor} 35%, transparent)`);
+    }
     if (uiConfig.theme) document.documentElement.setAttribute('data-theme', uiConfig.theme);
 
     // Never reachable before tonight — 'blazing' mode required
@@ -3523,13 +3757,16 @@ document.addEventListener('blazing-profile-selected', () => {
 /**
  * Continue Watching, for the profile that was just picked.
  *
- * THIS ROW HAS NEVER RENDERED FOR ANYBODY. loadContinueWatching() returns at its
+ * THIS ROW HAD NEVER RENDERED FOR ANYBODY. loadContinueWatching() returns at its
  * first line unless `localStorage.profileId` is set, and profile.js — the gate
- * every real device goes through — NEVER writes that key (grepped: the only two
- * writers in the whole app are boot()'s legacy #profile-picker at the two lines
- * above, a dialog the modern gate never opens). So `profileId` was null on every
- * device, on every visit, and the row was skipped in silence. Markus, 2026-08-30:
+ * every real device goes through — never wrote that key. The only writers were
+ * boot()'s legacy #profile-picker, a second dialog that has since been deleted
+ * (see boot()). So `profileId` was null on every device, on every visit, and the
+ * row was skipped in silence. Markus, 2026-08-30:
  * "embry continue watching all the posters." There were no posters to hover.
+ *
+ * THIS LISTENER IS NOW THE ONLY WRITER, which is why deleting that dialog cost
+ * nothing: the gate dispatches on every pick, including the first.
  *
  * The event carries the id, so take it from there and persist it — the next
  * boot() then draws the row on the first paint instead of waiting for a pick.

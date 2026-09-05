@@ -1301,6 +1301,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   --surface: #261f1a;
   --text: #fffdfa;
   --accent: #FFD700;
+  /* --accent-strong was MISSING here, and it is not decoration: every primary
+     button, the profile picker's old avatar tile and the pill gradients are
+     `linear-gradient(var(--accent), var(--accent-strong))`. Without this line
+     the kids shell painted gold fading into Blazing red — two brands in one
+     button. The value is the same relationship #E11D2B has to #FF3D47: the
+     accent taken down about a fifth. */
+  --accent-strong: #C9A400;
   --accent-glow: rgba(255, 215, 0, 0.4);
 }
 

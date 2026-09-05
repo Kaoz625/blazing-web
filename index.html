@@ -213,11 +213,21 @@
     </aside>
   </div>
 
-  
-  <dialog id="profile-picker" class="detail-dialog" style="padding: 24px; text-align: center;">
-    <h2>Who's Watching?</h2>
-    <div id="profile-list" style="display: flex; gap: 16px; justify-content: center; margin-top: 24px; flex-wrap: wrap;"></div>
-  </dialog>
+  <!-- DELETED, 5 Sep 2026: a SECOND profile picker lived here —
+       `<dialog id="profile-picker">` with a `#profile-list` of plain-text
+       buttons, filled by app.js boot() from GET /api/profiles.
+
+       It was NOT dead code. boot() runs on every load (app.js, last line), and
+       its branch fired whenever `localStorage.profileId` was unset and that
+       endpoint answered with more than one profile — which is every first-time
+       browser. It then showModal()'d a second "Who's Watching?" over the top of
+       profile.js's gate: a different list, from a different endpoint, with no
+       PIN prompt, no kids flag, no avatars and none of the rate limiting the
+       real gate has. Markus, looking at the live app: "why does the profile
+       picker look different?"
+
+       One picker now, and it is profile.js's. boot() calls
+       window.BlazingProfile.open() instead. -->
   <main id="app-main">
 
     <section id="home-view" class="view">

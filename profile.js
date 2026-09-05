@@ -27,6 +27,80 @@
   // Minimum password length for an account. The server rejects shorter; saying
   // so here means the viewer finds out before a round trip.
   const MIN_PASSWORD = 8;
+  /**
+   * The profile pictures, and they are NOT a web-only set.
+   *
+   * These are Fire TV's ICON_CHOICES verbatim — same twenty, same order, laid
+   * out five to a row exactly as ProfileGateActivity.kt:89-92 does. The whole
+   * value of an avatar is that it is the SAME face on every screen in the
+   * house, so a third look invented here would be worse than none: pick a fox
+   * on the Fire Stick and the browser has to show a fox.
+   *
+   * The server stores whatever string it is sent — blazing-fleet profiles.js
+   * does `if (body.avatar !== undefined) next.avatar = body.avatar || null;`
+   * and validates nothing — so this list, and isGlyphAvatar() below, ARE the
+   * rules. There is no second line of defence behind them.
+   */
+  const ICON_CHOICES = Object.freeze([
+    '🦄', '🐯', '🐸', '🦊', '🐼', '🐵', '🐙', '🦁', '🐳', '🐨',
+    '🐰', '🦖', '🐧', '🐷', '🐻', '🎮', '⚽', '🚀', '🎨', '👑',
+  ]);
+  // Grapheme clusters, because a family emoji or a flag is several code points
+  // and one picture. Intl.Segmenter is in every browser this app supports; the
+  // spread fallback counts code points, which only ever over-counts, so the
+  // fallback is stricter rather than looser.
+  const GRAPHEMES = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null;
+
+  function graphemeCount(value) {
+    if (!GRAPHEMES) return [...value].length;
+    let count = 0;
+    for (const _ of GRAPHEMES.segment(value)) count += 1;
+    return count;
+  }
+
+  /**
+   * True when this string can be DRAWN as the profile picture instead of the
+   * name's initial.
+   *
+   * The two televisions disagree about the length, so this takes the STRICTER
+   * of the two: tvOS RootView.swift:1612-1617 allows `count <= 2` grapheme
+   * clusters, Fire TV ProfileGateRules.kt:83-86 allows `length <= 4` UTF-16
+   * units, which is up to four plain characters or two astral emoji. Two
+   * graphemes is the tighter bound and it is the one used here, so any avatar
+   * this browser accepts is one BOTH televisions will also draw as a picture.
+   * The reverse is not true, and that asymmetry is deliberate: the strict end
+   * of the fleet is the safe end to sit at when the server checks nothing.
+   *
+   * The non-ASCII rule is the same on both and is kept as-is: it is what stops
+   * a name, an initial or a stray "?" from being mistaken for a picture.
+   */
+  function isGlyphAvatar(value) {
+    const glyph = typeof value === 'string' ? value.trim() : '';
+    if (!glyph) return false;
+    if (graphemeCount(glyph) > 2) return false;
+    for (const character of glyph) {
+      if (character.codePointAt(0) < 128) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The avatar to PATCH, or null for "leave it alone".
+   *
+   * A straight copy of Fire TV's ProfileGateRules.avatarChange. The null return
+   * is the whole point: picking the emoji the profile already wears must send
+   * NOTHING, because the fleet's PATCH is a read-modify-write on a shared
+   * household record and a no-op write is still a write that can lose a race
+   * with a television. Blank normalises to null so a server that answers with
+   * "" never reads as a difference from a profile with no picture.
+   */
+  function avatarChange(current, picked) {
+    const now = typeof current === 'string' && current.trim() ? current.trim() : null;
+    const next = typeof picked === 'string' && picked.trim() ? picked.trim() : null;
+    return next !== null && next !== now ? next : null;
+  }
 
   const state = {
     credentials: null,
@@ -75,6 +149,10 @@
     // /app/?pair= (an empty value). The sheet then offers a six-character box
     // for the code read aloud from the TV, and peeks once the six are in.
     approveEntry: false,
+    // The profile whose picture the icon chooser is open on, or null. Held
+    // because the grid's own buttons are rebuilt on every open and a closure
+    // over a stale profile would PATCH the wrong id after a refresh.
+    iconProfile: null,
   };
 
   const ui = {};
@@ -147,8 +225,8 @@
       .bp-invite-input, .bp-create-input { width: 100%; min-height: 52px; margin: 16px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 18px; font-weight: 800; }
       .bp-invite-input { letter-spacing: .1em; text-transform: uppercase; }
       .bp-kids-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; color: var(--muted, #a3a3aa); font-size: 14px; }
-      .bp-welcome[hidden], .bp-invite[hidden], .bp-create[hidden] { display: none; }
-      .bp-profile-add { border-style: dashed; border-color: rgba(255,255,255,.22); }
+      .bp-welcome[hidden], .bp-invite[hidden], .bp-create[hidden], .bp-icons[hidden] { display: none; }
+      .bp-profile-add .bp-avatar { border-style: dashed; border-color: rgba(255,255,255,.22); }
       /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
          else is drawn." One thing kept deliberately different, not missed:
          the rating/PIN meta line stays on each row — the reference shows only a name, but
@@ -209,25 +287,110 @@
       .bp-status { min-height: 24px; margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.45; }
       .bp-status[data-state="error"] { color: #ff9aa1; }
       .bp-status[data-state="pending"] { color: #ffd289; }
-      .bp-profiles { display: grid; gap: 10px; margin-top: 20px; }
-      .bp-profile { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 72px; border: 1px solid transparent; border-radius: 17px; padding: 10px 12px; color: inherit; background: transparent; text-align: left; transition: background .15s, border-color .15s; }
-      .bp-profile:hover, .bp-profile:focus-visible, .bp-profile[data-active="true"] { border-color: rgba(255,255,255,.5); background: rgba(255,255,255,.045); }
-      /* Rounded-square, not a circle — the reference's "cartoon avatar" tile
-         shape — and bigger: a left-rail avatar column is the ONLY chrome on
-         that screen, so it can afford the size a card-row layout couldn't.
+      /* ── THE PICKER ──────────────────────────────────────────────────────
+         Markus, 5 Sep 2026, looking at the live app: "why does the profile
+         picker look different? ... i dont like those grey boxes ... also
+         theres no icon selectors like netflix has."
 
-         Neutral, not the accent gradient it used to be. Three profiles all
-         wearing the same red gradient and the same red glow told you nothing
-         about which was which, and spent the brand colour on decoration for
-         rows that are all equally inactive. The accent now arrives only on the
-         row you are actually on (below), which is the one thing on this screen
-         worth colouring. */
-      .bp-avatar { display: grid; place-items: center; width: 54px; height: 54px; flex: 0 0 auto; border-radius: 16px; color: var(--text, #f7f7f8); background: rgba(255,255,255,.07); font-size: 20px; font-weight: 900; transition: background .15s, color .15s; }
-      .bp-profile:hover .bp-avatar, .bp-profile:focus-visible .bp-avatar, .bp-profile[data-active="true"] .bp-avatar { color: #fff; background: linear-gradient(145deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); }
-      .bp-profile-copy { min-width: 0; flex: 1; }
-      .bp-profile-name { display: block; overflow: hidden; font-size: 16px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-      .bp-profile-meta { display: block; margin-top: 3px; color: var(--muted, #a3a3aa); font-size: 12px; }
-      .bp-profile-tag { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 4px 7px; color: var(--muted, #a3a3aa); font-size: 10px; font-weight: 900; letter-spacing: .05em; }
+         The grey boxes were literal: a 54px rounded chip holding ONE CAPITAL
+         LETTER, sitting to the left of a name on a 72px list row. Every TV
+         client in this fleet had already moved past that — Fire TV
+         (ProfileGateActivity) and tvOS (RootView) both draw a real picture
+         from a 20-emoji set, and both offer a pencil to change it. The web was
+         the only client with neither.
+
+         SO THE TILE IS THE PICTURE NOW, not a bullet beside a name. A square
+         that fills its grid cell, the emoji drawn large inside it, the name
+         under it — the shape a TV picker has, in a column narrow enough for a
+         rail. A profile with no picture yet still falls back to its initial,
+         but at tile size that reads as a monogram rather than as a grey box.
+
+         Neutral until you are on it. Three profiles all wearing the same red
+         gradient told you nothing about which was which; the accent arrives
+         only on hover, focus, or the profile that is actually active. */
+      .bp-profiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px 14px; margin-top: 20px; }
+      /* [hidden] has to beat the display:grid above it, and showProfiles()/
+         hideAllScreens() toggle exactly that attribute. */
+      .bp-profiles[hidden] { display: none; }
+      /* The slot exists ONLY so the pencil can be a sibling of the tile rather
+         than a child of it. A <button> inside a <button> is invalid HTML and
+         the parser hoists the inner one out, which would have put the pencil
+         outside the row it belongs to. Keeping .bp-profile a plain button also
+         keeps every existing harness working: gate.smoke.mjs clicks
+         .bp-profile and reads its textContent for the name, profileart
+         focuses it and fires mouseenter on it.
+
+         NO BACKTICKS IN HERE. This whole block is one JS template literal, so
+         a backtick used for markdown emphasis CLOSES it: everything after the
+         quote around .bp-profile was parsed as JavaScript, the bare word
+         "profile" in a later comment became an identifier, and boot() died
+         with "ReferenceError: profile is not defined" before it drew anything.
+         15 of the 19 smoke suites went red on a one-character typo. */
+      .bp-profile-slot { position: relative; min-width: 0; }
+      .bp-profile { position: relative; display: grid; gap: 9px; width: 100%; border: 0; padding: 0; color: inherit; background: transparent; text-align: center; }
+      .bp-profile:focus-visible { outline: none; }
+      .bp-avatar { display: grid; place-items: center; width: 100%; aspect-ratio: 1 / 1; border: 2px solid transparent; border-radius: 20px; color: var(--text, #f7f7f8); background: rgba(255,255,255,.07); font-size: clamp(34px, 7vw, 50px); font-weight: 900; line-height: 1; transition: background .15s, border-color .15s, box-shadow .15s; }
+      /* An initial is a letterform, not a picture: it needs less size and it
+         needs the tracking a 50px emoji does not. */
+      .bp-avatar[data-glyph="false"] { font-size: clamp(26px, 5.4vw, 38px); letter-spacing: .02em; }
+      /* ONE focus treatment, and it is var(--accent) with no second colour
+         beside it. --accent-strong is NOT redefined by [data-theme="kids_warm"]
+         (styles.css), so the old accent→accent-strong gradient rendered gold
+         fading into Blazing red on the kids shell. The ring is the accent, the
+         glow is --accent-glow, and both themes define both. */
+      .bp-profile:hover .bp-avatar, .bp-profile:focus-visible .bp-avatar, .bp-profile[data-active="true"] .bp-avatar {
+        border-color: var(--accent, #ff3d47);
+        background: rgba(255,255,255,.13);
+        box-shadow: 0 0 0 4px var(--accent-glow, rgba(255,61,71,.35));
+      }
+      /* NAMES ARE ALWAYS VISIBLE HERE, and on the two televisions they are not:
+         Fire TV and tvOS reveal the name only on the focused row. That is the
+         right call for a remote, where exactly one row is focused at all times
+         and the focused row IS the reading position. A mouse has no focus until
+         it moves, and a keyboard user tabbing in has none either — so the same
+         rule on a browser would open a grid of unlabelled squares. Always-on
+         names cost nothing on a pointer screen and are the only thing that
+         makes the grid readable before you touch it. */
+      .bp-profile-copy { display: block; min-width: 0; padding: 0 18px; }
+      .bp-profile-name { display: block; overflow: hidden; font-size: 14px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+      .bp-profile-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--muted, #a3a3aa); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+      /* On the tile, not beside the name: the name row is 120px wide now and a
+         pill in it would push the name into an ellipsis. */
+      .bp-profile-tag { position: absolute; top: 8px; right: 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 2px 6px; color: #fff; background: rgba(8,8,10,.74); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+      /* THE PENCIL. Fire TV puts it left of the avatar at 34dp, glyph "✎"
+         (U+270E), invisible until the row is focused and a red pill once the
+         pencil itself has focus; tvOS puts it left of the tile at opacity
+         0 / 0.55 / 1. Same three states here, sat beside the name because in a
+         tile grid that is where the row's own text is — left of a 120px square
+         is the next profile.
+
+         It is a real button in the DOM at all times, so Tab reaches it and
+         :focus-within brings it up before it is used. */
+      .bp-pencil {
+        position: absolute; right: 0; bottom: 2px;
+        display: grid; place-items: center;
+        width: 30px; height: 30px; min-height: 0;
+        border: 0; border-radius: 999px; padding: 0;
+        color: var(--text, #f7f7f8); background: rgba(255,255,255,.1);
+        font-size: 14px; line-height: 1;
+        opacity: 0; transition: opacity .15s, background .15s, color .15s, box-shadow .15s;
+      }
+      .bp-profile-slot:hover .bp-pencil, .bp-profile-slot:focus-within .bp-pencil { opacity: .6; }
+      .bp-pencil:hover, .bp-pencil:focus-visible { opacity: 1; color: #fff; background: var(--accent, #ff3d47); box-shadow: 0 0 0 3px var(--accent-glow, rgba(255,61,71,.35)); outline: none; }
+      /* No hover on a touch screen, so "reveal on hover" is "never" there. */
+      @media (hover: none) { .bp-pencil { opacity: .6; } }
+
+      /* ── THE ICON CHOOSER ────────────────────────────────────────────────
+         The same 20 emoji as Fire TV's ICON_CHOICES, in the same order, 5 to a
+         row — one set across the fleet, so a profile picked on the television
+         is the same picture in the browser. */
+      .bp-icon-current { display: flex; align-items: center; gap: 13px; margin: 0 0 16px; color: var(--muted, #a3a3aa); font-size: 13px; line-height: 1.4; }
+      .bp-icon-preview { display: grid; place-items: center; width: 58px; height: 58px; flex: 0 0 auto; border-radius: 18px; background: rgba(255,255,255,.07); font-size: 32px; font-weight: 900; line-height: 1; }
+      .bp-icon-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+      .bp-icon { display: grid; place-items: center; aspect-ratio: 1 / 1; min-height: 48px; border: 2px solid rgba(255,255,255,.1); border-radius: 16px; padding: 0; color: inherit; background: rgba(255,255,255,.05); font-size: clamp(21px, 4.6vw, 30px); line-height: 1; transition: background .15s, border-color .15s, box-shadow .15s; }
+      .bp-icon:hover, .bp-icon:focus-visible { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.11); outline: none; }
+      .bp-icon[aria-checked="true"] { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.13); box-shadow: 0 0 0 3px var(--accent-glow, rgba(255,61,71,.35)); }
+      .bp-icon:disabled { cursor: wait; opacity: .52; }
       .bp-pin { margin-top: 22px; }
       .bp-pin[hidden] { display: none; }
       .bp-pin-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -273,7 +436,7 @@
         /* Capped, not full-bleed. On a 768px tablet an uncapped row put the
            name hard left and the PIN badge 700px away hard right, with the
            reader's eye crossing an empty middle to connect them. */
-        .bp-kicker, .bp-heading, .bp-copy, .bp-status, .bp-profiles, .bp-pin, .bp-footer { width: 100%; max-width: 560px; }
+        .bp-kicker, .bp-heading, .bp-copy, .bp-status, .bp-profiles, .bp-icons, .bp-pin, .bp-footer { width: 100%; max-width: 560px; }
         .bp-profiles { margin-top: 16px; }
       }
       /* The topbar button used to be squeezed to a 42px box with "font-size: 0"
@@ -294,9 +457,9 @@
          row this wide does not need to grow to show it is focused: it already
          gets a border, a lit background and a coloured avatar tile. */
       @media (pointer: coarse), (hover: none) {
-        .bp-profile:focus-visible { transform: none; }
+        .bp-profile:focus-visible, .bp-pencil:focus-visible, .bp-icon:focus-visible { transform: none; }
       }
-      @media (prefers-reduced-motion: reduce) { .bp-profile, .bp-digit, .bp-action { transition: none; } }
+      @media (prefers-reduced-motion: reduce) { .bp-profile, .bp-avatar, .bp-pencil, .bp-icon, .bp-digit, .bp-action { transition: none; } }
 
       /* ── THE GATE ────────────────────────────────────────────────────────
          Markus, 1 Sep 2026: the root of blazingstream must open on the same
@@ -434,7 +597,10 @@
     // literal left Verify disabled after every setBusy(false) until renderPin()
     // happened to run again.
     if (ui.verify) ui.verify.disabled = busy || state.pinDigits.length !== pinLength();
-    document.querySelectorAll('.bp-profile, .bp-digit, .bp-action').forEach((button) => {
+    // The pencil and the icon tiles are in this list for the same reason the
+    // profile tiles are: they are built by renderProfileList()/showIconPicker()
+    // rather than held in `ui`, so setBusy() cannot reach them by key.
+    document.querySelectorAll('.bp-profile, .bp-pencil, .bp-icon, .bp-digit, .bp-action').forEach((button) => {
       button.disabled = busy;
     });
   }
@@ -608,17 +774,30 @@
     }
   }
 
+  /** The picture to draw on the tile, and whether it IS a picture. */
+  function avatarFace(profile) {
+    return isGlyphAvatar(profile.avatar)
+      ? { glyph: profile.avatar.trim(), isPicture: true }
+      : { glyph: (profile.name || '?').slice(0, 1).toUpperCase(), isPicture: false };
+  }
+
   function renderProfileList() {
     ui.profiles.replaceChildren();
     const profiles = state.profiles;
     profiles.forEach((profile) => {
+      // The slot, not the button, is what goes in the grid — see the
+      // .bp-profile-slot comment in addStyle() for why the pencil cannot be a
+      // child of the tile.
+      const slot = element('div', 'bp-profile-slot');
       const button = element('button', 'bp-profile');
       button.type = 'button';
       button.disabled = state.busy;
       button.dataset.active = state.activeProfile && state.activeProfile.id === profile.id ? 'true' : 'false';
       button.setAttribute('aria-label', `Choose ${profile.name}${profile.hasPin ? ', PIN required' : ''}`);
 
-      const avatar = element('span', 'bp-avatar', profile.name.slice(0, 1).toUpperCase());
+      const face = avatarFace(profile);
+      const avatar = element('span', 'bp-avatar', face.glyph);
+      avatar.dataset.glyph = face.isPicture ? 'true' : 'false';
       avatar.setAttribute('aria-hidden', 'true');
       const copy = element('span', 'bp-profile-copy');
       copy.append(element('span', 'bp-profile-name', profile.name));
@@ -632,23 +811,147 @@
       const swap = () => showProfileArt(profile);
       button.addEventListener('mouseenter', swap);
       button.addEventListener('focus', swap);
-      ui.profiles.appendChild(button);
+      slot.appendChild(button);
+
+      const pencil = element('button', 'bp-pencil', '✎');
+      pencil.type = 'button';
+      pencil.disabled = state.busy;
+      // The glyph is decoration; the label is the whole control for anyone not
+      // looking at it.
+      pencil.setAttribute('aria-label', `Change the picture for ${profile.name}`);
+      pencil.addEventListener('click', (event) => {
+        // The tile behind it selects a profile, and selecting a profile closes
+        // the panel. Without this, the pencil opened the chooser and the click
+        // fell through to the tile that shut it again.
+        event.stopPropagation();
+        showIconPicker(profile);
+      });
+      // The pencil is over the tile's own artwork, so keep the art in step with
+      // it rather than letting the backdrop go stale under a focused control.
+      pencil.addEventListener('focus', swap);
+      slot.appendChild(pencil);
+
+      ui.profiles.appendChild(slot);
     });
     // Only once this browser is confirmed approved — a pending browser's own
     // POST would just 403, and showing the tile there is a promise this
     // screen can't keep yet.
     if (state.approved) {
+      const addSlot = element('div', 'bp-profile-slot');
       const addButton = element('button', 'bp-profile bp-profile-add');
       addButton.type = 'button';
       addButton.disabled = state.busy;
       addButton.setAttribute('aria-label', 'Create a new profile');
       const addAvatar = element('span', 'bp-avatar', '+');
+      addAvatar.dataset.glyph = 'false';
       addAvatar.setAttribute('aria-hidden', 'true');
       const addCopy = element('span', 'bp-profile-copy');
       addCopy.append(element('span', 'bp-profile-name', 'Add profile'));
       addButton.append(addAvatar, addCopy);
       addButton.addEventListener('click', showCreateProfile);
-      ui.profiles.appendChild(addButton);
+      // No pencil: there is no profile here yet to re-picture.
+      addSlot.appendChild(addButton);
+      ui.profiles.appendChild(addSlot);
+    }
+  }
+
+  /**
+   * The icon chooser: Fire TV's EDIT_ICON surface, in a browser.
+   *
+   * It opens ON the picture the profile already wears — `aria-checked` marks
+   * it and focus lands on it — so the first thing the keyboard sees is where
+   * it currently is, not the top-left corner of an anonymous grid. A profile
+   * with no picture yet, or with something this browser refuses to draw (see
+   * isGlyphAvatar), opens on the first tile with nothing checked.
+   *
+   * NO PIN IS ASKED FOR. The fleet needs an unlock token to change an adult
+   * rating or a PIN and needs nothing at all to change an avatar, so asking
+   * here would be a lock this screen invented and the televisions do not have.
+   */
+  function showIconPicker(profile) {
+    if (state.busy) return;
+    state.iconProfile = profile;
+    hideAllScreens();
+    setPanelView('');
+    ui.icons.hidden = false;
+    ui.kicker.textContent = 'Profile picture';
+    ui.heading.textContent = profile.name;
+
+    const face = avatarFace(profile);
+    ui.iconPreview.textContent = face.glyph;
+    ui.iconPreviewCopy.textContent = face.isPicture
+      ? 'This is the picture on every screen in the house. Pick another to change it.'
+      : 'No picture yet — this profile shows its initial. Pick one and every screen uses it.';
+
+    ui.iconGrid.replaceChildren();
+    let selected = null;
+    ICON_CHOICES.forEach((glyph) => {
+      const choice = element('button', 'bp-icon', glyph);
+      choice.type = 'button';
+      choice.disabled = state.busy;
+      choice.setAttribute('role', 'radio');
+      const isCurrent = face.isPicture && glyph === face.glyph;
+      choice.setAttribute('aria-checked', isCurrent ? 'true' : 'false');
+      choice.setAttribute('aria-label', `Picture ${ICON_CHOICES.indexOf(glyph) + 1} of ${ICON_CHOICES.length}`);
+      if (isCurrent) selected = choice;
+      choice.addEventListener('click', () => chooseAvatar(profile, glyph));
+      ui.iconGrid.appendChild(choice);
+    });
+    setStatus('Pick a picture. It saves straight away.', 'info');
+    const first = selected || ui.iconGrid.firstElementChild;
+    window.setTimeout(() => first && first.focus(), 0);
+  }
+
+  /**
+   * PATCH /profiles/:id?deviceId=… with `{"avatar":"🦊"}` and nothing else.
+   *
+   * The body carries ONLY the field that changed, which is the shape every TV
+   * client sends and the shape the fleet's read-modify-write expects: naming a
+   * field is what makes it change, so a fuller body would overwrite whatever a
+   * television wrote a second ago.
+   */
+  async function chooseAvatar(profile, picked) {
+    if (state.busy) return;
+    const next = avatarChange(profile.avatar, picked);
+    if (!next) {
+      // Not an error, and not silence either — the tap did land, it just had
+      // nothing to do. Fire TV's avatarChange returns null here and skips the
+      // call the same way.
+      showProfiles(`${profile.name} already uses that picture.`);
+      return;
+    }
+    if (!state.credentials) {
+      setStatus('This browser is not connected yet. Select Refresh profiles first.', 'error');
+      return;
+    }
+    setBusy(true);
+    setStatus('Saving that picture…', 'info');
+    try {
+      const result = await request(
+        `/profiles/${encodeURIComponent(profile.id)}?deviceId=${encodeURIComponent(state.credentials.id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+          body: JSON.stringify({ avatar: next }),
+        },
+      );
+      if (!result.ok) {
+        setStatus(serverError(result, result.timeout
+          ? 'The profile server did not answer in time. Try again.'
+          : 'Could not save that picture.'), 'error');
+        return;
+      }
+      const saved = profileFrom(result.body && result.body.profile);
+      // Trust the server's echo over the value that was sent: it is the record
+      // every other screen will read.
+      const value = saved ? saved.avatar : next;
+      profile.avatar = value;
+      const live = state.profiles.find((entry) => entry.id === profile.id);
+      if (live) live.avatar = value;
+      if (state.activeProfile && state.activeProfile.id === profile.id) state.activeProfile.avatar = value;
+      showProfiles(`${profile.name} now uses ${value}.`);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -815,6 +1118,7 @@
 
   function showProfiles(message) {
     state.pendingProfile = null;
+    state.iconProfile = null;
     state.ownerMode = false;
     clearPinEntry();
     hideAllScreens();
@@ -843,6 +1147,7 @@
     ui.createProfile.hidden = true;
     ui.pin.hidden = true;
     ui.profiles.hidden = true;
+    if (ui.icons) ui.icons.hidden = true;
     if (ui.qr) ui.qr.hidden = true;
     if (ui.signup) ui.signup.hidden = true;
     if (ui.email) ui.email.hidden = true;
@@ -2509,6 +2814,29 @@
     ui.createSubmit.type = 'button';
     ui.createProfile.append(createTop, ui.createName, kidsRow, ui.createSubmit);
 
+    // THE ICON CHOOSER. Same sheet shape as every other screen in this panel:
+    // Back on the left, a title beside it, the content under. It is a
+    // radiogroup rather than twenty loose buttons so a screen reader is told
+    // "1 of 20, checked" instead of reading out twenty unrelated controls.
+    ui.icons = element('section', 'bp-icons');
+    ui.icons.id = 'bp-icons';
+    ui.icons.hidden = true;
+    const iconsTop = element('div', 'bp-pin-top');
+    ui.iconsBack = element('button', 'bp-back', 'Back');
+    ui.iconsBack.type = 'button';
+    ui.iconsBack.id = 'bp-icons-back';
+    iconsTop.append(ui.iconsBack, element('strong', '', 'Choose a picture'));
+    const iconCurrent = element('div', 'bp-icon-current');
+    ui.iconPreview = element('span', 'bp-icon-preview', '');
+    ui.iconPreview.setAttribute('aria-hidden', 'true');
+    ui.iconPreviewCopy = element('span', '', '');
+    iconCurrent.append(ui.iconPreview, ui.iconPreviewCopy);
+    ui.iconGrid = element('div', 'bp-icon-grid');
+    ui.iconGrid.id = 'bp-icon-grid';
+    ui.iconGrid.setAttribute('role', 'radiogroup');
+    ui.iconGrid.setAttribute('aria-label', 'Profile picture');
+    ui.icons.append(iconsTop, iconCurrent, ui.iconGrid);
+
     ui.pin = element('section', 'bp-pin');
     ui.pin.hidden = true;
     const pinTop = element('div', 'bp-pin-top');
@@ -2562,7 +2890,7 @@
     ui.keepBrowsing.type = 'button';
     const keepBrowsing = ui.keepBrowsing;
     footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing);
-    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.profiles, ui.pin, footer);
+    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.icons, ui.profiles, ui.pin, footer);
     // Art FIRST, so the close-catcher and the rail both paint over it.
     ui.layer.append(ui.art, backdrop, panel);
     document.body.appendChild(ui.layer);
@@ -2609,6 +2937,10 @@
         event.preventDefault();
         redeemInviteCode();
       }
+    });
+    ui.iconsBack.addEventListener('click', () => {
+      state.iconProfile = null;
+      showProfiles('Choose who is watching.');
     });
     ui.createBack.addEventListener('click', () => showProfiles());
     ui.createSubmit.addEventListener('click', submitCreateProfile);
@@ -2680,6 +3012,31 @@
       showWelcome();
     }
   }
+
+  /**
+   * The ONE way in from outside this file.
+   *
+   * There used to be a SECOND profile picker: a `<dialog id="profile-picker">`
+   * in index.html, filled by app.js boot() from GET /api/profiles whenever
+   * `localStorage.profileId` was unset. It was live — boot() runs on every load
+   * — so a first-time browser could get a bare list of plain-text buttons on
+   * top of this gate, built from a different endpoint, with no PIN, no kids
+   * flag and no avatars. Both are deleted; app.js now calls this instead, so
+   * there is exactly one picker and it is this one.
+   */
+  window.BlazingProfile = {
+    open() {
+      if (!ui.layer) return false;
+      openPanel();
+      if (storedCredentials()) connectProfiles();
+      else showWelcome();
+      return true;
+    },
+    /** True while the gate is on screen — app.js uses it to avoid a double open. */
+    isOpen() {
+      return Boolean(ui.layer && !ui.layer.hidden);
+    },
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot, { once: true });
