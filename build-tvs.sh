@@ -13,10 +13,11 @@
 #      "Failed to minify code" and named app.js as if the file were broken. It
 #      is not. --no-minify is the fix; these files are already small and are
 #      served from local storage on the TV, not over a network.
-#   2. admin.js is dead code — nothing in index.html loads it, and it imports
-#      `getConfig` from locker.js, which exports no such thing. It is excluded
-#      rather than shipped, because a broken module inside a TV package is a
-#      trap for whoever wires it up next.
+#   2. There used to be a second note here, about excluding admin.js because it
+#      was dead code importing a `getConfig` locker.js does not export. On
+#      4 Sep 2026 it was deleted instead, along with brightminds.js, delight.js
+#      and the five patch*.py scripts, so there is nothing left to exclude.
+#      .github/checks/assets.py now asserts they stay deleted.
 #
 # Requires (install once):
 #   npm i -g @webosose/ares-cli                      # LG   -> ares-package
@@ -56,8 +57,8 @@ mkdir -p "$OUT"
 # .github/checks/assets.py asserts both of these names stay in this list.
 rsync -a \
   --exclude '.git' --exclude '.wrangler' --exclude 'node_modules' \
-  --exclude 'dist' --exclude '*.smoke.mjs' --exclude 'patch*.py' \
-  --exclude 'build-tvs.sh' --exclude '.DS_Store' --exclude 'admin.js' \
+  --exclude 'dist' --exclude '*.smoke.mjs' \
+  --exclude 'build-tvs.sh' --exclude '.DS_Store' \
   --exclude '.claude' --exclude '.omc' --exclude '.gitignore' \
   --exclude '*.md' --exclude '.github' --exclude '__pycache__' \
   --exclude 'package.json' --exclude 'package-lock.json' --exclude 'scripts' \

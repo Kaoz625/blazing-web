@@ -1214,13 +1214,17 @@ function buildRowSkeleton(catalog) {
  * request and leave no blank shelf behind.
  */
 const TRENDING_ROWS = Object.freeze([
-  { id: 'blazing-trending-movies', type: 'movie', name: '🔥 Trending Now' },
-  { id: 'blazing-trending-series', type: 'series', name: '🔥 Trending Shows' },
+  // No emoji. DESIGN.md specifies section headings as plain 16px/600 text, and
+  // the Roku, Apple TV and Fire TV all draw them that way -- "Latest Releases",
+  // "Trending Movies". A flame on the web only was the loudest single tell that
+  // this client was designed apart from the others.
+  { id: 'blazing-trending-movies', type: 'movie', name: 'Trending Movies' },
+  { id: 'blazing-trending-series', type: 'series', name: 'Trending Shows' },
 ]);
 
 const TRAILER_ROWS = Object.freeze([
-  { id: 'blazing-trailers-new', type: 'movie', name: '🎬 New in Theaters' },
-  { id: 'blazing-trailers-upcoming', type: 'movie', name: '🗓 Coming Soon' },
+  { id: 'blazing-trailers-new', type: 'movie', name: 'New in Theaters' },
+  { id: 'blazing-trailers-upcoming', type: 'movie', name: 'Coming Soon' },
 ]);
 
 const EDU_SLUGS = Object.freeze(['science', 'history', 'stem', 'kids', 'languages']);
@@ -1928,8 +1932,14 @@ async function bootFromShelves() {
     })
     .catch(() => []);
 
-  const [freshRows, catalogRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
-  const gotAnything = freshRows.some((metas) => metas.length) || catalogRows.some((metas) => metas.length);
+  const [freshRows, catalogRows, trendingRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
+  // trendingRows was AWAITED and then thrown away by a two-name destructure, so
+  // a home whose only populated rows were Trending Now and Trending Shows -- the
+  // ordinary case when the discover shelves are quiet -- counted as "nothing"
+  // and printed the empty line above two full rows of posters.
+  const gotAnything = freshRows.some((metas) => metas.length)
+    || catalogRows.some((metas) => metas.length)
+    || trendingRows.some((metas) => metas && metas.length);
   // Every row loader removes its own empty section, so a totally quiet home
   // reaches here with #rows literally empty — no separate hero to fall back
   // on to say so. One honest line beats a blank screen with nothing wrong
@@ -2423,7 +2433,10 @@ async function loadStreams(meta) {
       const size = el('span');
       size.textContent = sizeMatch ? sizeMatch[0] : '';
       const seeders = el('span');
-      seeders.textContent = seedMatch ? `👤 ${seedMatch[1]}` : '';
+      // A word, not a person emoji: emoji render at a different size and weight
+      // per operating system, so this line jumped around between machines while
+      // the size beside it did not.
+      seeders.textContent = seedMatch ? `${seedMatch[1]} seeders` : '';
       metaLine.append(size, seeders);
       info.append(qualityLine, titleLine, metaLine);
       row.appendChild(info);
@@ -3105,14 +3118,23 @@ async function startDetailTrailer(meta) {
 
   const toggle = el('button', 'detail-mute-btn');
   toggle.type = 'button';
-  toggle.textContent = '🔇';
+  // Inline SVG, not 🔇/🔊. This app already draws every other control with an
+  // inline svg under .icon-button; an emoji here inherited the platform's
+  // colour font, so it stayed blue-and-white on the accent and could not be
+  // themed at all.
+  const SPEAKER = '<path d="M4 9v6h4l5 4V5L8 9H4z"/>';
+  const MUTED_MARK = '<path d="M16 9l5 5m0-5l-5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>';
+  const WAVES = '<path d="M16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>';
+  const speakerIcon = (isMuted) =>
+    `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">${SPEAKER}${isMuted ? MUTED_MARK : WAVES}</svg>`;
+  toggle.innerHTML = speakerIcon(true);
   toggle.setAttribute('aria-label', 'Unmute trailer');
   let muted = true;
   toggle.addEventListener('click', (event) => {
     event.stopPropagation();
     muted = !muted;
     video.muted = muted;
-    toggle.textContent = muted ? '🔇' : '🔊';
+    toggle.innerHTML = speakerIcon(muted);
     toggle.setAttribute('aria-label', muted ? 'Unmute trailer' : 'Mute trailer');
     telemetry('nav_action', { action: muted ? 'trailer_mute' : 'trailer_unmute', from: 'detail' });
   });

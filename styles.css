@@ -22,8 +22,31 @@
      states and a third neutral tier this app invented on its own, with no
      matching token on any other client to copy a corrected value from. */
   --surface: #0E0A0C;
-  --surface-focus: #1c1c1f;
-  --surface-soft: #18181b;
+  /* The warm ladder, matched to the Roku's Theme.brs rather than invented here:
+     bg 0A0A0B -> surface 0E0A0C -> surface-soft -> surface-focus 171012, which
+     is literally Roku's surfaceHi. These two were #1c1c1f and #18181b -- COLD
+     neutral greys, the exact "grey plate" Markus has now called out twice, and
+     the reason a focused card on the web reads blue-black next to the Roku's. */
+  --surface-soft: #140F11;
+  --surface-focus: #171012;
+  /* Roku draws EVERY hairline in the accent at 20% (Theme.brs `line 0xFF3D4733`),
+     not in white. The web had no border token at all, so each rule invented its
+     own white rgba and the app grew a grey-line grid the TVs do not have. */
+  --border: rgba(255, 61, 71, .20);
+  /* Roku's `text` tier, 0xFFFFFFCC. Body copy sits between --text (headings) and
+     --muted (secondary); without it every body paragraph picked one or the
+     other and the type had two tiers where the contract has four. */
+  --text-body: rgba(255, 255, 255, .80);
+  /* Roku fills a FOCUSED row with the accent at 78% (Theme.brs focusFill
+     0xFF3D47C8) and edges it with the solid accent. The web only ever glowed at
+     35%, so the selected thing on a television read as a grey plate with a red
+     halo instead of a red plate. This is the token that closes that. */
+  --focus-fill: rgba(255, 61, 71, .78);
+  /* The content gutter. DESIGN.md was measured on a 1920 desktop with a 1740
+     content track, i.e. 90px each side, and Theme.brs uses the same 90 on the
+     Roku. Small screens keep the tight 18 they were built with; the 90 arrives
+     only when there is room for it. */
+  --gutter: 18px;
   --text: #f7f7f8;
   --muted: rgba(255,255,255,.6);
   --quiet: rgba(255,255,255,.35);
@@ -76,19 +99,32 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: sticky;
   top: 0;
   z-index: 20;
-  width: min(1280px, calc(100% - 24px));
+  /* A PILL, so it shrinks to its contents: DESIGN.md measures the bar at ~808
+     wide on a 1920 page, not as a full-width slab. It was min(1280px, ...),
+     which drew a 1280px plate with the chips huddled at the left and a lot of
+     empty bar to their right -- the single thing that most made this read as a
+     web header rather than as the same floating bar the televisions have. */
+  width: max-content;
+  max-width: calc(100% - 24px);
   height: 58px;
-  margin: calc(10px + var(--safe-top)) auto 0;
+  /* 16, matching the contract's y=16. It was 10, so the bar sat closer to the
+     top edge than every other client's. */
+  margin: calc(16px + var(--safe-top)) auto 0;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 7px;
-  border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 20px;
-  background: rgba(10, 10, 10, .88);
+  border: 1px solid rgba(255, 255, 255, .10);
+  /* 16, not 20: DESIGN.md gives ONE radius and every card, panel and the bar
+     share it. */
+  border-radius: var(--radius);
+  /* Was rgba(10,10,10,.88) -- the near-black GROUND at near-opacity, so the bar
+     did not read as a floating pane at all. The contract is the SURFACE at 55%
+     with a 40px blur, which is what makes it float. */
+  background: rgba(14, 10, 12, .55);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
   transition: background var(--transition);
 }
 
@@ -157,8 +193,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: 700;
   transition: color var(--transition), background var(--transition);
 }
-.topnav button:hover, .topnav button.active { color: #fff; background: var(--surface-focus); }
-.search-button { margin-left: auto; }
+/* Hover is a surface; ACTIVE is the accent. These shared one grey plate, which
+   is the "it highlights grey and not red" note against the TVs -- the same bug,
+   on the web, months later. Hover stays a quiet accent wash so the two states
+   are still told apart. */
+.topnav button:hover { color: #fff; background: rgba(255, 61, 71, .20); }
+.topnav button.active { color: #fff; background: var(--focus-fill); }
+/* No margin-left:auto. That pushed the magnifier to the far right of a
+   full-width bar; now the bar is max-content, an auto margin would stretch it
+   back out to the max-width and undo the pill. */
+.search-button { margin-left: 0; }
 
 /* The profile chip is the only child of .topbar with an unbounded width: it prints
    the active profile's NAME. Logged out it reads "Connect profile" (126px); a long
@@ -185,9 +229,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   margin: 16px;
   padding: 24px;
   overflow-y: auto;
-  border: 1px solid rgba(255,255,255,.1);
-  border-radius: 24px;
-  background: rgba(14, 14, 16, 0.94);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius);
+  /* rgba(14,14,16) LOOKS like --surface #0E0A0C and is not: it is the old cold
+     near-black, one blue step off. At 95% over a warm page that difference is
+     visible along the drawer's edge. */
+  background: rgba(14, 10, 12, .95);
   box-shadow: 0 25px 80px rgba(0,0,0,.75);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
@@ -197,11 +244,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .drawer-nav { display: grid; gap: 6px; }
 .drawer-nav [data-discover-filters] { display: contents; }
 .drawer-nav button { padding: 13px 14px; text-align: left; font-size: 15px; }
-.drawer-nav button.active, .drawer-nav button:hover { background: var(--surface-focus); color: #fff; }
+.drawer-nav button:hover { background: rgba(255, 61, 71, .20); color: #fff; }
+.drawer-nav button.active { background: var(--focus-fill); color: #fff; }
 .drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: 11px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
 
 /* ── Main layout ─────────────────────────────────────────── */
-#app-main { width: min(1440px, 100%); margin: 0 auto; padding-bottom: calc(42px + var(--safe-bottom)); }
+/* Was min(1440px, 100%). EVERY size in DESIGN.md was measured at 1920, so a
+   1440 cap made all of them unreachable at once -- a 160px poster in a 1740
+   track and the same poster in a 1404 track are different designs, and this one
+   cap is why the web could not look like the Roku no matter what the cards did. */
+#app-main { width: min(1920px, 100%); margin: 0 auto; padding-bottom: calc(42px + var(--safe-bottom)); }
 .view { padding-top: 18px; }
 .hero {
   position: relative;
@@ -215,9 +267,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .hero-art, .detail-art { position: absolute; inset: 0; background-position: center right; background-size: cover; background-repeat: no-repeat; opacity: .9; z-index: -1; }
 .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, rgba(10,10,10,.90), transparent 58%); }
-.hero-loading .hero-art { animation: pulse 1.4s ease-in-out infinite alternate; background: linear-gradient(110deg, #151518, #202024, #151518); background-size: 180% 100%; }
+.hero-loading .hero-art { animation: pulse 1.4s ease-in-out infinite alternate; background: linear-gradient(110deg, #100C0E, #171013, #100C0E); background-size: 180% 100%; }
 .hero-content { display: flex; flex-direction: column; justify-content: end; min-height: inherit; width: min(560px, 100%); padding: 48px 24px 28px; }
-.eyebrow { margin: 0 0 8px; color: #d0d0d4; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .hero h1, .page-heading h1 { margin: 0; font-size: clamp(28px, 5vw, 52px); line-height: 1.02; letter-spacing: -.05em; }
 .hero-content > p:not(.eyebrow), .page-heading > p:not(.eyebrow) { max-width: 520px; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
 .hero-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; align-items: center; }
@@ -318,11 +370,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   letter-spacing: -.045em;
   text-shadow: 0 2px 18px rgba(0,0,0,.75);
 }
-.home-hero-meta { margin: 10px 0 0; color: #d0d0d4; font-size: 13px; font-weight: 750; letter-spacing: .02em; }
+.home-hero-meta { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-weight: 750; letter-spacing: .02em; }
 .home-hero-synopsis {
   margin: 10px 0 0;
   max-width: 560px;
-  color: #d0d0d4;
+  color: var(--muted);
   font-size: 14px;
   line-height: 1.45;
   text-shadow: 0 1px 8px rgba(0,0,0,.8);
@@ -400,12 +452,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ── Rows / Cards ────────────────────────────────────────── */
 .rows { display: flex; flex-direction: column; gap: 29px; }
 .row[hidden] { display: none; }
-.row-title { margin: 0 0 11px 18px; font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+.row-title { margin: 0 0 11px var(--gutter); font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
 .row-track, .result-grid {
   display: flex;
   gap: 12px;
   overflow-x: auto;
-  padding: 3px 18px 9px;
+  padding: 3px var(--gutter) 9px;
   scroll-snap-type: x proximity;
   scrollbar-width: none;
 }
@@ -435,7 +487,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   z-index: 2;
 }
 .card:active { transform: scale(.97); }
-.card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #252529, #111113); transition: opacity var(--transition); }
+.card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); transition: opacity var(--transition); }
 /* .seerr-art joins these: the Requests poster is a real <img> now, like every
    other card in the app, so it needs the same dead-URL mark rather than a
    private one that would drift from this. */
@@ -443,7 +495,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card.no-image .card-image, .seerr-art.no-image .card-image { visibility: hidden; }
 .card-label { position: absolute; right: 0; bottom: 0; left: 0; padding: 32px 10px 9px; background: linear-gradient(0deg, rgba(0,0,0,.93), rgba(0,0,0,0)); font-size: 12px; font-weight: 750; line-height: 1.25; text-shadow: 0 1px 4px #000; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
-.skeleton { background: linear-gradient(100deg, #151518 30%, #242429 50%, #151518 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
+.skeleton { background: linear-gradient(100deg, #100C0E 30%, #1B1417 50%, #100C0E 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
 
 /* ── Hero-inside-the-row (DebridStream reference) ───────────
    One band does both jobs: no separate hero banner. The first row with
@@ -500,10 +552,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   pointer-events: none;
 }
 .card-hero-title { margin: 0; font-size: 17px; font-weight: 850; letter-spacing: -.02em; line-height: 1.15; }
-.card-meta-line { margin: 6px 0 0; color: #d0d0d4; font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+.card-meta-line { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .01em; }
 .card-synopsis {
   margin: 8px 0 0;
-  color: #d0d0d4;
+  color: var(--muted);
   font-size: 12.5px;
   line-height: 1.4;
   display: -webkit-box;
@@ -735,9 +787,21 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .search-view .search-results { grid-template-columns: repeat(2, 1fr); }
 }
 .result-grid { flex-wrap: wrap; overflow: visible; padding-bottom: 0; }
+/* A grid page card is NOT a row card. DESIGN.md measures the row at 160x240 and
+   the grid at 238x356; the web drew both at the row size, so /movies looked
+   like a denser home rather than its own page. Only from 1280 up, so phones
+   keep the row size and do not get a two-across grid of very large posters. */
+@media (min-width: 1280px) {
+  .result-grid .card { width: 238px; }
+}
 .empty-copy { margin: 20px; color: var(--muted); }
-.roadmap-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 920px; margin: 0 auto; padding: 0 20px; }
-.roadmap-grid article { min-height: 190px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
+/* DESIGN.md measures a roadmap card at 582x392, three across with a 16px gap
+   -- a 1778px block. This was capped at 920px, so the eight franchise cards
+   drew at roughly 285x190: half size, and the only screen where the web was
+   less than half the Roku's. The cap stays as a max-width so narrow windows
+   still collapse instead of overflowing. */
+.roadmap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 582px)); gap: 16px; max-width: 1778px; margin: 0 auto; padding: 0 var(--gutter); justify-content: center; }
+.roadmap-grid article { min-height: 392px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
 .roadmap-grid article:hover { border-color: rgba(255,61,71,.3); box-shadow: 0 8px 24px rgba(255,61,71,.1); }
 .roadmap-grid span { color: var(--accent); font-size: 13px; font-weight: 900; letter-spacing: .12em; }
 .roadmap-grid h2 { margin: 25px 0 8px; font-size: 20px; letter-spacing: -.03em; }
@@ -771,13 +835,19 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   box-shadow: 0 6px 18px var(--accent-glow);
 }
 /* Education card variant — slightly lighter background, subtle green border */
+/* There is ONE focus colour, and it is the accent. Theme.brs deleted exactly
+   this pattern on the Roku by name -- "Games green, Adult magenta, YouTube red"
+   -- because a focus ring that changes hue by section teaches the eye that
+   focus means different things in different places. The green survives as a
+   RESTING tint, which is a category mark, not a focus signal.
+   var(--accent) also means the kids shell gets its own gold ring for free. */
 .card.edu-card {
   background: var(--surface-soft);
   border-color: rgba(40, 200, 100, .18);
 }
 .card.edu-card:hover, .card.edu-card:focus-visible {
-  border-color: rgba(40, 200, 100, .55);
-  box-shadow: 0 0 0 2px rgba(40,200,100,.4), 0 20px 40px rgba(0,0,0,.4);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 20px 40px rgba(0,0,0,.4);
 }
 /* EDU badge */
 .edu-badge {
@@ -812,7 +882,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .detail-card { position: relative; min-height: min(560px, calc(100vh - 24px)); min-height: min(560px, calc(100dvh - 24px)); overflow: hidden; }
 .detail-art { opacity: .72; background-position: right center; }
 .detail-card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.68) 45%, rgba(0,0,0,.3) 100%); }
-.detail-close { position: absolute; top: 14px; right: 14px; z-index: 3; color: #fff; background: rgba(10,10,10,.78); transition: background var(--transition); }
+/* Circular and outlined -- DESIGN.md, "Circular outlined X at the top right".
+   .icon-button gives it a square-ish radius, so the shape is set here and only
+   for this control. */
+.detail-close {
+  position: absolute; top: 14px; right: 14px; z-index: 3; color: #fff;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
+  background: rgba(10,10,10,.78); transition: background var(--transition);
+}
 .detail-close:hover { background: rgba(255,61,71,.3); }
 .detail-body { position: relative; z-index: 0; width: min(550px, 100%); padding: 60px 28px 30px; }
 .detail-body h2 { margin: 0; font-size: clamp(27px, 5vw, 43px); line-height: 1.04; letter-spacing: -.05em; }
@@ -975,7 +1052,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .stream-tags { font-size: 0.75rem; color: var(--muted); }
 .stream-q { font-weight: 600; color: var(--accent); font-size: 0.85rem; }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 800; font-size: 11px; margin-right: 6px; }
-.badge-4k { background: #8a2be2; color: #fff; }
+/* Was #8a2be2, a purple. The contract allows ONE accent and every other
+   client badges 4K in it. */
+.badge-4k { background: var(--accent); color: #fff; }
 .badge-1080 { background: #0066ee; color: #fff; }
 .badge-720 { background: #1a9e4a; color: #fff; }
 .badge-sd { background: #555; color: #fff; }
@@ -995,11 +1074,21 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 @media (min-width: 760px) {
   .hero { margin-right: 18px; margin-left: 18px; }
   .hero-content { padding: 70px 54px 45px; }
-  .row-title { margin-left: 26px; }
-  .row-track { padding-right: 26px; padding-left: 26px; }
-  .card { width: 158px; }
+  /* The gutter is a token (:root, near the top). Setting it here rather than
+     re-stating .row-title/.row-track means the >=1600 rule that widens it to
+     the contract's 90 is not silently overridden by this block, which is
+     exactly what happened the first time. */
+  :root { --gutter: 26px; }
+  /* 160, the measured poster width. aspect-ratio 2/3 gives the 240 height. */
+  .card { width: 160px; }
   .detail-body { padding: 74px 48px 46px; }
 }
+
+/* The contract's gutter. DESIGN.md was measured on a 1920 desktop whose
+   content track is 1740 wide -- 90 each side -- and Theme.brs uses the same 90.
+   This MUST sit after the 760px block above: equal specificity, so source order
+   is what decides, and when it sat earlier the 26 won at every width. */
+@media (min-width: 1600px) { :root { --gutter: 90px; } }
 
 /* The nav used to survive down to 700px, then to 900px. Neither was far enough.
    .topnav is overflow-x:auto with the scrollbar hidden, so there is no
@@ -1121,9 +1210,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 /* ── Detail rating chips ─────────────────────────────────────── */
 .detail-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+/* Small OUTLINED pills, per DESIGN.md's detail sheet ("2008 - IMDb 8.9 - Share",
+   small outlined pills). They were filled 6px rectangles in a cold grey, which
+   is why the sheet read like a form and not like the TVs. */
 .detail-chip {
-  border-radius: 6px; padding: 3px 9px;
-  background: rgba(255,255,255,.1); color: #cfcfd4;
+  border-radius: 999px; padding: 3px 10px;
+  background: transparent; border: 1px solid rgba(255,255,255,.25);
+  color: var(--text-body);
   font-size: 12px; font-weight: 700; letter-spacing: .02em;
 }
 .detail-chip-cert { border: 1px solid rgba(255,255,255,.45); background: transparent; color: #fff; }
@@ -1180,7 +1273,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: rgba(255, 255, 255, 0.14); color: #fff; border: 0;
   border-radius: 999px; padding: 6px 14px; cursor: pointer;
 }
-.comic-close:focus-visible { outline: 3px solid var(--accent, #f43f5e); }
+.comic-close:focus-visible { outline: 3px solid var(--accent, #FF3D47); }
 .comic-page { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
 
 /* ── Game screenshots (Games / FLT-2) ────────────────────── */
@@ -1207,197 +1300,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   --accent-glow: rgba(255, 215, 0, 0.4);
 }
 
-/* ── BrightMinds Feature UIs ──────────────────────────────── */
-.bm-stories-layout, .bm-podcast-layout, .bm-family-layout {
-  display: flex;
-  gap: 24px;
-  padding: 40px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.bm-panel {
-  background: var(--surface-soft);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 24px;
-  padding: 32px;
-  flex: 1;
-}
-
-.bm-form { display: flex; flex-direction: column; gap: 16px; margin: 24px 0; }
-.bm-form-row { display: flex; flex-direction: column; gap: 8px; }
-.bm-form-row label { font-weight: 600; color: var(--muted); font-size: 14px; }
-.bm-form-row input, .bm-form-row select, .bm-form-row textarea {
-  background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.1);
-  padding: 12px 16px;
-  border-radius: 12px;
-  color: #fff;
-  font-size: 16px;
-}
-.bm-form-row input:focus, .bm-form-row select:focus, .bm-form-row textarea:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-
-.bm-library-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.bm-story-card {
-  background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 16px;
-  padding: 16px;
-  text-align: left;
-  transition: transform 0.2s, box-shadow 0.2s;
-  cursor: pointer;
-}
-.bm-story-card:hover, .bm-story-card:focus {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0,0,0,0.4);
-  border-color: var(--accent);
-}
-.bm-story-card-emoji { font-size: 32px; margin-bottom: 8px; }
-.bm-story-card-title { font-weight: 700; margin-bottom: 4px; }
-.bm-story-card-meta { font-size: 12px; color: var(--muted); }
-
-.bm-reader { flex: 1.5; display: flex; flex-direction: column; }
-.bm-reader-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-.bm-reader-title { font-size: 20px; font-weight: 700; flex: 1; }
-
-.bm-book {
-  flex: 1;
-  background: #111;
-  border-radius: 20px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  border: 1px solid rgba(255,255,255,0.1);
-}
-.bm-page-art {
-  height: 45vh;
-  display: grid;
-  place-items: center;
-  font-size: 120px;
-  background: linear-gradient(135deg, #2a0845 0%, #6441A5 100%);
-  transition: background 1s ease;
-}
-.bm-page-text {
-  padding: 32px;
-  font-size: 22px;
-  line-height: 1.6;
-  flex: 1;
-}
-.bm-page-number { font-size: 14px; color: var(--muted); margin-bottom: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;}
-.bm-page-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 32px;
-  background: rgba(255,255,255,0.02);
-  border-top: 1px solid rgba(255,255,255,0.05);
-}
-
-.bm-page-turning .bm-page-art { transform: rotateY(-15deg); opacity: 0.5; }
-.bm-page-turning .bm-page-text { opacity: 0; transform: translateX(20px); }
-.bm-page-art, .bm-page-text { transition: all 0.4s ease; }
-
-/* Podcast Studio */
-.bm-hosts { display: flex; gap: 40px; justify-content: center; margin: 40px 0; }
-.bm-host { text-align: center; }
-.bm-host-avatar { font-size: 80px; margin-bottom: 16px; }
-.bm-host-name { font-weight: 700; font-size: 20px; margin-bottom: 16px; }
-.bm-sound-bars { display: flex; gap: 4px; justify-content: center; height: 40px; align-items: flex-end;}
-.bm-sound-bars span { width: 8px; height: 4px; background: var(--muted); border-radius: 4px; transition: height 0.1s ease; }
-.bm-bars-active span { background: var(--accent); }
-
-.bm-transcript {
-  margin-top: 32px;
-  flex: 1;
-  background: var(--surface);
-  border-radius: 16px;
-  padding: 24px;
-  overflow-y: auto;
-  max-height: 400px;
-}
-.transcript-line { margin-bottom: 16px; opacity: 0.5; transition: opacity 0.3s; display: flex; gap: 16px; }
-.transcript-line.active { opacity: 1; }
-.tl-host { font-weight: 700; color: var(--accent); min-width: 80px; }
-.tl-text { flex: 1; line-height: 1.5; }
-
-/* Family Tree */
-.bm-family-sidebar { flex: 1; overflow-y: auto; max-height: 85vh; }
-.bm-member-detail { flex: 1; position: sticky; top: 40px; }
-.bm-generation { margin-bottom: 32px; }
-.bm-gen-label { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;}
-.bm-gen-row { display: flex; flex-wrap: wrap; gap: 16px; }
-.bm-member-card { display: flex; flex-direction: column; align-items: center; text-align: center; background: none; border: none; cursor: pointer; opacity: 0.8; transition: opacity 0.2s, transform 0.2s; width: 100px;}
-.bm-member-card:hover, .bm-member-card:focus { opacity: 1; transform: scale(1.05); }
-.bm-member-avatar { width: 64px; height: 64px; border-radius: 32px; background: var(--surface); display: grid; place-items: center; font-size: 24px; font-weight: 700; margin-bottom: 8px; border: 2px solid transparent;}
-.bm-member-card:focus .bm-member-avatar { border-color: var(--accent); }
-.bm-member-name { font-weight: 600; font-size: 14px; line-height: 1.2; }
-.bm-member-years { font-size: 12px; color: var(--muted); margin-top: 4px; }
-
-.bm-profile-header { display: flex; gap: 24px; align-items: center; margin-bottom: 32px; }
-.bm-profile-avatar-large { width: 96px; height: 96px; border-radius: 48px; background: var(--surface); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
-.bm-transmute-wrap { margin-top: 32px; padding: 24px; background: rgba(255,61,71, 0.05); border: 1px solid var(--accent-glow); border-radius: 16px; }
-.bm-transmute-result { margin-top: 16px; line-height: 1.6; font-style: italic; }
-
-
-/* ── Phase 4 Delight CSS ──────────────────────────────────── */
-
-/* Circadian Engine */
-html.circadian-night {
-  --bg: #120e0a;
-  --surface: #1f1812;
-  --surface-soft: #17110d;
-}
-/* The warm surface tokens above are the whole of the night theme now. There
-   used to be `filter: sepia(.2) hue-rotate(-5deg) saturate(1.1)` on <body>
-   as well. Two reasons it is gone: it hue-rotated #FF3D47, and DESIGN.md is
-   explicit that this red reading identically on all five clients is the one
-   thing that must not drift (a mismatch here was a real bug on 27 Aug) — so
-   after 8pm the web quietly stopped matching the Roku. And a filter on <body>
-   promotes the entire page to its own composite layer, repainted on every
-   scroll, for decoration nobody asked for. */
-
-/* Voice Button */
-#voice-btn {
-  font-size: 20px;
-  transition: transform 0.2s, text-shadow 0.2s;
-}
-#voice-btn.recording {
-  color: var(--accent);
-  text-shadow: 0 0 15px var(--accent);
-  animation: pulse-mic 1s infinite alternate;
-}
-@keyframes pulse-mic {
-  0% { transform: scale(1); }
-  100% { transform: scale(1.2); }
-}
-
-/* Modal Dialog Base */
-.bm-dialog {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 24px;
-  padding: 40px;
-  max-width: 400px;
-  margin: auto;
-  /* backdrop-filter: blur(20px) was declared here on a fully opaque
-     var(--surface) background. It could never have rendered. */
-  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-}
-.bm-dialog::backdrop {
-  background: rgba(0,0,0,0.8);
-  backdrop-filter: blur(4px);
-}
+/* DELETED, 4 Sep 2026: 191 lines of BrightMinds (.bm-*) and "Phase 4 Delight"
+   rules that styled brightminds.js and delight.js -- two files index.html
+   stopped loading, and which are now deleted from the repo. Nothing in any
+   shipped script referenced a single one of these classes. */
 
 /* Deleted: a second `.hero::after` ("Volumetric Fog Hero") and a second
    `.hero-art` transition used to sit here, 880 lines below the originals.

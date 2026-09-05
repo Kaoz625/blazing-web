@@ -205,12 +205,21 @@ if not dropped:
     ok(f'none of the {len(set(refs) | set(shell))} files the app loads are '
        f'dropped by build-tvs.sh')
 
-if 'admin.js' not in excludes:
-    bad('build-tvs.sh no longer excludes admin.js. It is dead code that '
-        'imports a getConfig locker.js does not export — a trap inside a TV '
-        'package. Either keep excluding it or delete the file.')
+# 4 Sep 2026: this used to assert that build-tvs.sh still EXCLUDED admin.js.
+# The file was taken up on that advice -- "Either keep excluding it or delete
+# the file" -- so admin.js, brightminds.js, delight.js and the five patch*.py
+# scripts are deleted, and an exclude for a file that does not exist guards
+# nothing. The check now asserts the stronger thing: they must not come back.
+_GONE = ['admin.js', 'brightminds.js', 'delight.js',
+         'patch.py', 'patch_web.py', 'patch_sdui.py',
+         'patch_profiles.py', 'patch_player_bridge.py']
+_back = [n for n in _GONE if Path(n).exists()]   # run from the repo root, like the reads above
+if _back:
+    bad('deleted dead code is back in the tree: ' + ', '.join(_back) + '. '
+        'None of these were loaded by index.html; they were served on the '
+        'public site for nothing. Delete them again, or wire them up properly.')
 else:
-    ok('build-tvs.sh still excludes admin.js')
+    ok(f'all {len(_GONE)} deleted dead files are still gone')
 
 # ── 6. the non-app directories stay out of the TV packages ──────────────────
 # The bug build-tvs.sh's header records twice, caught a third time on 2 Sep
@@ -253,11 +262,11 @@ for name, what in (
             f'exclude with no slash matches the basename exactly.')
     else:
         ok(f'build-tvs.sh excludes {name}')
-if 'admin.js' in refs:
-    bad('index.html now loads ./admin.js, which build-tvs.sh strips from every '
-        'TV package. The website would work and every television would not.')
+_loaded_dead = [n for n in _GONE if n in refs]
+if _loaded_dead:
+    bad('index.html loads a deleted file: ' + ', '.join(_loaded_dead) + '.')
 else:
-    ok('index.html does not load admin.js')
+    ok('index.html loads none of the deleted files')
 
 print()
 print(f'{len(failures)} failure(s), {len(warnings)} warning(s)')

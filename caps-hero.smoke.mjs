@@ -417,6 +417,14 @@ const hero = await page.evaluate(() => {
     height: r ? Math.round(r.height) : null,
     rowsLeft: rr ? Math.round(rr.left) : null,
     rowsWidth: rr ? Math.round(rr.width) : null,
+    // Where the first CARD actually starts. #app-main is no longer capped
+    // below the viewport, so #rows itself is now full width and its own width
+    // can no longer show that the content is inset -- the inset moved into the
+    // row track's gutter padding. This is the number that still can.
+    firstCardLeft: (() => {
+      const c = document.querySelector('#rows .card');
+      return c ? Math.round(c.getBoundingClientRect().left) : null;
+    })(),
     clientWidth: document.documentElement.clientWidth,
     title: (document.querySelector('#home-hero-title') || {}).textContent || '',
     eyebrow: (document.querySelector('#home-hero-eyebrow') || {}).textContent || '',
@@ -445,14 +453,19 @@ ok(hero.eyebrow === 'Continue watching' && hero.title === 'Continue title one',
 ok(hero.progressShown && hero.progressWidth === '25%',
   'the resume position came with it', `(${hero.progressWidth})`);
 
-// FULL BLEED, measured at 1600px where #app-main is capped at 1440 — so a
-// width:100% band would be 1440 wide and inset, and this cannot pass by accident.
+// FULL BLEED, measured at 1600px. #app-main used to be capped at 1440, so a
+// width:100% band would have been 1440 wide and inset. On 4 Sep 2026 that cap
+// went to min(1920, 100%), because every size in DESIGN.md was measured on a
+// 1920 desktop and a 1440 column made all of them unreachable. So the band and
+// the container are now the same width, and the thing that proves the break-out
+// is the GUTTER: at >=1600 the row track is inset by 90px (the contract's
+// gutter, and the Roku's) while the hero stays flush at 0.
 ok(Math.abs(hero.left) <= 1 && Math.abs(hero.width - hero.clientWidth) <= 1,
   'it is FULL-BLEED: flush to both edges of the viewport',
   `(left ${hero.left}, ${hero.width} vs viewport ${hero.clientWidth})`);
-ok(hero.rowsWidth < hero.clientWidth - 20,
-  'and the rows below it are still inside the 1440px column — the band really broke out',
-  `(#rows ${hero.rowsWidth} wide at left ${hero.rowsLeft})`);
+ok(hero.firstCardLeft !== null && hero.firstCardLeft >= 80,
+  'and the row content below it is still inset by the gutter — the band really broke out',
+  `(first card at left ${hero.firstCardLeft}, hero at left ${hero.left})`);
 ok(hero.height >= 320, 'it is a band, not a strip', `(${hero.height}px tall)`);
 
 ok(hero.iframes === 0 && hero.pageIframes === 0,

@@ -212,6 +212,26 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # Take the dev-only files OUT of the checkout before the artifact is made.
+      # `path: .` below is deliberate and its reasoning still holds -- but it
+      # inherited one thing nobody chose: the 19 *.smoke.mjs harnesses, 348 KB
+      # of Playwright test code, were being served at
+      # kaoz625.github.io/blazing-web/gate.smoke.mjs and friends. They hold no
+      # credentials (checked: every "password"/"API_KEY" hit is a fixture string
+      # or an error message), so this is not a leak -- but a public site should
+      # not ship its own test suite, and each file spells out our fleet contract
+      # endpoint by endpoint.
+      #
+      # Deleting rather than excluding, because upload-pages-artifact takes no
+      # exclude list; and this is a throwaway checkout on its own runner, so
+      # nothing downstream sees the removal.
+      - name: Drop dev-only files from the published artifact
+        run: |
+          rm -f ./*.smoke.mjs
+          rm -f ./build-tvs.sh ./package.json ./package-lock.json
+          rm -rf ./scripts
+          echo "published files:"; ls -1 | head -40
+
       - uses: actions/upload-pages-artifact@v5
         with:
           # The whole repo, because that is exactly what the legacy publisher
