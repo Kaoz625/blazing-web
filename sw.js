@@ -50,7 +50,13 @@
 // holding the v22 profile.js has no heartbeat at all and stays frozen — a cache
 // hygiene bump, not a safety one, but the fix does not reach an installed app
 // without it.
-const CACHE = 'blazing-shell-v23';
+// v24: resource hints and the script order in index.html, and the system font in
+// styles.css. Pure cache HYGIENE — nothing here is a safety fix, and the
+// network-first code branch below already lands all three on the next load. The
+// bump is here to evict the v23 copies rather than leave them to age out, and
+// because the rule in the block comment below says to bump whenever the shell
+// changes.
+const CACHE = 'blazing-shell-v24';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

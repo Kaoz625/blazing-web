@@ -3,6 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- The home screen's first API byte otherwise waits on a cold DNS lookup
+       and TLS handshake to an origin the browser has never seen. There were
+       no resource hints in this file at all.
+
+       The add-on is here and the fleet is NOT, and that asymmetry is the point.
+       API_BASE (app.js:4) is a hard-coded https://addon.lyreosai.com and
+       BLAZING_API_BASE is read but never written, so the add-on is cross-origin
+       from every host we serve from. The fleet is not: the script below rewrites
+       it to a same-origin /fleet path on blazingstream.lyreosai.com, which is
+       the host most of our traffic actually loads from. A static fleet hint
+       would open a TLS connection there that nothing ever sends a byte down, so
+       that one is emitted from inside the same hostname branch instead.
+
+       `crossorigin` is required, not decoration: every fleet and add-on call is
+       fetch() with credentials:'omit', so the socket the browser must warm is
+       the anonymous-CORS one. Without the attribute it warms the wrong socket
+       and the request opens a second connection anyway. -->
+  <link rel="preconnect" href="https://addon.lyreosai.com" crossorigin>
   <title>Blazing</title>
   <meta name="description" content="Blazing: one clear place for your library." />
   <meta name="theme-color" content="#0A0A0A" />
@@ -28,6 +46,17 @@
     // address, so nothing that worked before changes.
     if (location.hostname === 'blazingstream.lyreosai.com') {
       window.BLAZING_FLEET_BASE = location.origin + '/fleet';
+    } else {
+      // Cross-origin here, so the hint is worth a socket. Injected rather than
+      // written in the markup for the reason above: on blazingstream the fleet
+      // is same-origin and a static tag would warm a connection to a host this
+      // page never calls. Still in <head>, still before any deferred script, so
+      // it lands as early as a markup hint would.
+      var hint = document.createElement('link');
+      hint.rel = 'preconnect';
+      hint.href = 'https://fleet.lyreosai.com';
+      hint.crossOrigin = 'anonymous';
+      document.head.appendChild(hint);
     }
   </script>
 </head>
@@ -640,7 +669,11 @@
        served HTML, and an HTML comment is part of that string. -->
   <!-- Vendored, not a CDN: sw.js precaches it, and Chrome/Edge/Firefox
        cannot play an HLS manifest from a bare <video src> without it. -->
-  <script src="./hls.min.js"></script>
+  <!-- defer, like every one of its neighbours. This is 414 KB and it was the
+       ONE script in the file without it, so it blocked the parser and gated
+       app.js's boot behind its download. defer keeps document order, so
+       window.Hls still exists before app.js runs. -->
+  <script src="./hls.min.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>
