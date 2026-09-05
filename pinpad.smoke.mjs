@@ -5,7 +5,7 @@
 // ReferenceError and the pad stopped dead — it was not "rejecting the wrong
 // length", it was broken. `node --check` passes on that file: syntax is fine and
 // the fault is at runtime. Only a browser can catch it, so this is a browser.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -28,7 +28,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const results = [];
 const check = (n, pass, d = '') => { results.push(pass); console.log(`${pass ? 'ok  ' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 const ctx = await browser.newContext();
 
 // A DEVICE IDENTITY, seeded before the first byte of profile.js runs.

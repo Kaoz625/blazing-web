@@ -25,7 +25,7 @@
 //      is then played;
 //  11. PLAYBACK: a resolver that never answers ends in a visible error, not a
 //      permanent spinner.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -58,7 +58,7 @@ const check = (name, cond, extra = '') => {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${extra ? ' — ' + extra : ''}`);
 };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 async function openApp({ statusReply, requestReply, resolveReply, streams, streamHang } = {}) {
   const ctx = await browser.newContext();

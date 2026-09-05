@@ -9,7 +9,7 @@
 //      screenshots and a working trailer button;
 //   4. a game with no trailer hides the trailer button;
 //   5. search resets to page 1 and "Load more" pages the catalogue.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -59,7 +59,7 @@ const DETAIL = {
   trailer: 'https://media.example.test/g1-trailer.mp4',
 };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 async function openApp({ configured = true, onCall } = {}) {
   const ctx = await browser.newContext();

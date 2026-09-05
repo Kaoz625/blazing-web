@@ -28,7 +28,7 @@
 //   node search.smoke.mjs
 //   BW_DIR=/path/to/checkout node search.smoke.mjs
 //   BW_URL=https://blazingstream.lyreosai.com/app/ node search.smoke.mjs   # the LIVE build
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -131,7 +131,7 @@ check('fleet /search/movie answers', Array.isArray(mv) && mv.length > 0, `${mv ?
 check('fleet /search/series answers', Array.isArray(sr), `${sr ? sr.length : 'null'} metas`);
 check('fleet /emby/search answers', Array.isArray(emby), `${emby ? emby.length : 'null'} metas`);
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 // Only in local mode: send both app.js and profile.js to THIS server instead of

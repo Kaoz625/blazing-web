@@ -9,7 +9,7 @@
 //   4. no stored device credentials at all means the shelf never appears;
 //   5. clicking a card calls /streamtape/resolve and hands the returned URL to
 //      the app's own player.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -44,7 +44,7 @@ const FILES = [
 ];
 const RESOLVED = 'https://cdn.example-streamtape.test/get_video/aaaa1111bbbb.mp4?token=xyz';
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 // Every scenario gets a clean context: the device credentials live in
 // localStorage, which is exactly what decides whether the shelf exists at all.

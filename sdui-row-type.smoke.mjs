@@ -44,7 +44,7 @@
 //
 //   node sdui-row-type.smoke.mjs                            the working tree
 //   BW_DIR=/path/to/checkout node sdui-row-type.smoke.mjs   any other checkout
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -131,7 +131,7 @@ const META = (n, pre, type) => ({
   })),
 });
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 const ctx = await browser.newContext();
 await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));

@@ -43,7 +43,7 @@
  *
  *   node caps-hero.smoke.mjs
  */
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -125,7 +125,7 @@ const CONTINUE = {
 let pass = 0, fail = 0;
 const ok = (cond, what, extra = '') => { cond ? pass++ : fail++; console.log(`${cond ? 'ok  ' : 'FAIL'}  ${what}${extra ? '  ' + extra : ''}`); };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 /** One configured page. `trailerStatus` lets the degrade run answer 404. */
 async function makePage(opts = {}) {
@@ -223,11 +223,50 @@ ok(probe.caps.probeApi === 'navigator.mediaCapabilities.decodingInfo',
   'the probe used the real API, not the canPlayType fallback', `(${probe.caps.probeApi})`);
 
 // A probe that answers YES to everything filters nothing and would pass a
-// count-only test while doing no work. At least one codec must come back false
-// on a runner that genuinely lacks one.
-const anyFalse = [probe.caps.h264, probe.caps.hevc, probe.caps.vp9, probe.caps.av1].some((v) => v === false);
-ok(anyFalse, 'the probe returned at least one NO — it is asking, not rubber-stamping',
-  `h264=${probe.caps.h264} hevc=${probe.caps.hevc} vp9=${probe.caps.vp9} av1=${probe.caps.av1}`);
+// count-only test while doing no work. So make the engine say NO to exactly one
+// codec and check the probe repeats it.
+//
+// THIS USED TO BE `some(v => v === false)` ON THE PLAIN READOUT, and it was a
+// test of the RUNNER, not of the code — its own comment said "on a runner that
+// genuinely lacks one". It passed only because Chrome for Testing is an
+// open-source Chromium build with no proprietary codecs, so h264 and HEVC came
+// back false for free. This repo now drives COMET (see comet.mjs), which is a
+// branded Chrome and decodes all four — exactly like the real televisions this
+// app ships to. The assertion went red without a single line of caps.js
+// changing, which is the definition of a test measuring the wrong thing.
+//
+// Forcing one NO proves the same property on ANY browser: the probe asks the
+// engine and reports the answer, rather than rubber-stamping true.
+const forced = await (async () => {
+  const ctx = await browser.newContext();
+  await ctx.addInitScript(() => {
+    const mc = navigator.mediaCapabilities;
+    const real = mc.decodingInfo.bind(mc);
+    mc.decodingInfo = (cfg) => (
+      cfg && cfg.video && /av01/.test(cfg.video.contentType || '')
+        ? Promise.resolve({ supported: false, smooth: false, powerEfficient: false })
+        : real(cfg));
+    // canPlayType is the documented fallback, and it must not quietly rescue
+    // AV1 behind the stub's back or this proves nothing.
+    const play = HTMLMediaElement.prototype.canPlayType;
+    HTMLMediaElement.prototype.canPlayType = function (t) {
+      return /av01/.test(String(t)) ? '' : play.call(this, t);
+    };
+  });
+  const p2 = await ctx.newPage();
+  await p2.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
+  const out = await p2.evaluate(async () => {
+    const caps = await window.BlazingCaps.probe();
+    return { av1: caps.av1, h264: caps.h264, api: caps.probeApi };
+  });
+  await ctx.close();
+  return out;
+})();
+
+ok(forced.av1 === false, 'a codec the engine refuses comes back NO — the probe asks, it does not rubber-stamp',
+  `av1=${forced.av1} (forced unsupported) h264=${forced.h264} via ${forced.api}`);
+ok(forced.h264 === probe.caps.h264, 'and forcing one codec down does not disturb the others',
+  `h264 forced-run=${forced.h264} plain-run=${probe.caps.h264}`);
 
 ok(probe.caps.maxHeight >= 1080,
   'the ceiling never falls below 1080p, whatever the panel reports',

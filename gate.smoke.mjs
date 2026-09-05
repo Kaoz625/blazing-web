@@ -24,7 +24,7 @@
 // live while /profiles was in flight.
 //
 //   node gate.smoke.mjs
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -68,7 +68,7 @@ const STALE_DEVICE = { status: 404, body: { error: 'unknown device; register fir
 const PENDING = { status: 403, body: { error: 'device enrollment is pending admin approval' } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 /**
  * One browser context per way in. Every https request is answered here — the

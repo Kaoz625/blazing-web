@@ -8,7 +8,7 @@
 // Playwright's page.keyboard.press() dispatches real, trusted key events —
 // the same path a webOS TV's remote driver feeds the page — not a synthetic
 // DOM event a click handler could fake past.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -42,7 +42,7 @@ const META = (n, pre) => ({
   })),
 });
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 await ctx.addInitScript(() => {
   localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-1', token: 'tok' }));

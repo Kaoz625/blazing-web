@@ -9,7 +9,7 @@
 // intercepted, so nothing real is contacted. The camera/mic are Chrome's own
 // fake devices, so RTCPeerConnection gets genuine MediaStreamTracks and the
 // real WebRTC stack runs.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -66,8 +66,12 @@ const STUBS = () => {
   window.RTCPeerConnection.prototype = Real.prototype;
 };
 
-const browser = await chromium.launch({
-  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
+// These three are BROWSER flags, so they go to the Comet spawn as extraArgs
+// rather than to a launch() this repo no longer makes. Same flags, same
+// effect: a fake camera/mic so getUserMedia resolves with nobody present,
+// and autoplay allowed so the party video element actually starts.
+const browser = await launchBrowser({
+  extraArgs: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 });
 
 // A FRESH context per scenario: watch-party.js remembers the joined code in

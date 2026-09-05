@@ -13,7 +13,7 @@
 //   5. an unreadable (licensed/redirected) chapter cannot be opened, and a
 //      readable one opens the reader and turns pages with arrow keys;
 //   6. switching to a Kids profile mid-read closes the reader immediately.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -61,7 +61,7 @@ const CHAPTERS_OBJECT_SHAPE = {
 };
 const PAGES = { pages: ['/manga/image?ch=c1&p=1', '/manga/image?ch=c1&p=2', 'https://cdn.example.test/absolute-page.jpg'] };
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 
 async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, onCall } = {}) {
   const ctx = await browser.newContext();

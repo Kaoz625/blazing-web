@@ -24,7 +24,7 @@
 // stored credential is BYTE-IDENTICAL afterwards. The network is stubbed; this
 // never touches the real fleet — a live 404 test would need a real dead id, and
 // a live 401 burns the register rate limit for nothing.
-import { chromium } from 'playwright';
+import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -54,7 +54,7 @@ const DEVICE = { id: 'dev-web-beat', token: 'tok-web-beat' };
 // object comparison and this catches it.
 const STORED = JSON.stringify(DEVICE);
 
-const browser = await chromium.launch();
+const browser = await launchBrowser();
 const ctx = await browser.newContext();
 
 // An identity, seeded before the first byte of profile.js runs. boot() only
