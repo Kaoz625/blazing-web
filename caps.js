@@ -567,7 +567,7 @@
     return typeof u === 'string' && /^https:\/\//i.test(u);
   }
 
-  function parseStream(s, caps) {
+  function parseStream(s, caps, inspected) {
     var name = (s && s.name) || '';
     var title = (s && s.title) || (s && s.description) || '';
     var blob = (name + ' ' + title).toLowerCase();
@@ -595,6 +595,23 @@
       rejected: '',
       score: 0
     };
+    // The caller validates the response mode, age and language choices. Raw
+    // provider fields alone must never override the device's format checks.
+    if (typeof inspected === 'function' && inspected(s)) {
+      var evidence = s._mediaEvidence;
+      var video = evidence && evidence.video;
+      if (video && video.packets > 0 && video.width > 0 && video.height > 0) {
+        info.height = Math.min(video.width, video.height);
+        var measuredCodec = String(video.codec || '').toLowerCase();
+        info.codec = ({ h264: 'h264', avc: 'h264', hevc: 'hevc', h265: 'hevc', av1: 'av1', vp9: 'vp9' })[measuredCodec] || '';
+        var audio = Array.isArray(evidence.audio) ? evidence.audio.filter(function (track) { return track.packets > 0; }) : [];
+        var english = audio.filter(function (track) { return /^(en|eng)(?:[-_]|$)/i.test(String(track.language || '')); });
+        var selectedAudio = english.length ? english : audio;
+        info.audio = selectedAudio.some(function (track) { return /^(aac|mp3|opus|vorbis)$/i.test(track.codec || ''); }) ? 'aac'
+          : (selectedAudio[0] && /^(truehd|dts|eac3|ac3)$/i.test(selectedAudio[0].codec || '') ? selectedAudio[0].codec.toLowerCase() : '');
+        if (english.length) info.foreign = false;
+      }
+    }
     info.playable = isHttps(info.url);
     info.score = score(info, caps);
     return info;
@@ -698,6 +715,8 @@
    *                 dead_links localStorage list app.js already keeps.
    * opts.showAll    keep the rejects, marked, at the bottom — the "show every
    *                 stream" escape hatch the Roku picker has.
+   * opts.inspected  caller-validated fresh sample predicate. Measured video
+   *                 dimensions and codecs then take priority over the name.
    * opts.cap        how many raw entries to parse at all. A popular title can
    *                 return well over a thousand and each one costs a handful of
    *                 regexes; 1200 is StreamRanker's measured number for its slow
@@ -729,7 +748,7 @@
     }
 
     for (var j = 0; j < work.length; j++) {
-      var info = parseStream(work[j], caps);
+      var info = parseStream(work[j], caps, opts.inspected);
       var reason = rejectReason(info, caps);
       if (!reason) {
         if (dead.indexOf(info.url) !== -1) info.score -= 100000;

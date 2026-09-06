@@ -898,6 +898,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .detail-body { position: relative; z-index: 0; width: min(550px, 100%); padding: 60px 28px 30px; }
 .detail-body h2 { margin: 0; font-size: clamp(27px, 5vw, 43px); line-height: 1.04; letter-spacing: -.05em; }
 .detail-copy { margin: 14px 0 0; color: #dddde0; font-size: 15px; line-height: 1.55; }
+#detail-copy.is-collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.detail-copy-toggle { min-width: 88px; min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: #f1f1f3; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.detail-copy-toggle:focus-visible { outline: 2px solid var(--accent, #ff3d47); outline-offset: 3px; }
 .source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(255,61,71,.5); border-radius: 999px; padding: 5px 9px; color: #fff; background: rgba(255,61,71,.16); font-size: 11px; font-weight: 800; }
 .detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
 
@@ -968,6 +971,24 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: 14px; font-weight: 800; transition: background var(--transition); }
 .player-close:hover { background: rgba(255,61,71,.3); }
 .player-title { overflow: hidden; color: #fff; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
+.player-bar { flex-wrap: wrap; }
+.stream-preferences, .stream-track-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.stream-preferences { margin: 18px 0; }
+.stream-preference-field { display: grid; gap: 6px; min-width: 145px; max-width: 100%; color: var(--muted); font-size: 13px; }
+.stream-preference-select, .stream-audio-track, .stream-subtitle-track { min-height: 44px; width: 100%; max-width: 260px; border: 1px solid rgba(255,255,255,.25); border-radius: 10px; padding: 9px 30px 9px 12px; background: #171719; color: #fff; font: inherit; }
+.stream-preference-select:focus-visible, .stream-audio-track:focus-visible, .stream-subtitle-track:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.stream-track-controls { margin-left: auto; pointer-events: auto; }
+.stream-track-controls .stream-preference-field { color: #eee; }
+.stream-track-notice, .stream-check-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.stream-check-status { margin: 12px 0 8px; color: var(--text); font-size: 13px; }
+.stream-check-coverage { display: flex; flex-wrap: wrap; gap: 8px; }
+.stream-check-coverage span { border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 6px 9px; font-size: 12px; color: var(--muted); }
+.stream-sample-proof { margin: 8px 0 0; color: #c9d8c6; font-size: 12px; line-height: 1.5; }
+@media (max-width: 600px) {
+  .stream-preference-field { flex: 1 1 130px; min-width: 0; }
+  .stream-track-controls { flex: 1 1 100%; margin-left: 0; }
+  .player-title { flex: 1; min-width: 0; }
+}
 .player-stage { position: relative; display: grid; flex: 1; place-items: center; }
 .video { width: 100%; height: 100%; background: #000; opacity: 0; transition: opacity .2s; }
 .video.ready { opacity: 1; }

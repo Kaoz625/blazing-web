@@ -654,6 +654,7 @@
         <p id="detail-year" class="eyebrow"></p>
         <h2 id="detail-title"></h2>
         <p id="detail-copy" class="detail-copy"></p>
+        <button id="detail-copy-toggle" class="detail-copy-toggle" type="button" aria-expanded="false" aria-controls="detail-copy" hidden>Show more</button>
         <div class="detail-actions">
           <button id="detail-play" class="primary-button" type="button">Play</button>
           <button id="detail-save" class="secondary-button" type="button">My list</button>
@@ -664,6 +665,8 @@
           </select>
           <a id="detail-source-link" class="text-link" target="_blank" rel="noreferrer" hidden>Open source page</a>
         </div>
+        <div id="detail-stream-preferences"></div>
+        <div id="detail-verification" class="stream-verification" aria-live="polite"></div>
         <p id="detail-status" class="detail-status" role="status"></p>
         <div id="detail-streams" class="detail-streams"></div>
       </div>
@@ -715,6 +718,8 @@
        app.js's boot behind its download. defer keeps document order, so
        window.Hls still exists before app.js runs. -->
   <script src="./hls.min.js" defer></script>
+  <script src="./stream-preferences.js" defer></script>
+  <script src="./stream-evidence.js" defer></script>
   <script src="./app.js" defer></script>
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>

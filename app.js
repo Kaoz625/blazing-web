@@ -2400,14 +2400,24 @@ function renderEpisodeControls(meta) {
   }
 }
 
+function setDetailCopy(text) {
+  detailCopy.textContent = text;
+  detailCopy.classList.toggle('is-collapsed', text.length > 280);
+  const toggle = $('#detail-copy-toggle');
+  toggle.hidden = text.length <= 280;
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Show more';
+}
+
 function openDetail(meta) {
   if (!ratingAllowed(meta.contentRating)) return showToast('This title is not available for this profile.', 'error');
   state.selected = meta;
+  $('#detail-verification')?.replaceChildren();
   state.selectedEpisode = null;
   clearEpisodeControls();
   detailTitle.textContent = meta.name;
   detailYear.textContent = meta.releaseInfo;
-  detailCopy.textContent = meta.description || 'Open this title to check available streams.';
+  setDetailCopy(meta.description || 'Open this title to check available streams.');
   setBackground(detailArt, meta.background || meta.poster);
   const source = sourceLabel(meta);
   detailSource.hidden = !source;
@@ -2444,7 +2454,7 @@ function openDetail(meta) {
       showToast('This title is not available for this profile.', 'error');
       return;
     }
-    if (meta.description) detailCopy.textContent = meta.description;
+    if (meta.description) setDetailCopy(meta.description);
     setBackground(detailArt, meta.background || meta.poster);
     renderRatingChips(meta);
     renderEpisodeControls(meta);
@@ -2480,6 +2490,7 @@ function closeDetail() {
   state.selectedEpisode = null;
   clearEpisodeControls();
   $('#detail-streams').innerHTML = '';
+  $('#detail-verification')?.replaceChildren();
 }
 
 const EDU_ID_PREFIX = 'yt:edu:';
@@ -2567,6 +2578,12 @@ async function resolveEduStream(id) {
 const FOREIGN_DUB = /(?:^|[^a-z0-9])(?:rus|russian|ita|italian|latino|french|dublado|hindi|tamil|telugu)(?:[^a-z0-9]|$)/i;
 
 let streamsRequest = 0;
+const sampledStreams = new WeakSet();
+function rememberSampledStreams(result) {
+  for (const stream of result.streams) {
+    if (window.BlazingStreamEvidence?.inspected(stream, result.verification, result.preferences)) sampledStreams.add(stream);
+  }
+}
 
 async function loadStreams(meta) {
   const request = ++streamsRequest;
@@ -2576,6 +2593,7 @@ async function loadStreams(meta) {
     && (state.selectedEpisode?.id || meta.id) === contentId && detailDialog.open;
   const container = $('#detail-streams');
   container.innerHTML = '';
+  $('#detail-verification')?.replaceChildren();
   resetQualitySelect();
   if (isMwp(meta)) return;
 
@@ -2583,8 +2601,11 @@ async function loadStreams(meta) {
   try {
     // `let`, because the capability filter below replaces this list with the
     // rows this device can actually decode.
-    let streams = await resolveStreams(meta, contentId);
+    const result = await resolveStreams(meta, contentId);
+    let streams = result.streams;
     if (!isCurrent()) return;
+    window.BlazingStreamEvidence?.render($('#detail-verification'), result.verification, result.preferences);
+    rememberSampledStreams(result);
     if (!streams.length) {
       detailStatus.textContent = 'No compatible stream available.';
       return;
@@ -2623,7 +2644,7 @@ async function loadStreams(meta) {
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
       if (!isCurrent()) return;
-      ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks });
+      ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) });
       streams = ranked.streams.map((info) => info.raw);
       if (!streams.length) {
         // Every row was rejected. Say WHICH ceiling did it, because "no
@@ -2658,7 +2679,7 @@ async function loadStreams(meta) {
       row.dataset.quality = qualityOf(s);
       if (deadLinks.includes(s.url)) row.classList.add('dead');
 
-      const label = plainText(s.name, 'SD');
+      const label = sampledStreams.has(s) ? qualityOf(s) : plainText(s.name, 'SD').replace(/[✓✔✅]\s*/g, '');
       const title = plainText(s.title);
       let badgeClass = 'badge-sd';
       if (/4k|2160/i.test(label)) badgeClass = 'badge-4k';
@@ -2685,6 +2706,10 @@ async function loadStreams(meta) {
       seeders.textContent = seedMatch ? `${seedMatch[1]} seeders` : '';
       metaLine.append(size, seeders);
       info.append(qualityLine, titleLine, metaLine);
+      const sample = window.BlazingStreamEvidence?.description(s, result.verification, result.preferences);
+      if (sample) {
+        const proof = el('p', 'stream-sample-proof'); proof.textContent = sample; info.append(proof);
+      }
       row.appendChild(info);
 
       row.addEventListener('click', () => {
@@ -2731,10 +2756,14 @@ async function loadStreams(meta) {
 }
 
 async function resolveStreams(meta, contentId = meta.id) {
+  const preferences = window.BlazingStreamPreferences?.current()
+    || { profileId: state.profileId, audio: 'english', subtitles: 'english' };
+  if (!state.profileId || preferences.profileId !== state.profileId) throw new Error('Choose a profile first.');
+  const query = window.BlazingStreamPreferences?.query() || 'audio=en&sub=en';
   const data = await fetchJSON(
-    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json`
+    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${query}`
   );
-  return Array.isArray(data.streams) ? data.streams : [];
+  return { streams: Array.isArray(data.streams) ? data.streams : [], verification: data.verification, preferences };
 }
 
 /**
@@ -2827,8 +2856,10 @@ async function playSelected() {
   }
   detailStatus.textContent = 'Checking direct streams…';
   try {
-    let streams = await resolveStreams(meta, contentId);
+    const result = await resolveStreams(meta, contentId);
+    let streams = result.streams;
     if (!isCurrent()) return;
+    rememberSampledStreams(result);
     const isDead = deadLinkProbe();
     const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
 
@@ -2844,7 +2875,7 @@ async function playSelected() {
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
       if (!isCurrent()) return;
-      streams = window.BlazingCaps.rankStreams(streams, caps, { deadLinks }).streams.map((i) => i.raw);
+      streams = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) }).streams.map((i) => i.raw);
     } else {
       const getPenalty = (s) => {
         if (deadLinks.includes(s.url)) return 1000;
@@ -3022,6 +3053,7 @@ const Platform = {
 let hlsInstance = null;
 
 function destroyHls() {
+  window.BlazingStreamPreferences?.resetPlayer();
   if (!hlsInstance) return;
   try { hlsInstance.destroy(); } catch (e) {}
   hlsInstance = null;
@@ -3068,6 +3100,7 @@ function attachSource(url, declared) {
   if (!looksLikeHls(url, declared)) {
     video.src = url;
     video.load();
+    window.BlazingStreamPreferences?.bindPlayer(video);
     return '';
   }
   if (window.Hls && window.Hls.isSupported()) {
@@ -3076,6 +3109,7 @@ function attachSource(url, declared) {
   if (nativeHlsOnly()) {
     video.src = url;
     video.load();
+    window.BlazingStreamPreferences?.bindPlayer(video);
     return '';
   }
   // Say which piece is missing. "Cannot play" alone sent people hunting for a
@@ -3097,6 +3131,7 @@ function attachViaHlsJs(url) {
   });
   hls.loadSource(url);
   hls.attachMedia(video);
+  window.BlazingStreamPreferences?.bindPlayer(video, hls);
   return '';
 }
 
@@ -3305,6 +3340,9 @@ const qualitySelect = $('#quality-select');
 
 /** One label per stream, from whatever the name and title happen to say. */
 function qualityOf(stream) {
+  if (sampledStreams.has(stream)) {
+    return ({ '2160p': '4K', '1080p': '1080p', '720p': '720p', '480p': 'SD' })[stream._verified.quality] || 'Other';
+  }
   const hay = `${stream.name || ''} ${stream.title || ''}`;
   if (/2160|4k|uhd/i.test(hay)) return '4K';
   if (/1080|fhd/i.test(hay)) return '1080p';
@@ -3977,7 +4015,18 @@ $$('[data-view]').forEach((button) => {
 $('#menu-button').addEventListener('click', openDrawer);
 $('#drawer-backdrop').addEventListener('click', closeDrawer);
 $('#detail-close').addEventListener('click', closeDetail);
+$('#detail-copy-toggle').addEventListener('click', (event) => {
+  const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+  event.currentTarget.setAttribute('aria-expanded', String(expanded));
+  event.currentTarget.textContent = expanded ? 'Show less' : 'Show more';
+  detailCopy.classList.toggle('is-collapsed', !expanded);
+});
 $('#detail-play').addEventListener('click', playSelected);
+window.BlazingStreamPreferences?.mountDetail($('#detail-stream-preferences'));
+document.addEventListener('blazing-stream-preferences-changed', () => {
+  ++playRequest;
+  if (state.selected && detailDialog.open) loadStreams(state.selected);
+});
 $('#detail-save').addEventListener('click', () => state.selected && toggleMyList(state.selected));
 $('#detail-upscale').addEventListener('click', requestUpscale);
 // A SECOND listener on #player-close rather than an edit to the telemetry one a

@@ -55,12 +55,17 @@ mkdir -p "$OUT"
 # `__pycache__/` is the same shape — untracked, invisible in `git status`
 # since it is now gitignored, and copied straight in by `rsync -a`.
 # .github/checks/assets.py asserts both of these names stay in this list.
-rsync -a \
+# Package reviewed tracked files only; parallel work may add unfinished modules.
+git -C "$ROOT" ls-files -z | rsync -a --from0 --files-from=- \
   --exclude '.git' --exclude '.wrangler' --exclude 'node_modules' \
-  --exclude 'dist' --exclude '*.smoke.mjs' \
+  --exclude '.git/***' --exclude '.wrangler/***' --exclude 'node_modules/***' \
+  --exclude 'dist' --exclude '*.smoke.mjs' --exclude '*.test.*' \
+  --exclude 'dist/***' \
   --exclude 'build-tvs.sh' --exclude '.DS_Store' \
   --exclude '.claude' --exclude '.omc' --exclude '.codex' --exclude '.gitignore' \
+  --exclude '.claude/***' --exclude '.omc/***' --exclude '.codex/***' \
   --exclude '*.md' --exclude '.github' --exclude '__pycache__' \
+  --exclude '.github/***' --exclude '__pycache__/***' --exclude 'scripts/***' \
   --exclude 'package.json' --exclude 'package-lock.json' --exclude 'scripts' --exclude 'comet.mjs' \
   "$ROOT"/ "$STAGE"/
 
