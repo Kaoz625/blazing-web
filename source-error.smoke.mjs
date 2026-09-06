@@ -38,11 +38,13 @@ const waitFor = async (ready) => {
 let browser;
 let releaseMovie;
 let releaseEpisode;
+let releasePlayback;
 try {
   browser = await launchBrowser();
   const ctx = await browser.newContext({ serviceWorkers: 'block' });
   let movieCalls = 0;
   let holdMovie = false;
+  let holdPlayback = false;
   const requests = [];
   await ctx.route('**/*', async (route) => {
     const url = new URL(route.request().url());
@@ -69,6 +71,7 @@ try {
           await new Promise((resolve) => { releaseEpisode = resolve; });
           return reply(route, { streams: [], retryable: true }, 503);
         }
+        if (id === 'tt302' && holdPlayback) await new Promise((resolve) => { releasePlayback = resolve; });
         return reply(route, source(id));
       }
       return reply(route, { metas: [], items: [], catalogs: [] });
@@ -81,6 +84,10 @@ try {
   page.on('pageerror', (error) => faults.push(error.message));
   await page.goto(`${base}/index.html`);
   await selectProfile(page);
+  await page.evaluate(() => {
+    const url = 'https://cdn.example.test/tt301.mp4';
+    localStorage.setItem('dead_links', JSON.stringify({ [`${url.length}~${url.slice(-28)}`]: Math.floor(Date.now() / 1000) }));
+  });
   await page.getByRole('button', { name: 'View Retry Movie', exact: true }).click();
   const retry = page.getByRole('button', { name: 'Retry sources', exact: true });
   await retry.waitFor();
@@ -91,6 +98,7 @@ try {
   assert.equal(movieCalls, 2, 'Retry makes a fresh lookup for this title');
   assert.match(await page.locator('#detail-streams').innerText(), /tt301/);
   assert.equal(await retry.count(), 0, 'Successful retry replaces the error control');
+  assert.equal(await page.locator('#detail-streams .stream-row.dead').count(), 1, 'Timestamped broken-link marks render without an array-format crash');
   console.log('PASS 503 source lookup → real Retry sources click → valid source row');
 
   await page.locator('#detail-close').click();
@@ -106,6 +114,20 @@ try {
   assert.match(await page.locator('#detail-streams').innerText(), /tt302/);
   assert.equal(await retry.count(), 0, 'Old title failure cannot replace current sources');
   console.log('PASS late failure from former title leaves current source rows intact');
+
+  holdPlayback = true;
+  await page.locator('#detail-play').click();
+  await waitFor(() => releasePlayback);
+  await page.locator('#detail-close').click();
+  holdMovie = false;
+  await page.getByRole('button', { name: 'View Retry Movie', exact: true }).click();
+  await page.locator('#detail-streams .stream-row').waitFor();
+  const oldPlayResponse = page.waitForResponse((response) => response.url().includes('/stream/movie/tt302.json'));
+  releasePlayback(); await oldPlayResponse;
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('#player').isHidden(), true, 'A late Play reply cannot start the previous title');
+  assert.equal(await page.locator('#detail-title').innerText(), 'Retry Movie');
+  console.log('PASS late Play reply cannot start a title after leaving it');
 
   await page.locator('#detail-close').click();
   await page.getByRole('button', { name: 'View Episode Show', exact: true }).click();
@@ -123,6 +145,7 @@ try {
 } finally {
   if (releaseMovie) releaseMovie();
   if (releaseEpisode) releaseEpisode();
+  if (releasePlayback) releasePlayback();
   if (browser) await browser.close();
   await new Promise((resolve) => server.close(resolve));
 }

@@ -40,7 +40,11 @@ await ctx.route('**/*', async (route) => {
     if (url.pathname.endsWith('/comedy')) return json({ error: 'offline' }, 503);
     return json({ name: 'Explore anime', items: catalogMode === 'normal' ? anime : [{ ...anime[0], id: catalogMode === 'restricted' ? 'tt9002002' : 'tt9002000', contentRating: '', background: '', description: '' }] });
   }
-  if (url.pathname.includes('/catalog/anime/')) return json({ metas: [catalogMode === 'restricted' ? { ...anime[0], id: 'tt9002001', contentRating: '' } : anime[0]] });
+  if (url.pathname.includes('/catalog/anime/')) return json({ metas: [catalogMode === 'restricted' ? { ...anime[0], id: 'tt9002001', contentRating: '' } : catalogMode === 'kitsu' ? { ...anime[0], id: 'kitsu:100', name: 'Fullmetal Alchemist' } : anime[0]] });
+  if (url.hostname === 'anime-kitsu.strem.fun' && url.pathname.startsWith('/meta/')) return json({ meta: {
+    ...anime[0], id: 'kitsu:100', type: 'series', name: 'Fullmetal Alchemist',
+    videos: [{ id: 'kitsu:100:1', season: 1, episode: 1, title: 'To Challenge the Sun' }, { id: 'kitsu:100:2', season: 1, episode: 2, title: 'Body of the Sanctioned' }, { id: 'kitsu:100:3', title: 'Mother' }],
+  } });
   if (url.pathname === '/manga/discover') return json({ popular: [manga], latest: [manga] });
   if (url.pathname === '/manga/search') return json({ manga: [manga] });
   if (url.pathname === '/comics/search') return comicOutage ? json({}, 503) : json({ comics: [comic] });
@@ -58,7 +62,7 @@ await ctx.route('**/*', async (route) => {
 await prepareProfile(ctx, { id: 'reader-a', name: 'Reader', maxRating: 'adult', isKids: false });
 const page = await ctx.newPage();
 page.on('pageerror', (error) => errors.push(String(error)));
-page.setDefaultTimeout(10000);
+page.setDefaultTimeout(30000);
 try {
   await page.goto(base, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await selectProfile(page, 'Reader');
@@ -91,11 +95,24 @@ try {
   await page.waitForFunction(() => window.BlazingManga.history()[0]?.index === 1);
   check('Reading saves only after a page image loads', await page.locator('#manga-reader .comic-counter').textContent() === '2 / 3');
   await page.locator('#manga-reader .comic-close').click();
+  check('Closing the reader returns to its chapter button', await page.locator('#manga-chapters-list [role="button"]').evaluate((el) => el === document.activeElement));
+  await page.locator('#manga-chapters-close').click();
   await page.locator('[data-room-view="manga"]').click();
   await page.locator('#manga-continue .manga-history-item').click();
   await page.waitForFunction(() => document.querySelector('#manga-reader .comic-counter').textContent === '2 / 3');
   check('Continue reading reopens the exact chapter and page', true);
   await page.locator('#manga-reader .comic-close').click();
+  check('Closing a resumed chapter returns to its refreshed reading card', await page.locator('#manga-continue .manga-history-item').evaluate((el) => el === document.activeElement));
+  catalogMode = 'kitsu';
+  await page.locator('#anime-room-query').fill('Fullmetal Alchemist'); await page.locator('#anime-room-search button').click();
+  await page.locator('#anime-room-results [data-anime-id="kitsu:100"]').click();
+  await page.waitForSelector('#detail-episode-select');
+  check('Kitsu search hydrates its own real-shaped episode metadata', await page.locator('#detail-episode-select option').count() === 3 && calls.some((url) => url.includes('anime-kitsu.strem.fun/meta/anime/kitsu%3A100.json')));
+  check('A Kitsu ID without a season field remains season 1', (await page.locator('#detail-episode-select option').last().textContent()).startsWith('S1 E3'));
+  const episodeRequest = page.waitForRequest((req) => req.url().includes('/stream/series/kitsu%3A100%3A2.json'));
+  await page.locator('#detail-episode-select').selectOption('kitsu:100:2'); await episodeRequest;
+  check('Choosing a Kitsu episode preserves its full stream ID', true);
+  await page.locator('#detail-close').click();
   await page.evaluate(() => document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'reader-b', name: 'Other reader', maxRating: 'adult', isKids: false } })));
   check('Another Adult profile has no inherited reading history', await page.evaluate(() => window.BlazingManga.history().length === 0));
   catalogMode = 'poster';

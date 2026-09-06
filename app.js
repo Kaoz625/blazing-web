@@ -392,7 +392,8 @@ function safeEpisodes(raw) {
     if (!video || !video.id) return null;
     const id = plainText(video.id).slice(0, 160);
     const parts = id.split(':');
-    const season = Math.max(1, Math.floor(Number(video.season || parts[parts.length - 2]) || 1));
+    const fallbackSeason = /^kitsu:\d+:\d+$/.test(id) ? 1 : parts[parts.length - 2];
+    const season = Math.max(1, Math.floor(Number(video.season || fallbackSeason) || 1));
     const episode = Math.floor(Number(video.episode || parts[parts.length - 1]) || 0);
     if (!id || episode < 1) return null;
     return {
@@ -1580,13 +1581,18 @@ const fullMetaCache = new Map();
 async function fetchFullMeta(meta, forDetail = false) {
   const key = `${forDetail ? 'detail' : 'preview'}:${meta.type}:${meta.id}`;
   if (fullMetaCache.has(key)) return fullMetaCache.get(key);
+  const kitsuId = /^kitsu:\d+$/.test(String(meta.id));
   // Emby titles are not in the addon catalog, so /meta/ is a guaranteed 404 for
   // them - the same reason openDetail skips /stream/ for an embyId.
-  if (meta.embyId || (!forDetail && !/^tt\d+$/.test(String(meta.id)))) {
+  if (meta.embyId || (!forDetail && !kitsuId && !/^tt\d+$/.test(String(meta.id)))) {
     fullMetaCache.set(key, null);
     return null;
   }
-  const job = fetchJSON(`${API_BASE}/meta/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`)
+  // Kitsu has its own episode IDs. Cinemeta cannot return metadata for them.
+  const url = kitsuId
+    ? `https://anime-kitsu.strem.fun/meta/anime/${encodeURIComponent(meta.id)}.json`
+    : `${API_BASE}/meta/${encodeURIComponent(meta.type)}/${encodeURIComponent(meta.id)}.json`;
+  const job = fetchJSON(url)
     .then((data) => safeMeta({ ...(data && data.meta), type: meta.type }) || null)
     .catch(() => null);
   fullMetaCache.set(key, job);
@@ -2586,7 +2592,8 @@ async function loadStreams(meta) {
 
     // A link marked dead by a long-press sinks to the bottom, and so does a
     // dub in a language nobody here reads.
-    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
+    const isDead = deadLinkProbe();
+    const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
 
     // WHAT THIS DEVICE CAN ACTUALLY DECODE, asked at runtime, then used to
     // filter and to order. Markus, letter C: "based on the device and what that
@@ -2688,14 +2695,14 @@ async function loadStreams(meta) {
           source: String(s._from || '').replace(/^site:/, ''),
           res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
         });
-        closeDetail();
         openPlayer(meta.name, s.url);
+        closeDetail();
       });
 
       row.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         if (!deadLinks.includes(s.url)) deadLinks.push(s.url);
-        localStorage.setItem('dead_links', JSON.stringify(deadLinks));
+        markDeadLink(s.url);
         row.classList.add('dead');
         container.appendChild(row); // move to bottom
       });
@@ -2752,7 +2759,7 @@ function buildFilterNote(ranked) {
   if (d.codec || d.codec4k) parts.push(`${d.codec + d.codec4k} this browser cannot decode`);
   if (d.size) parts.push(`${d.size} too large for this connection`);
   const note = el('div', 'stream-note');
-  note.textContent = `${ranked.streams.length} of ${ranked.total} sources play on this device` +
+  note.textContent = `${ranked.streams.length} of ${ranked.total} sources match this device’s format limits` +
     (parts.length ? ` — hidden: ${parts.join(', ')}.` : '.');
   return note;
 }
@@ -2779,9 +2786,18 @@ function describeAllRejected(ranked, caps) {
   return 'No compatible stream available.';
 }
 
+let playRequest = 0;
 async function playSelected() {
   const meta = state.selected;
   if (!meta) return;
+  const request = ++playRequest;
+  const profileId = state.profileId;
+  let contentId = null;
+  const isCurrent = () => request === playRequest && state.selected === meta && profileId === state.profileId
+    && (!contentId || (state.selectedEpisode?.id || meta.id) === contentId) && detailDialog.open;
+  await fetchFullMeta(meta, true);
+  if (!isCurrent() || !ratingAllowed(meta.contentRating)) return;
+  contentId = state.selectedEpisode?.id || meta.id;
   // Emby needs no stream resolution: the fleet IS the stream, and it forwards
   // Range so the scrub bar works.
   if (meta.embyId && window.BlazingEmby) {
@@ -2799,20 +2815,22 @@ async function playSelected() {
   if (isEduId(meta.id)) {
     detailStatus.textContent = 'Getting the video…';
     const edu = await resolveEduStream(meta.id);
+    if (!isCurrent()) return;
     if (!edu) {
       detailStatus.textContent = 'This lesson could not be opened. The video ' +
         'resolver on the server did not answer.';
       return;
     }
-    closeDetail();
     openPlayer(meta.name, edu.url, { streamFormat: edu.streamFormat });
+    closeDetail();
     return;
   }
   detailStatus.textContent = 'Checking direct streams…';
   try {
-    const contentId = state.selectedEpisode ? state.selectedEpisode.id : meta.id;
     let streams = await resolveStreams(meta, contentId);
-    const deadLinks = JSON.parse(localStorage.getItem('dead_links') || '[]');
+    if (!isCurrent()) return;
+    const isDead = deadLinkProbe();
+    const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
 
     // THE SAME RANKING THE LIST USES, and that is the whole point of the change.
     // Play and the source list were two separate sorts before this: the list
@@ -2825,6 +2843,7 @@ async function playSelected() {
     // to be one function with one caller here too.
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
+      if (!isCurrent()) return;
       streams = window.BlazingCaps.rankStreams(streams, caps, { deadLinks }).streams.map((i) => i.raw);
     } else {
       const getPenalty = (s) => {
@@ -2843,9 +2862,10 @@ async function playSelected() {
         : 'No compatible direct stream is available right now.';
       return;
     }
-    closeDetail();
     openPlayer(meta.name, playable.url);
+    closeDetail();
   } catch {
+    if (!isCurrent()) return;
     detailStatus.textContent = 'Could not check streams. Try again.';
   }
 }

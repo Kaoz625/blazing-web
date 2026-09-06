@@ -64,6 +64,7 @@ const PAGES = { pages: ['/manga/image?ch=c1&p=1', '/manga/image?ch=c1&p=2', 'htt
 const PAGE_IMAGE = await readFile(join(ROOT, 'icon-192.png'));
 
 const browser = await launchBrowser();
+const readerOnly = process.env.MANGA_SMOKE_CASE === 'reader';
 
 async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, onCall } = {}) {
   const ctx = await browser.newContext();
@@ -132,7 +133,7 @@ async function settledStatus(page, id, timeout = 5000) {
 }
 
 // --- 1a: no profile chosen reads as the strictest cap, not "no cap" --------
-{
+if (!readerOnly) {
   const { ctx, page, calls } = await openApp({ profile: {} });
   await settledStatus(page, 'manga-status');
   const status = (await page.locator('#manga-status').textContent()) || '';
@@ -144,6 +145,7 @@ async function settledStatus(page, id, timeout = 5000) {
 
 // --- 1b: Kids, Guest-as-kids and Teen all fail closed ------------------------
 for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) {
+  if (readerOnly) continue;
   const { ctx, page } = await openApp({ profile });
   await settledStatus(page, 'manga-status');
   const status = (await page.locator('#manga-status').textContent()) || '';
@@ -213,9 +215,11 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
   check('paging past the last page is a no-op, not an error', (await page.locator('#manga-reader .comic-counter').textContent()) === '3 / 3');
 
   // --- 6: a profile downgrade mid-read closes the reader immediately ----------
-  await page.evaluate(() => document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'kid', isKids: true } })));
-  await page.waitForFunction(() => document.getElementById('manga-reader').hidden, null, { timeout: 3000 });
-  check('switching to a Kids profile closes the open reader', (await page.locator('#manga-reader').isHidden()) === true);
+  const closedOnDowngrade = await page.evaluate(() => {
+    document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'kid', isKids: true } }));
+    return document.getElementById('manga-reader').hidden;
+  });
+  check('switching to a Kids profile closes the open reader immediately', closedOnDowngrade === true);
   check('the chapters dialog also closes', (await page.locator('#manga-chapters-dialog').evaluate((d) => d.open)) === false);
   const gateStatus = (await page.locator('#manga-status').textContent()) || '';
   check('the tab itself falls back to the gate message', gateStatus.toLowerCase().includes('mature'), gateStatus);
@@ -223,7 +227,7 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
 }
 
 // --- 4b: the plain-array chapter-list shape is read too ---------------------
-{
+if (!readerOnly) {
   const { ctx, page } = await openApp({
     chaptersBody: { chapters: [{ id: 'c9', chapter: '9', title: '', pages: 5, readable: true }] },
   });
@@ -236,7 +240,7 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
 }
 
 // --- 4c: zero chapters, with a server-given reason, is not a generic error --
-{
+if (!readerOnly) {
   const { ctx, page } = await openApp({ chaptersBody: { chapters: { list: [], error: 'Officially licensed. Removed at the publisher’s request.', via: 'mangadex' } } });
   await page.waitForSelector('#manga-rows .card', { timeout: 10000 });
   await page.click('#manga-rows .card >> nth=0');
@@ -255,7 +259,7 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
 }
 
 // --- 7: search --------------------------------------------------------------
-{
+if (!readerOnly) {
   const { ctx, page, calls } = await openApp();
   await page.waitForSelector('#manga-rows .row', { timeout: 10000 });
   await page.fill('#anime-room-query', 'One Piece');

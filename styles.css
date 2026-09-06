@@ -1340,7 +1340,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .anime-room-tabs { display: flex; gap: 28px; margin-top: 28px; border-bottom: 1px solid rgba(255,255,255,.12); }
 .anime-room-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; min-height: 50px; padding: 10px 0; color: rgba(255,255,255,.72); font: inherit; font-weight: 600; cursor: pointer; }
 .anime-room-tabs button[aria-current="page"] { border-bottom-color: var(--accent); color: var(--text); }
-.anime-room-filters { display: flex; gap: 8px; overflow-x: auto; padding: 3px 2px 12px; }
+.anime-room-filters { display: flex; gap: 8px; overflow-x: auto; padding: 3px 2px 12px; scrollbar-width: none; }
+.anime-room-filters::-webkit-scrollbar { display: none; }
 .anime-room-filters button { white-space: nowrap; min-height: 44px; padding: 9px 16px; border-radius: 24px; border: 1px solid rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.78); font: inherit; font-size: 13px; cursor: pointer; }
 .anime-room-filters button[aria-pressed="true"] { background: #f7f7f8; color: #0a0a0b; border-color: #f7f7f8; }
 #anime-room-feature { position: relative; isolation: isolate; min-height: 380px; display: flex; align-items: center; overflow: hidden; border-radius: 16px; background: var(--surface); margin: 0 0 36px; }

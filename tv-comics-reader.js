@@ -25,7 +25,7 @@ class TVComicReader {
       this.label = this.container.querySelector('.comic-label');
       this.counter = this.container.querySelector('.comic-counter');
       const close = this.container.querySelector('.comic-close');
-      if (close) close.addEventListener('click', () => this.close());
+      if (close) close.addEventListener('click', () => this.close(true));
       this.previous = this.container.querySelector('.comic-previous');
       this.next = this.container.querySelector('.comic-next');
       this.previous?.addEventListener('click', () => this.go(-1));
@@ -46,7 +46,7 @@ class TVComicReader {
       }
       if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') this.go(1);
       else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') this.go(-1);
-      else if (key === 'Escape' || key === 'Backspace' || key === 'BrowserBack') this.close();
+      else if (key === 'Escape' || key === 'Backspace' || key === 'BrowserBack') this.close(true);
       else return;
       event.preventDefault();
     });
@@ -55,6 +55,7 @@ class TVComicReader {
   async open(comicId, name) {
     if (!this.container) return;
     const request = ++this.request;
+    this.returnFocus = document.activeElement;
     this.pages = [];
     if (this.image) this.image.removeAttribute('src');
     this.container.hidden = false;
@@ -120,13 +121,15 @@ class TVComicReader {
     if (ahead) new Image().src = ahead;
   }
 
-  close() {
+  close(restoreFocus = false) {
     ++this.request;
     if (!this.container) return;
     this.container.hidden = true;
     document.body.classList.remove('no-scroll');
     if (this.image) this.image.removeAttribute('src');
     this.pages = [];
+    if (restoreFocus && this.returnFocus?.isConnected && this.returnFocus.getClientRects().length) this.returnFocus.focus();
+    this.returnFocus = null;
   }
 }
 

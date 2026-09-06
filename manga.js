@@ -414,7 +414,7 @@
   // Same behavior as tv-comics-reader.js's TVComicReader: one page ahead
   // prefetched, arrow/page keys turn pages, Escape closes.
 
-  const readerState = { pages: [], index: 0, manga: null, chapter: null };
+  const readerState = { pages: [], index: 0, manga: null, chapter: null, returnFocus: null, returnChapters: false };
   const HISTORY_KEY = 'blazing-manga-progress-v1:';
   function history() {
     if (!state.profileId || !allowed()) return [];
@@ -437,6 +437,7 @@
     const grid = element('div', 'manga-history-grid');
     for (const record of records) {
       const button = element('button', 'manga-history-item'); button.type = 'button';
+      button.dataset.mangaId = record.manga.id;
       const image = element('img'); image.alt = ''; image.loading = 'lazy';
       const cover = safeHttpsUrl(record.manga.cover); if (cover) image.src = cover;
       const body = element('span');
@@ -484,20 +485,32 @@
     if (r && r.counter) r.counter.textContent = '';
   }
 
-  function closeReader() {
+  function closeReader({ restoreFocus = false } = {}) {
     ++state.readerRequest;
     const r = readerRefs();
     if (!r) return;
     r.container.hidden = true;
     document.body.classList.remove('no-scroll');
     if (r.image) { r.image.onload = null; r.image.onerror = null; r.image.removeAttribute('src'); }
+    if (restoreFocus && allowed()) {
+      const dialog = refs().dialog;
+      if (readerState.returnChapters && dialog && !dialog.open) dialog.showModal();
+      let target = readerState.returnFocus;
+      if (!target?.isConnected || !target.getClientRects().length) {
+        target = [...document.querySelectorAll('.manga-history-item')].find((el) => el.dataset.mangaId === readerState.manga?.id && el.getClientRects().length);
+      }
+      if (target?.getClientRects().length) target.focus();
+    }
     readerState.pages = [];
     readerState.manga = null; readerState.chapter = null;
+    readerState.returnFocus = null; readerState.returnChapters = false;
   }
 
   async function openReader(manga, chapter, resumeIndex) {
     if (!allowed()) return; // re-checked: a profile switch can land between click and open
     const request = ++state.readerRequest;
+    readerState.returnFocus = document.activeElement;
+    readerState.returnChapters = Boolean(refs().dialog?.open);
     closeChapters();
     const r = readerRefs();
     if (!r) return;
@@ -539,7 +552,7 @@
       }
       if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') readerGo(1);
       else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') readerGo(-1);
-      else if (key === 'Escape' || key === 'Backspace') closeReader();
+      else if (key === 'Escape' || key === 'Backspace') closeReader({ restoreFocus: true });
       else return;
       event.preventDefault();
     });
@@ -562,7 +575,7 @@
     const reader = document.getElementById('manga-reader');
     if (reader) {
       const close = reader.querySelector('.comic-close');
-      if (close) close.addEventListener('click', closeReader);
+      if (close) close.addEventListener('click', () => closeReader({ restoreFocus: true }));
       reader.querySelector('.manga-previous')?.addEventListener('click', () => readerGo(-1));
       reader.querySelector('.manga-next')?.addEventListener('click', () => readerGo(1));
     }
