@@ -248,7 +248,7 @@ check('Home is still in the drawer',
 // would pass for a chip with no view at all. Movies/Shows/Anime genuinely share
 // #home-view with the rows filtered; the rest own a section.
 const CHIP_VIEW = {
-  movies: 'home-view', shows: 'home-view', anime: 'home-view',
+  movies: 'home-view', shows: 'home-view', anime: 'anime-room-view',
   roadmaps: 'roadmaps-view', library: 'library-view',
   games: 'games-view', search: 'search-view',
 };

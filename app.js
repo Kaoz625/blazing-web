@@ -878,7 +878,7 @@ function closeDrawer() {
 
 function updateNavigation(route) {
   $$('[data-view]').forEach((button) => {
-    const active = button.dataset.view === route;
+    const active = button.dataset.view === route || (button.dataset.view === 'anime' && ['manga', 'comics', 'anime-search'].includes(route));
     button.classList.toggle('active', active);
     if (button.closest('nav')) button.setAttribute('aria-current', active ? 'page' : 'false');
   });
@@ -1361,8 +1361,12 @@ const BROWSE_HEADINGS = Object.freeze({
 });
 
 function showRoute(route) {
-  const browseRoute = ['home', 'movies', 'shows', 'anime'].includes(route);
+  const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
+  const roomRoute = ['anime', 'manga', 'comics', 'anime-search'].includes(route);
+  $('#anime-room-header').hidden = !roomRoute;
+  $('#anime-room-view').hidden = route !== 'anime' && route !== 'anime-search';
+  window.BlazingAnimeRoom?.mount(route, { navigate: showRoute, safeMeta: safeDiscoverMeta, buildCard, openDetail, ratingAllowed, fetchFullMeta });
   homeView.hidden = !browseRoute;
   if (browseRoute) {
     const [eyebrow, title, blurb] = BROWSE_HEADINGS[route] || BROWSE_HEADINGS.home;
@@ -1417,7 +1421,7 @@ function showRoute(route) {
 
   if (route === 'trailers') loadTrailersView();
   if (route === 'education') loadEducationView();
-  if (route === 'comics') loadComicsView();
+  if (route === 'comics') window.BlazingAnimeRoom?.loadComics();
   if (route === 'requests') loadRequestsView();
   if (route === 'emby') loadEmbyView();
   if (route === 'manga') window.BlazingManga && window.BlazingManga.mount();
@@ -1592,6 +1596,7 @@ async function fetchFullMeta(meta, forDetail = false) {
 /** Fold anything the catalog was missing into the meta the card already holds. */
 function mergeFullMeta(meta, full) {
   if (!full) return meta;
+  if (RATINGS.includes(full.contentRating)) meta.contentRating = full.contentRating;
   for (const k of ['description', 'imdbRating', 'runtime', 'certification', 'background', 'trailerYt', 'trailerUrl']) {
     if (!meta[k] && full[k]) meta[k] = full[k];
   }
@@ -1745,12 +1750,14 @@ function attachHoverTrailer(card, meta) {
     textTimer = setTimeout(async () => {
       const full = await fetchFullMeta(meta);
       mergeFullMeta(meta, full);
+      if (!ratingAllowed(meta.contentRating)) { stop(); card.remove(); return; }
       fillCardHeroContent(card, meta);
     }, DWELL_MS);
 
     videoTimer = setTimeout(async () => {
       const full = await fetchFullMeta(meta);
       mergeFullMeta(meta, full);
+      if (!ratingAllowed(meta.contentRating)) { stop(); card.remove(); return; }
       const url = await resolveTrailerUrl(meta);
       // The pointer may have left while that was in flight - resolving runs
       // yt-dlp server-side and is not instant on a cold cache.
@@ -2388,6 +2395,7 @@ function renderEpisodeControls(meta) {
 }
 
 function openDetail(meta) {
+  if (!ratingAllowed(meta.contentRating)) return showToast('This title is not available for this profile.', 'error');
   state.selected = meta;
   state.selectedEpisode = null;
   clearEpisodeControls();
@@ -2400,6 +2408,8 @@ function openDetail(meta) {
   detailSource.textContent = source;
   const sourceOnly = isMwp(meta);
   detailPlay.hidden = sourceOnly;
+  detailPlay.disabled = true;
+  $('#detail-streams').replaceChildren();
   
   refreshUpscaleButton(meta);
 
@@ -2415,21 +2425,23 @@ function openDetail(meta) {
   if (typeof detailDialog.showModal === 'function') detailDialog.showModal();
   else detailDialog.setAttribute('open', '');
 
-  startDetailTrailer(meta);
   // A CATALOG META IS NOT ENOUGH TO FILL THIS PANEL. Only 129 of 300 carry a
   // description and none carries a trailer, so a title opened straight from a
   // poster - without dwelling on it first - showed "Open this title to check
   // available streams." and no trailer. Same cached fetch the card uses; if the
   // dialog moved on in the meantime the result is dropped.
-  const fullMeta = fetchFullMeta(meta, meta.type === 'series').then((full) => {
+  const fullMeta = fetchFullMeta(meta, true).then((full) => {
     if (!full || state.selected !== meta) return;
-    const hadTrailer = Boolean(meta.trailerYt || meta.trailerUrl);
     mergeFullMeta(meta, full);
+    if (!ratingAllowed(meta.contentRating)) {
+      closeDetail();
+      showToast('This title is not available for this profile.', 'error');
+      return;
+    }
     if (meta.description) detailCopy.textContent = meta.description;
     setBackground(detailArt, meta.background || meta.poster);
     renderRatingChips(meta);
     renderEpisodeControls(meta);
-    if (!hadTrailer) startDetailTrailer(meta);
     return full;
   });
   telemetry('nav_action', { action: 'open_detail', from: state.route || 'home' });
@@ -2437,21 +2449,21 @@ function openDetail(meta) {
   // An Emby title is not in the addon catalog, so /stream/<type>/emby:<id>.json
   // is a guaranteed 404. Asking anyway would spin the streams panel and then
   // report "no sources" for something that plays perfectly.
-  if (meta.embyId) {
+  fullMeta.finally(() => {
+    if (state.selected !== meta || !ratingAllowed(meta.contentRating)) return;
+    detailPlay.disabled = false;
+    startDetailTrailer(meta);
+    if (meta.embyId) {
     $('#detail-streams').innerHTML = '';
     detailStatus.textContent = 'On the Emby server. Press Play.';
-  } else if (!sourceOnly && meta.type === 'series') {
-    detailStatus.textContent = 'Loading episodes…';
-    fullMeta.finally(() => {
-      if (state.selected !== meta) return;
+    } else if (!sourceOnly) {
       renderEpisodeControls(meta);
       loadStreams(meta);
-    });
-  } else if (!sourceOnly) {
-    loadStreams(meta);
-  } else {
+    } else {
     $('#detail-streams').innerHTML = '';
-  }
+    }
+  });
+  if (!sourceOnly) detailStatus.textContent = meta.type === 'series' ? 'Loading episodes…' : 'Loading title…';
 }
 
 function closeDetail() {

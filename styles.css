@@ -1323,3 +1323,72 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    .hero-content instead of behind it, greying out the hero title and buttons
    it was supposed to be making legible. One scrim, declared once, next to the
    rest of the .hero rules. */
+/* Anime & Manga: one quiet room, with the same player and readers. */
+.anime-room-header, .anime-room, #manga-view, #comics-view { padding-left: var(--gutter); padding-right: var(--gutter); }
+.anime-room-shelf .row-title, .manga-history .row-title { margin-left: 0; }
+.anime-room-header { padding: 30px 0 0; margin-bottom: 24px; }
+.anime-room-header { padding-left: var(--gutter); padding-right: var(--gutter); }
+.anime-room-intro { display: flex; justify-content: space-between; align-items: end; gap: 36px; }
+.anime-room-intro h1 { font-size: clamp(28px, 3.5vw, 44px); line-height: 1.12; letter-spacing: -.035em; margin: 6px 0 12px; }
+.anime-room-intro p { color: rgba(255,255,255,.72); margin: 0; line-height: 1.6; }
+.anime-room-intro .eyebrow { color: rgba(255,255,255,.65); }
+#anime-room-search { width: min(420px, 40%); flex-shrink: 0; }
+#anime-room-search label { display: block; font-size: 13px; color: rgba(255,255,255,.72); margin-bottom: 9px; }
+#anime-room-search > div { display: flex; gap: 8px; min-width: 0; }
+#anime-room-search button { flex: 0 0 auto; }
+#anime-room-query { width: 100%; min-width: 0; min-height: 46px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 14px; font: inherit; }
+.anime-room-tabs { display: flex; gap: 28px; margin-top: 28px; border-bottom: 1px solid rgba(255,255,255,.12); }
+.anime-room-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; min-height: 50px; padding: 10px 0; color: rgba(255,255,255,.72); font: inherit; font-weight: 600; cursor: pointer; }
+.anime-room-tabs button[aria-current="page"] { border-bottom-color: var(--accent); color: var(--text); }
+.anime-room-filters { display: flex; gap: 8px; overflow-x: auto; padding: 3px 2px 12px; }
+.anime-room-filters button { white-space: nowrap; min-height: 44px; padding: 9px 16px; border-radius: 24px; border: 1px solid rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.78); font: inherit; font-size: 13px; cursor: pointer; }
+.anime-room-filters button[aria-pressed="true"] { background: #f7f7f8; color: #0a0a0b; border-color: #f7f7f8; }
+#anime-room-feature { position: relative; isolation: isolate; min-height: 380px; display: flex; align-items: center; overflow: hidden; border-radius: 16px; background: var(--surface); margin: 0 0 36px; }
+#anime-room-feature[hidden] { display: none; }
+.anime-feature-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 25%; z-index: -2; }
+.anime-feature-cover { position: absolute; right: 6%; top: 8%; height: 84%; max-width: 32%; object-fit: contain; border-radius: 12px; z-index: -2; }
+.anime-feature-poster::after { opacity: .35; }
+#anime-room-feature::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg,rgba(10,10,11,.97),rgba(10,10,11,.9) 35%,rgba(10,10,11,.15) 100%); z-index: -1; }
+.anime-feature-body { padding: clamp(24px, 4vw, 54px); width: min(64%, 680px); }
+.anime-feature-body h2 { font-size: clamp(27px, 3vw, 42px); letter-spacing: -.025em; line-height: 1.1; margin: 12px 0; }
+.anime-feature-meta { font-size: 14px; color: rgba(255,255,255,.8); }
+.anime-feature-description { font-size: 15px; line-height: 1.7; color: rgba(255,255,255,.82); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.anime-feature-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+.anime-feature-actions .primary-button { background: #f7f7f8; color: #0a0a0b; }
+.anime-room-shelf, .manga-history { margin: 0 0 36px; }
+.anime-room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 20px 16px; }
+.anime-room-grid .card { width: 100%; min-width: 0; }
+.anime-room-grid .card-label { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.manga-history-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 12px; }
+.manga-history-item { display: flex; align-items: center; text-align: left; gap: 16px; background: var(--surface); color: var(--text); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 12px; min-width: 0; cursor: pointer; font: inherit; }
+.manga-history-item img { width: 54px; height: 76px; object-fit: cover; border-radius: 6px; background: var(--surface-soft); flex-shrink: 0; }
+.manga-history-item > span { min-width: 0; }
+.manga-history-item strong { display: block; line-height: 1.4; }
+.manga-history-item span span { display: block; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.72); margin-top: 6px; }
+.comic-reader .comic-bar { flex-wrap: wrap; gap: 10px; }
+.comic-reader .comic-bar button { min-height: 44px; border: 1px solid rgba(255,255,255,.3); background: #171719; color: #fff; border-radius: 22px; padding: 8px 15px; font: inherit; cursor: pointer; }
+.comic-reader .comic-bar button:disabled { opacity: .45; cursor: default; }
+.anime-room-header button:focus-visible, .anime-room button:focus-visible, .manga-history-item:focus-visible, #manga-reader button:focus-visible, #anime-room-query:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+#manga-view > .page-heading, #comics-view > .page-heading { margin-top: 0; }
+#manga-view > .search-form { display: none; }
+#manga-view .row-title { margin-left: 0; }
+#manga-view .row-track { padding-left: 0; padding-right: 0; }
+@media (max-width: 768px) {
+  .anime-room-intro { display: block; }
+  #anime-room-search { width: 100%; margin-top: 22px; }
+  .anime-room-tabs { margin-top: 20px; }
+  .anime-feature-body { width: 85%; }
+  #anime-room-feature { min-height: 360px; }
+}
+@media (max-width: 480px) {
+  .anime-room-header { padding-top: 14px; }
+  .anime-room-intro p { font-size: 14px; }
+  .anime-room-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+  #anime-room-feature { align-items: end; min-height: 390px; }
+  .anime-feature-body { width: 100%; padding: 24px; }
+  #anime-room-feature::after { background: linear-gradient(0deg,rgba(10,10,11,.98),rgba(10,10,11,.85) 55%,rgba(10,10,11,.12)); }
+  .anime-feature-actions { gap: 8px; }
+  .anime-feature-actions button { font-size: 13px; padding: 10px 15px; }
+  .comic-reader .comic-label { flex-basis: 100%; }
+  .comic-reader .comic-counter { margin-right: auto; }
+}

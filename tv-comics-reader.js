@@ -19,12 +19,17 @@ class TVComicReader {
     this.base = String(fleetBase || 'https://fleet.lyreosai.com').replace(/\/+$/, '');
     this.pages = [];
     this.index = 0;
+    this.request = 0;
     if (this.container) {
       this.image = this.container.querySelector('.comic-page');
       this.label = this.container.querySelector('.comic-label');
       this.counter = this.container.querySelector('.comic-counter');
       const close = this.container.querySelector('.comic-close');
       if (close) close.addEventListener('click', () => this.close());
+      this.previous = this.container.querySelector('.comic-previous');
+      this.next = this.container.querySelector('.comic-next');
+      this.previous?.addEventListener('click', () => this.go(-1));
+      this.next?.addEventListener('click', () => this.go(1));
     }
     this.bindKeys();
   }
@@ -33,6 +38,12 @@ class TVComicReader {
     window.addEventListener('keydown', (event) => {
       if (!this.container || this.container.hidden) return;
       const key = event.key;
+      if (key === 'Tab') {
+        const buttons = [...this.container.querySelectorAll('button:not(:disabled)')];
+        const index = buttons.indexOf(document.activeElement);
+        buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+        event.preventDefault(); return;
+      }
       if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') this.go(1);
       else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') this.go(-1);
       else if (key === 'Escape' || key === 'Backspace' || key === 'BrowserBack') this.close();
@@ -43,16 +54,22 @@ class TVComicReader {
 
   async open(comicId, name) {
     if (!this.container) return;
+    const request = ++this.request;
+    this.pages = [];
+    if (this.image) this.image.removeAttribute('src');
     this.container.hidden = false;
+    this.container.querySelector('.comic-close')?.focus();
     document.body.classList.add('no-scroll');
     this.setLabel(name || 'Loading…', '');
     try {
       const chapters = await this.json(`/comics/${encodeURIComponent(comicId)}/chapters`);
+      if (request !== this.request) return;
       // `readable:false` means the fleet cannot unpack that archive. Offering it
       // would open a reader onto nothing.
       const first = (chapters.chapters || []).find((c) => c && c.readable);
       if (!first) return this.fail('This comic has no readable chapters.');
       const pages = await this.json(`/comics/chapter/${encodeURIComponent(first.id)}/pages`);
+      if (request !== this.request) return;
       const list = Array.isArray(pages.pages) ? pages.pages : [];
       if (!list.length) return this.fail('This chapter has no pages.');
       this.pages = list.map((p) => (/^https?:/.test(p) ? p : `${this.base}${p}`));
@@ -60,6 +77,7 @@ class TVComicReader {
       this.setLabel(pages.label || name || 'Comic', '');
       this.render();
     } catch (e) {
+      if (request !== this.request) return;
       this.fail('Could not reach the comics library.');
     }
   }
@@ -92,6 +110,9 @@ class TVComicReader {
   render() {
     if (!this.image || !this.pages.length) return;
     this.image.src = this.pages[this.index];
+    this.image.alt = `${this.label?.textContent || 'Comic'} · Page ${this.index + 1}`;
+    if (this.previous) this.previous.disabled = this.index === 0;
+    if (this.next) this.next.disabled = this.index === this.pages.length - 1;
     if (this.counter) this.counter.textContent = `${this.index + 1} / ${this.pages.length}`;
     // One page ahead only. Prefetching a whole 169-page chapter over a TV's
     // connection would stall the page that is actually on screen.
@@ -100,6 +121,7 @@ class TVComicReader {
   }
 
   close() {
+    ++this.request;
     if (!this.container) return;
     this.container.hidden = true;
     document.body.classList.remove('no-scroll');

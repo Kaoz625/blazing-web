@@ -43,6 +43,10 @@
     mounted: false,
     isKids: true, // fail closed until profile.js says otherwise — locker.js's own default, same reason
     cap: null,    // no profile yet = the strictest cap, not "no cap"
+    profileId: null,
+    generation: 0,
+    chapterRequest: 0,
+    readerRequest: 0,
   };
 
   function allowed() {
@@ -198,19 +202,21 @@
   }
 
   async function loadDiscover() {
+    const request = ++state.generation;
     const { status, rows } = refs();
     rows.dataset.loaded = 'true';
     status.textContent = 'Loading…';
     rows.replaceChildren();
     const data = await fetchJSON(`${FLEET_BASE}/manga/discover?limit=20`);
-    if (!allowed()) return; // downgraded while the request was in flight
+    if (!allowed() || request !== state.generation) return;
     if (!data) {
       status.textContent = 'Could not reach the manga library.';
       rows.dataset.loaded = 'false';
       return;
     }
     const popular = (Array.isArray(data.popular) ? data.popular : []).map(normalizeManga).filter(Boolean);
-    const latest = (Array.isArray(data.latest) ? data.latest : []).map(normalizeManga).filter(Boolean);
+    const ids = new Set(popular.map((item) => item.id));
+    const latest = (Array.isArray(data.latest) ? data.latest : []).map(normalizeManga).filter((item) => item && !ids.has(item.id));
     const sections = [shelf('Popular', popular), shelf('Latest', latest)].filter(Boolean);
     if (!sections.length) {
       status.textContent = 'No manga is available right now.';
@@ -222,12 +228,13 @@
   }
 
   async function runSearch(query) {
+    const request = ++state.generation;
     const { status, rows } = refs();
     rows.dataset.loaded = 'true';
     status.textContent = `Searching for "${query}"…`;
     rows.replaceChildren();
     const data = await fetchJSON(`${FLEET_BASE}/manga/search?q=${encodeURIComponent(query)}&limit=20`);
-    if (!allowed()) return;
+    if (!allowed() || request !== state.generation) return;
     if (!data) {
       status.textContent = 'Manga search could not be completed.';
       rows.dataset.loaded = 'false';
@@ -293,6 +300,7 @@
 
   async function openChapters(manga) {
     if (!allowed()) return; // the gate can close between a card render and a click
+    const request = ++state.chapterRequest;
     const { dialog, dtitle, dmeta, ddesc, dstatus, dlist, dart } = refs();
     if (!dialog) return;
     dtitle.textContent = manga.title;
@@ -313,7 +321,7 @@
       `${FLEET_BASE}/manga/${encodeURIComponent(manga.id)}/chapters?limit=2000`,
       CHAPTERS_TIMEOUT_MS,
     );
-    if (!allowed()) { closeChapters(); return; } // downgraded mid-fetch
+    if (!allowed() || request !== state.chapterRequest) return;
     if (!data) {
       dstatus.textContent = 'Could not load this manga’s chapters.';
       return;
@@ -348,7 +356,7 @@
     if (!title || episode < 1) return;
     const { dialog, dtitle, dmeta, ddesc, dstatus, dlist, dart } = refs();
     if (!dialog) return;
-    const request = (state.episodeRequest = (state.episodeRequest || 0) + 1);
+    const request = ++state.chapterRequest;
     dtitle.textContent = title;
     dmeta.textContent = `Season ${Math.floor(Number(context.season) || 1)}  ·  Episode ${episode}`;
     ddesc.textContent = plainText(context.episodeTitle, 'Manga chapters for this episode.');
@@ -370,7 +378,7 @@
     put('episodeCount', context.episodeCount);
     put('mangaId', context.mangaId);
     const data = await fetchJSON(`${FLEET_BASE}/manga/episode-map?${query.toString()}`, CHAPTERS_TIMEOUT_MS);
-    if (request !== state.episodeRequest) return;
+    if (request !== state.chapterRequest) return;
     if (!allowed()) { closeChapters(); return; }
     if (!data || !data.mapping || !data.manga || !Array.isArray(data.chapters) || !data.chapters.length) {
       dstatus.textContent = plainText(data && data.error, 'No readable manga chapters matched this episode.');
@@ -397,6 +405,7 @@
   }
 
   function closeChapters() {
+    ++state.chapterRequest;
     const { dialog } = refs();
     if (dialog && dialog.open) dialog.close();
   }
@@ -405,15 +414,59 @@
   // Same behavior as tv-comics-reader.js's TVComicReader: one page ahead
   // prefetched, arrow/page keys turn pages, Escape closes.
 
-  const readerState = { pages: [], index: 0 };
+  const readerState = { pages: [], index: 0, manga: null, chapter: null };
+  const HISTORY_KEY = 'blazing-manga-progress-v1:';
+  function history() {
+    if (!state.profileId || !allowed()) return [];
+    try {
+      const data = JSON.parse(localStorage.getItem(HISTORY_KEY + encodeURIComponent(state.profileId)) || '[]');
+      return (Array.isArray(data) ? data : []).filter((item) => item?.manga?.id && item?.chapter?.id && Number.isInteger(item.index) && item.index >= 0).slice(0, 24);
+    } catch { return []; }
+  }
+  function saveProgress() {
+    if (!allowed() || !state.profileId || !readerState.pages.length || !readerState.manga || !readerState.chapter) return;
+    const record = { manga: readerState.manga, chapter: readerState.chapter, index: readerState.index, total: readerState.pages.length, updatedAt: Date.now() };
+    const records = [record, ...history().filter((item) => item.manga.id !== record.manga.id)].slice(0, 24);
+    try { localStorage.setItem(HISTORY_KEY + encodeURIComponent(state.profileId), JSON.stringify(records)); } catch { return; }
+    renderHistory();
+    document.dispatchEvent(new CustomEvent('blazing-reading-progress'));
+  }
+  function historySection(records = history()) {
+    const section = element('section', 'manga-history');
+    const heading = element('h2', 'row-title'); heading.textContent = 'Continue reading';
+    const grid = element('div', 'manga-history-grid');
+    for (const record of records) {
+      const button = element('button', 'manga-history-item'); button.type = 'button';
+      const image = element('img'); image.alt = ''; image.loading = 'lazy';
+      const cover = safeHttpsUrl(record.manga.cover); if (cover) image.src = cover;
+      const body = element('span');
+      const title = element('strong'); title.textContent = plainText(record.manga.title);
+      const place = element('span'); place.textContent = `Chapter ${plainText(record.chapter.number)} · Page ${record.index + 1} of ${record.total}`;
+      body.append(title, place); button.append(image, body);
+      button.addEventListener('click', () => { ensureBound(); openReader(record.manga, record.chapter, record.index); });
+      grid.append(button);
+    }
+    section.append(heading, grid); return section;
+  }
+  function renderHistory() {
+    const host = document.getElementById('manga-continue'); if (!host) return;
+    const records = history(); host.replaceChildren(...(records.length ? [historySection(records)] : []));
+  }
 
   function readerRender() {
     const r = readerRefs();
     if (!r || !r.image || !readerState.pages.length) return;
+    const request = state.readerRequest;
+    const pageIndex = readerState.index;
+    r.image.onload = () => { if (request === state.readerRequest && pageIndex === readerState.index) saveProgress(); };
+    r.image.onerror = () => { if (request === state.readerRequest && r.counter) r.counter.textContent = `Page ${pageIndex + 1} could not load. Try another page.`; };
     r.image.src = readerState.pages[readerState.index];
+    r.image.alt = `${readerState.manga?.title || 'Manga'} · Page ${readerState.index + 1}`;
     if (r.counter) r.counter.textContent = `${readerState.index + 1} / ${readerState.pages.length}`;
     const ahead = readerState.pages[readerState.index + 1];
     if (ahead) new Image().src = ahead;
+    r.container.querySelector('.manga-previous').disabled = readerState.index === 0;
+    r.container.querySelector('.manga-next').disabled = readerState.index === readerState.pages.length - 1;
   }
 
   function readerGo(step) {
@@ -432,16 +485,20 @@
   }
 
   function closeReader() {
+    ++state.readerRequest;
     const r = readerRefs();
     if (!r) return;
     r.container.hidden = true;
     document.body.classList.remove('no-scroll');
-    if (r.image) r.image.removeAttribute('src');
+    if (r.image) { r.image.onload = null; r.image.onerror = null; r.image.removeAttribute('src'); }
     readerState.pages = [];
+    readerState.manga = null; readerState.chapter = null;
   }
 
-  async function openReader(manga, chapter) {
+  async function openReader(manga, chapter, resumeIndex) {
     if (!allowed()) return; // re-checked: a profile switch can land between click and open
+    const request = ++state.readerRequest;
+    closeChapters();
     const r = readerRefs();
     if (!r) return;
     r.container.hidden = false;
@@ -450,9 +507,12 @@
     if (r.counter) r.counter.textContent = '';
     readerState.pages = [];
     readerState.index = 0;
+    readerState.manga = manga; readerState.chapter = chapter;
+    r.image.removeAttribute('src');
+    r.container.querySelector('.comic-close')?.focus();
 
     const data = await fetchJSON(`${FLEET_BASE}/manga/chapter/${encodeURIComponent(chapter.id)}/pages`);
-    if (!allowed()) { closeReader(); return; } // downgraded mid-fetch
+    if (!allowed() || request !== state.readerRequest) return;
     if (!data) return readerFail('Could not load this chapter’s pages.');
 
     const why = plainText(data.error);
@@ -460,7 +520,8 @@
     if (!pages.length) return readerFail(why || 'Could not load this chapter’s pages.');
 
     readerState.pages = pages;
-    readerState.index = 0;
+    const previous = history().find((item) => item.manga.id === manga.id && item.chapter.id === chapter.id);
+    readerState.index = Math.max(0, Math.min(Number(resumeIndex ?? previous?.index) || 0, pages.length - 1));
     readerRender();
   }
 
@@ -469,6 +530,13 @@
       const r = readerRefs();
       if (!r || r.container.hidden) return;
       const key = event.key;
+      if (key === 'Tab') {
+        const buttons = [...r.container.querySelectorAll('button:not(:disabled)')];
+        const index = buttons.indexOf(document.activeElement);
+        const next = index + (event.shiftKey ? -1 : 1);
+        buttons[(next + buttons.length) % buttons.length]?.focus();
+        event.preventDefault(); return;
+      }
       if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') readerGo(1);
       else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') readerGo(-1);
       else if (key === 'Escape' || key === 'Backspace') closeReader();
@@ -490,19 +558,26 @@
       });
     }
     if (dclose) dclose.addEventListener('click', closeChapters);
+    refs().dialog?.addEventListener('cancel', () => { ++state.chapterRequest; });
     const reader = document.getElementById('manga-reader');
     if (reader) {
       const close = reader.querySelector('.comic-close');
       if (close) close.addEventListener('click', closeReader);
+      reader.querySelector('.manga-previous')?.addEventListener('click', () => readerGo(-1));
+      reader.querySelector('.manga-next')?.addEventListener('click', () => readerGo(1));
     }
     bindReaderKeys();
   }
 
-  function mount() {
+  function ensureBound() {
     if (!state.mounted) {
       state.mounted = true;
       bindOnce();
     }
+  }
+  function mount() {
+    ensureBound();
+    renderHistory();
     renderGate();
   }
 
@@ -513,10 +588,25 @@
   // time and never re-filtered on switch.
   document.addEventListener('blazing-profile-selected', (event) => {
     const detail = (event && event.detail) || {};
+    ++state.generation;
+    closeReader(); closeChapters();
+    state.profileId = detail.id || null;
     state.isKids = detail.isKids === true;
     state.cap = detail.maxRating || null;
-    if (state.mounted) renderGate();
+    const { rows, input } = refs();
+    rows.replaceChildren(); rows.dataset.loaded = 'false'; input.value = '';
+    renderHistory();
+    if (state.mounted && !refs().view.hidden) renderGate();
   });
-
-  window.BlazingManga = { mount, openEpisode };
+  document.addEventListener('blazing-profile-signed-out', () => {
+    ++state.generation;
+    state.profileId = null; state.cap = null; state.isKids = true;
+    closeReader(); closeChapters(); renderHistory();
+    const { rows, input } = refs(); rows.replaceChildren(); rows.dataset.loaded = 'false'; input.value = '';
+  });
+  function openTitle(raw) {
+    ensureBound();
+    const manga = normalizeManga(raw); if (manga) openChapters(manga);
+  }
+  window.BlazingManga = { mount, openEpisode: (context) => { ensureBound(); return openEpisode(context); }, openTitle, history, historySection };
 })();

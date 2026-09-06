@@ -456,12 +456,39 @@
       </div>
     </section>
 
-    <!-- ── Comics View ── -->
+    <header id="anime-room-header" class="anime-room-header" hidden>
+      <div class="anime-room-intro">
+        <div><p class="eyebrow">Blazing Stream</p><h1>Anime &amp; Manga</h1><p>Anime, manga and comics, together.</p></div>
+        <form id="anime-room-search" role="search">
+          <label for="anime-room-query">Search this collection</label>
+          <div><input id="anime-room-query" type="search" maxlength="180" autocomplete="off" placeholder="Anime, manga or comics" /><button type="submit" class="primary-button">Search</button></div>
+        </form>
+      </div>
+      <nav class="anime-room-tabs" aria-label="Anime and manga">
+        <button type="button" data-room-view="anime">Anime</button>
+        <button type="button" data-room-view="manga">Manga</button>
+        <button type="button" data-room-view="comics">Comics</button>
+      </nav>
+    </header>
+    <section id="anime-room-view" class="view anime-room" aria-label="Anime collection" hidden>
+      <div id="anime-room-filters" class="anime-room-filters" aria-label="Anime categories">
+        <button type="button" data-anime-category="all" aria-pressed="true">Explore</button>
+        <button type="button" data-anime-category="top-rated" aria-pressed="false">Top rated</button>
+        <button type="button" data-anime-category="action" aria-pressed="false">Action &amp; adventure</button>
+        <button type="button" data-anime-category="comedy" aria-pressed="false">Comedy</button>
+        <button type="button" data-anime-category="scifi" aria-pressed="false">Fantasy &amp; sci-fi</button>
+      </div>
+      <p id="anime-room-status" class="search-status" role="status"></p>
+      <div id="anime-room-feature" hidden></div>
+      <div id="anime-room-continue"></div>
+      <div id="anime-room-results"></div>
+    </section>
+
+    <!-- The same room keeps the existing reader routes and dialogs. -->
     <section id="comics-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Comics &amp; Manga</p>
-        <h1>📖 Comics</h1>
-        <p>Pick a cover to read it. Arrow keys turn the page, Escape closes.</p>
+        <h2>Comics</h2>
+        <p>Open a cover to read. Some entries contain a preview only.</p>
       </div>
       <div id="comics-rows" class="rows">
          <div class="row"><div class="row-track"><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div><div class="card skeleton"></div></div></div>
@@ -469,10 +496,12 @@
     </section>
 
     <!-- ── Comic reader overlay ── -->
-    <div id="comic-reader" class="comic-reader" hidden>
+    <div id="comic-reader" class="comic-reader" role="dialog" aria-modal="true" aria-label="Comic reader" hidden>
       <div class="comic-bar">
         <span class="comic-label"></span>
         <span class="comic-counter"></span>
+        <button type="button" class="comic-previous" aria-label="Previous page">Previous</button>
+        <button type="button" class="comic-next" aria-label="Next page">Next</button>
         <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
       </div>
       <img class="comic-page" alt="" />
@@ -484,15 +513,15 @@
          Teen profiles are refused, same as Roku's mangaAllowedNow(). -->
     <section id="manga-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Manga</p>
-        <h1>📚 Manga</h1>
-        <p>Pick a cover to see its chapters. Mature and Adult profiles only.</p>
+        <h2>Manga</h2>
+        <p>Open a title for English chapters. Your place is saved for this profile on this device.</p>
       </div>
       <form id="manga-search-form" class="search-form" role="search">
-        <input id="manga-search-input" name="mq" type="search" autocomplete="off" placeholder="Search for a manga title" />
+        <input id="manga-search-input" name="mq" type="search" aria-label="Search manga" autocomplete="off" placeholder="Search for a manga title" />
         <button class="primary-button" type="submit">Search</button>
       </form>
       <p id="manga-status" class="search-status" role="status"></p>
+      <div id="manga-continue"></div>
       <div id="manga-rows" class="rows"></div>
     </section>
 
@@ -514,10 +543,12 @@
     </dialog>
 
     <!-- ── Manga reader overlay — same markup/CSS as #comic-reader on purpose ── -->
-    <div id="manga-reader" class="comic-reader" hidden>
+    <div id="manga-reader" class="comic-reader" role="dialog" aria-modal="true" aria-label="Manga reader" hidden>
       <div class="comic-bar">
         <span class="comic-label"></span>
         <span class="comic-counter"></span>
+        <button type="button" class="manga-previous" aria-label="Previous page">Previous</button>
+        <button type="button" class="manga-next" aria-label="Next page">Next</button>
         <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
       </div>
       <img class="comic-page" alt="" />
@@ -688,6 +719,7 @@
   <script src="./watch-party.js" defer></script>
   <script src="./locker.js" defer></script>
   <script src="./manga.js" defer></script>
+  <script src="./anime-room.js" defer></script>
   <script src="./games.js" defer></script>
 </body>
 </html>

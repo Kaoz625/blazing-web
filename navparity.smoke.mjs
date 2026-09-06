@@ -58,7 +58,7 @@ const VIEWS = [
   { id: 'home', heading: 'Home' },
   { id: 'movies', heading: 'Movies' },
   { id: 'shows', heading: 'TV Shows' },
-  { id: 'anime', heading: 'Anime' },
+  { id: 'anime', heading: 'Anime & Manga' },
   { id: 'search', heading: false },
   { id: 'library', heading: true },
   { id: 'emby', heading: true },
@@ -157,13 +157,14 @@ for (const view of VIEWS) {
       .filter((b) => b.classList.contains('active') || b.getAttribute('aria-current') === 'page');
     return { views: [...new Set(marked.map((b) => b.dataset.view))].join(','), want: v };
   }, view.id);
-  ok(active.views === view.id, `${view.id}: it is the one marked active`, `(${active.views || 'none'})`);
+  const expectedActive = view.id === 'manga' || view.id === 'comics' ? ['anime', view.id].sort().join(',') : view.id;
+  ok(active.views.split(',').sort().join(',') === expectedActive, `${view.id}: its room and current section are marked active`, `(${active.views || 'none'})`);
 
   const head = await page.evaluate((v) => {
-    const section = document.querySelector(`#${v}-view`)
-      || (['movies', 'shows', 'anime'].includes(v) ? document.getElementById('home-view') : null);
+    const section = ['anime', 'manga', 'comics'].includes(v) ? document.getElementById('anime-room-header')
+      : document.querySelector(`#${v}-view`) || (['movies', 'shows'].includes(v) ? document.getElementById('home-view') : null);
     if (!section || section.hidden) return null;
-    const h = section.querySelector('.page-heading h1');
+    const h = section.querySelector('.page-heading h1, .anime-room-intro h1');
     // Text alone is not enough. showRoute() writes into #browse-title whether or
     // not the block is on screen, so a heading hidden by a `hidden` attribute or
     // display:none would still read back its own words. A heading nobody can see

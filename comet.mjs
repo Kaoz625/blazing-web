@@ -123,7 +123,10 @@ async function cdpReady(port, timeoutMs) {
  * GPU and network helpers running — measured 3 descendants before, 2 still
  * alive after.
  */
-export async function launchBrowser({ timeoutMs = 30000, extraArgs = [] } = {}) {
+// Slow hosts can extend process startup only. Page/action/assertion timeouts
+// stay unchanged; CI keeps the normal30second default.
+export async function launchBrowser({ timeoutMs = Math.max(1000, Math.min(180000,
+  Number(process.env.BLAZING_COMET_START_TIMEOUT_MS) || 30000)), extraArgs = [] } = {}) {
   if (process.platform !== 'darwin' || !existsSync(COMET_BIN)) {
     if (process.platform === 'darwin') {
       throw new Error(
@@ -180,7 +183,13 @@ export async function launchBrowser({ timeoutMs = 30000, extraArgs = [] } = {}) 
     throw new Error(`Comet did not answer CDP on 127.0.0.1:${port} within ${timeoutMs}ms`);
   }
 
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(info.webSocketDebuggerUrl, { timeout: timeoutMs });
+  } catch (error) {
+    hardStop();
+    throw error;
+  }
   const disconnect = browser.close.bind(browser);
   // Shadow the prototype method so every existing `await browser.close()` also
   // reaps the process group and the scratch profile. Without this the harness

@@ -61,6 +61,7 @@ const CHAPTERS_OBJECT_SHAPE = {
   },
 };
 const PAGES = { pages: ['/manga/image?ch=c1&p=1', '/manga/image?ch=c1&p=2', 'https://cdn.example.test/absolute-page.jpg'] };
+const PAGE_IMAGE = await readFile(join(ROOT, 'icon-192.png'));
 
 const browser = await launchBrowser();
 
@@ -71,6 +72,7 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
     const url = route.request().url();
     calls.push({ url });
     if (onCall) onCall({ url });
+    if (route.request().resourceType() === 'image') return route.fulfill({ status: 200, contentType: 'image/png', body: PAGE_IMAGE });
 
     if (url.includes('/manga/discover')) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ popular: POPULAR, latest: LATEST }) });
@@ -89,6 +91,10 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
   });
   await ctx.route('https://addon.lyreosai.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+  await ctx.route('https://anime-kitsu.strem.fun/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ metas: [] }) }));
+  await ctx.route('https://cdn.example.test/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: PAGE_IMAGE }));
   const hasProfile = Object.keys(profile).length > 0;
   if (hasProfile) await prepareProfile(ctx, profile);
   const page = await ctx.newPage();
@@ -252,12 +258,12 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
 {
   const { ctx, page, calls } = await openApp();
   await page.waitForSelector('#manga-rows .row', { timeout: 10000 });
-  await page.fill('#manga-search-input', 'One Piece');
-  await page.click('#manga-search-form button[type="submit"]');
-  await page.waitForFunction(() => document.querySelectorAll('#manga-rows .row').length === 1, null, { timeout: 5000 });
+  await page.fill('#anime-room-query', 'One Piece');
+  await page.click('#anime-room-search button[type="submit"]');
+  await page.waitForSelector('#anime-room-results .card', { timeout: 30000 });
   const searchCall = calls.find((c) => c.url.includes('/manga/search') && c.url.includes('q=One'));
   check('search request carries the query', Boolean(searchCall), searchCall && searchCall.url);
-  check('search replaces the shelves with one results row', (await page.locator('#manga-rows .row-title').first().textContent()).includes('One Piece'));
+  check('one search opens the manga results in the shared room', (await page.locator('#anime-room-results .row-title').allTextContents()).includes('Manga'));
   await ctx.close();
 }
 
