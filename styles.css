@@ -965,6 +965,129 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .quality-select:hover, .quality-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); outline: none; }
 .quality-select option { background: #1c1c1f; color: #fff; }
 
+/* ── Season strip and episode rail ────────────────────────
+   Replaces a single <select> that held EVERY episode of EVERY season: measured
+   on the deployed app, The Simpsons drew 876 <option>s in it, Grey's Anatomy
+   476, Breaking Bad 67, with no grouping of any kind.
+
+   Both controls here are plain buttons, and that is the point. dpad.js walks
+   focusable elements by geometry, so it can reach a button and cannot open or
+   walk a native <select> popup — a dropdown is unusable from a TV remote. The
+   .episode-jump select survives beside them as the mouse's quick jump, scoped
+   to one season, which is what takes it from 876 options to about twenty.
+
+   The chips borrow .edu-tab's language on purpose: pill, muted at rest, accent
+   gradient when active. One focus colour everywhere, and it is the accent. */
+.episode-picker {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  margin-top: 14px;
+}
+.season-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  /* A show with twenty-eight seasons cannot wrap into eight rows above the
+     episodes. It scrolls sideways, and the scrollbar is left visible rather
+     than hidden — a hidden one is how a mouse user learns there is nothing
+     more to the right. */
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+}
+.season-chip {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 8px 16px;
+  color: var(--muted);
+  background: rgba(28,28,31,.8);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.season-chip:hover { color: #fff; background: var(--surface-focus); }
+.season-chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.season-chip.active {
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), var(--accent-strong));
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+/* Not a season, so it never wears the "this is the open season" gradient. It is
+   an action sitting at the end of a row of states, and it says so by being
+   outlined rather than filled. */
+.season-chip-jump {
+  margin-left: 4px;
+  border-style: dashed;
+  border-color: rgba(255,255,255,.28);
+}
+
+.episode-rail {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+}
+.episode-chip {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 2px;
+  align-content: center;
+  justify-items: start;
+  width: 190px;
+  min-height: 56px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 8px 12px;
+  text-align: left;
+  background: rgba(28,28,31,.8);
+  scroll-snap-align: start;
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.episode-chip:hover { background: var(--surface-focus); }
+.episode-chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.episode-chip.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.episode-chip-number { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.episode-chip-title {
+  /* Two lines, then an ellipsis. A one-line clamp cuts most episode titles mid
+     word; letting them run makes every card in the rail a different height. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.episode-jump { justify-self: start; max-width: 100%; }
+
+/* Both strips scroll, so both need a visible track — but two default macOS
+   scrollbars stacked under a chip row read as chrome, not as content. Thin,
+   rounded and low-contrast: still findable, no longer the loudest thing in the
+   dialog. */
+.season-strip, .episode-rail { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+.season-strip::-webkit-scrollbar, .episode-rail::-webkit-scrollbar { height: 6px; }
+.season-strip::-webkit-scrollbar-track, .episode-rail::-webkit-scrollbar-track { background: transparent; }
+.season-strip::-webkit-scrollbar-thumb, .episode-rail::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255,255,255,.22); }
+
+@media (max-width: 640px) {
+  .episode-chip { width: 158px; }
+}
+
+/* A remote cannot drag a scrollbar, so the app has to move both strips itself
+   (renderEpisodeControls scrolls the open season and the playing episode into
+   view). Smooth everywhere except where the viewer asked for no motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .season-strip, .episode-rail { scroll-behavior: smooth; }
+}
+
 /* ── Player ──────────────────────────────────────────────── */
 .player { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #000; }
 .player-bar { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-top)) 16px 26px; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.8), transparent); }

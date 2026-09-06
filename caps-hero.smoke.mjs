@@ -109,7 +109,18 @@ const STREAMS = {
     { name: '4K',     title: 'Some.Film.2026.2160p.WEB-DL.AV1.OPUS-GRP.mp4\n💾 18.2 GB 👤 12',              url: 'https://cdn.invalid/av1-4k.mp4' },
     { name: '1080p',  title: 'Some.Film.2026.1080p.WEB-DL.HEVC.AAC-GRP.mp4\n💾 3.4 GB 👤 150',              url: 'https://cdn.invalid/fhd-hevc.mp4' },
     { name: '1080p',  title: 'Some.Film.2026.1080p.WEB-DL.H264.AAC-GRP.mp4\n💾 4.1 GB 👤 220',              url: 'https://cdn.invalid/fhd.mp4' },
-    { name: '1080p',  title: 'Some.Film.2026.1080p.BluRay.x264.DTS-GRP.mkv\n💾 9.8 GB 👤 90',               url: 'https://cdn.invalid/fhd.mkv' },
+    // AAC, deliberately. This row exists to prove a CONTAINER coin-toss is a
+    // demotion and not a removal, so its audio must be decodable everywhere —
+    // it carried DTS until 6 Sep 2026 and then started being removed for the
+    // right reason by the new audio gate, which quietly stopped this assertion
+    // from testing containers at all. The DTS case has its own row below.
+    { name: '1080p',  title: 'Some.Film.2026.1080p.BluRay.x264.AAC-GRP.mkv\n💾 9.8 GB 👤 90',               url: 'https://cdn.invalid/fhd.mkv' },
+    // The audio gate's own fixture: a strong 1080p that this browser cannot make
+    // a sound from. Chrome/Comet decode no DTS, so it must be REMOVED, not merely
+    // demoted — a silent picture ranked first is the exact bug this gate exists
+    // for. On Safari, which does decode Dolby, the probe answers differently and
+    // the assertion below is skipped rather than inverted.
+    { name: '1080p',  title: 'Some.Film.2026.1080p.BluRay.x264.DTS-HD.MA-GRP.mkv\n💾 11.2 GB 👤 88',        url: 'https://cdn.invalid/fhd-dts.mkv' },
     { name: '720p',   title: 'Some.Film.2026.720p.WEB-DL.H264.AAC-GRP.mp4\n💾 1.9 GB 👤 300',               url: 'https://cdn.invalid/hd.mp4' },
     { name: '1080p',  title: 'Some.Film.2026.1080p.WEB.H264-HASHONLY\n💾 3.3 GB 👤 7',                      infoHash: 'abc123' },
   ],
@@ -352,7 +363,7 @@ const ranked = await page.evaluate((fixture) => {
 console.log('── ranked for a 1080p, no-HEVC device ──');
 ranked.weak.order.forEach((l, i) => console.log(`   ${i + 1}. ${l}`));
 console.log('   dropped:', JSON.stringify(ranked.weak.dropped));
-console.log('── ranked for a 4K, HEVC device (SAME seven rows) ──');
+console.log('── ranked for a 4K, HEVC device (SAME eight rows) ──');
 ranked.strong.order.forEach((l, i) => console.log(`   ${i + 1}. ${l}`));
 console.log('   dropped:', JSON.stringify(ranked.strong.dropped), '\n');
 
@@ -390,6 +401,31 @@ ok(/1080/.test(ranked.weak.order[0]) && /mp4/.test(ranked.weak.order[0]),
 ok(ranked.weak.order.findIndex((l) => l.includes('mkv')) >
    ranked.weak.order.findIndex((l) => l.includes('mp4')),
   'the mkv is demoted below the mp4 rather than removed');
+
+// The audio gate, stated as intent rather than as a row count so it still means
+// something when the fixture list changes. A source whose only audio track this
+// browser cannot decode must not appear at all: it plays a perfect picture in
+// total silence, reports no error, and readyState reaches 4 — so nothing further
+// down the stack can catch it. Measured 6 Sep 2026 on the real 324-source list
+// for "Past Lives": the old first row decoded 670,712 bytes of video and exactly
+// 0 bytes of audio.
+const dtsRows = [...ranked.weak.order, ...ranked.strong.order].filter((l) => /DTS/i.test(l));
+ok(dtsRows.length === 0 && ranked.weak.dropped.audio >= 1,
+  'a source this browser cannot make sound from is removed, not ranked',
+  `(kept ${JSON.stringify(dtsRows)}, dropped.audio ${ranked.weak.dropped.audio})`);
+// AND THE OTHER DIRECTION, so this cannot pass by removing everything. The AAC
+// mkv sits one row away in the same fixture and must survive — if the gate ever
+// widens from "cannot decode" to "is an mkv", or to "mentions a Dolby word
+// anywhere", this is what goes red.
+ok(weakHas('mkv') && ranked.weak.dropped.audio === 1,
+  'the AAC mkv beside it is untouched — the gate is about audio, not containers',
+  `(kept ${ranked.weak.order.filter((l) => l.includes('mkv')).length} mkv, dropped.audio ${ranked.weak.dropped.audio})`);
+// The 4K device drops TWO on audio, not one: the DTS row AND the TrueHD/Atmos
+// UHD remux, which is the single largest file in the fixture and the one a
+// naive "biggest is best" ranker would have put first. Chrome decodes neither.
+ok(ranked.strong.dropped.audio === 2,
+  'the 62GB TrueHD Atmos remux is dropped too — the prize row is exactly the silent one',
+  `(strong dropped.audio ${ranked.strong.dropped.audio})`);
 
 // THE OTHER DIRECTION. Without this the whole test passes on an empty list.
 ok(strongHas('hevc') && / 2160$/.test(ranked.strong.order[0]),

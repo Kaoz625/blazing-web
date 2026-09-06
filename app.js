@@ -45,11 +45,21 @@ const el = (tag, className) => {
   return node;
 };
 
-async function fetchJSON(url) {
+/**
+ * `headers` is optional and additive — every existing caller passes nothing and
+ * behaves exactly as before. It exists for the ONE route in this file that is
+ * authenticated: the fleet's per-profile progress, which wants the device token
+ * in X-Device-Token. `credentials: 'omit'` stays, because that token is a
+ * header, never a cookie.
+ */
+async function fetchJSON(url, { headers } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   try {
-    const response = await fetch(url, { signal: controller.signal, mode: 'cors', credentials: 'omit' });
+    const response = await fetch(url, {
+      signal: controller.signal, mode: 'cors', credentials: 'omit',
+      headers: { Accept: 'application/json', ...(headers || {}) },
+    });
     if (!response.ok) {
       const error = new Error(`HTTP ${response.status}`);
       error.status = response.status;
@@ -386,14 +396,39 @@ function youtubeTrailerId(raw) {
   return '';
 }
 
+/**
+ * SEASON 0 IS SPECIALS, AND IT USED TO BE SILENTLY RENAMED SEASON 1.
+ *
+ * `Math.max(1, Math.floor(Number(video.season || fallbackSeason) || 1))` folded
+ * three separate things into the number 1: a real season 1, a missing season,
+ * and season 0. Zero is falsy twice over on that line — `video.season || …`
+ * skips it, and `Number('0') || 1` turns the id's own "0" segment into 1 — so
+ * every special came out labelled S1, sorted in among the real first season, and
+ * (because the list is sorted and the old default was episodes[0]) a show with
+ * specials OPENED PRE-SELECTED ON ONE. That mislabelled episode id is what the
+ * Play button and the source search then used, so the wrong thing played.
+ *
+ * The id is never touched — it is `tt0096697:0:5` on the wire and it stays
+ * `tt0096697:0:5`, because that is what /stream/ is asked for. Only the season
+ * NUMBER is now honest, so seasonLabel() can say "Specials" and
+ * firstRealEpisode() can skip past them.
+ *
+ * A season this cannot read at all is 1, not 0: an unreadable season is a
+ * missing field, and calling it Specials would be a worse lie than the old one.
+ */
 function safeEpisodes(raw) {
   const list = raw && Array.isArray(raw.videos) ? raw.videos : [];
   return list.map((video, index) => {
     if (!video || !video.id) return null;
     const id = plainText(video.id).slice(0, 160);
     const parts = id.split(':');
-    const fallbackSeason = /^kitsu:\d+:\d+$/.test(id) ? 1 : parts[parts.length - 2];
-    const season = Math.max(1, Math.floor(Number(video.season || fallbackSeason) || 1));
+    // kitsu:100:3 has no season segment at all — its middle part is the SHOW id
+    // — so a kitsu episode is season 1 unless the meta says otherwise.
+    const stated = video.season === undefined || video.season === null || video.season === ''
+      ? (/^kitsu:\d+:\d+$/.test(id) ? 1 : parts[parts.length - 2])
+      : video.season;
+    const parsed = Math.floor(Number(stated));
+    const season = Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
     const episode = Math.floor(Number(video.episode || parts[parts.length - 1]) || 0);
     if (!id || episode < 1) return null;
     return {
@@ -405,6 +440,39 @@ function safeEpisodes(raw) {
     };
   }).filter(Boolean).sort((a, b) =>
     a.season - b.season || a.episode - b.episode || a.absoluteEpisode - b.absoluteEpisode);
+}
+
+/** Season 0 is where Cinemeta, TMDB and Kitsu all keep the specials. */
+function seasonLabel(season) {
+  return season === 0 ? 'Specials' : `Season ${season}`;
+}
+
+/** The short form, for a chip that has to sit in a row of twenty-eight of them. */
+function seasonChipLabel(season) {
+  return season === 0 ? 'Specials' : `S${season}`;
+}
+
+/**
+ * PLAY ON A SERIES MEANS THE FIRST REAL EPISODE. The list is sorted, so season 0
+ * sits at the front of it and episodes[0] is a special for every show that has
+ * any — which is exactly what used to be pre-selected and played.
+ *
+ * A show that has NOTHING but specials still has to open on something, so the
+ * fallback is the first of those.
+ */
+function firstRealEpisode(episodes) {
+  return episodes.find((episode) => episode.season >= 1) || episodes[0] || null;
+}
+
+/** The sorted list, cut into contiguous per-season blocks. */
+function episodeSeasons(episodes) {
+  const seasons = [];
+  for (const episode of episodes) {
+    const last = seasons[seasons.length - 1];
+    if (!last || last.season !== episode.season) seasons.push({ season: episode.season, episodes: [episode] });
+    else last.episodes.push(episode);
+  }
+  return seasons;
 }
 
 function safeMeta(raw) {
@@ -486,6 +554,14 @@ const state = {
   // written; until now NOTHING listened, so every Emby row reached every viewer
   // and the Kids profile on the web saw the whole library.
   profileCap: null,
+  // The Kids flag, kept BESIDE the cap because they are two different things
+  // and the Roku gates Manga on both: mangaAllowedNow() (MainScene.brs:5155) is
+  // `not isKids AND rating allows mature`. profile.js carries isKids and
+  // maxRating independently, so a Kids profile with a mature cap passes a
+  // cap-only check and fails the Roku's — the web was the loose one.
+  // false with nobody connected is safe: profileCap is null then, so
+  // ratingAllowed('mature') already refuses.
+  profileIsKids: false,
 };
 
 const homeView = $('#home-view');
@@ -605,14 +681,16 @@ function seedHomeHero(meta, opts) {
     .filter(Boolean).join('  ·  ');
   $('#home-hero-synopsis').textContent = meta.description || '';
 
-  const progress = opts && opts.progress;
+  // A PERCENTAGE, already settled by the caller. It used to be a
+  // {position, duration} pair divided here, but the two history stores disagree
+  // on that shape — the fleet keeps a 0-100 integer and no duration at all,
+  // the add-on keeps seconds — so the division moved to the one place that
+  // knows which store answered (progressRowEntry). null, never 0, means the
+  // store does not know: a bar of NaN width renders as a FULL one.
+  const percent = opts && typeof opts.percent === 'number' ? opts.percent : null;
   const bar = $('#home-hero-progress');
-  if (progress && Number(progress.duration) > 0) {
-    // A zero or missing duration is the API saying it does not know, not "0%
-    // watched" — the same trap loadContinueWatching's row bar records, where a
-    // bar of NaN width renders as a FULL one.
-    const pct = Math.max(0, Math.min(100, (Number(progress.position) / Number(progress.duration)) * 100));
-    $('#home-hero-progress-fill').style.width = `${pct}%`;
+  if (percent !== null && percent > 0) {
+    $('#home-hero-progress-fill').style.width = `${Math.max(0, Math.min(100, percent))}%`;
     bar.hidden = false;
   } else {
     bar.hidden = true;
@@ -2072,7 +2150,36 @@ async function loadSDUIRow(catalogInfo, section, request = homeRequest) {
   }
 }
 
-/** Rebuild Home after a profile is selected, including on a returning browser. */
+/**
+ * Rebuild Home after a profile is selected, including on a returning browser.
+ *
+ * IT NOW BUILDS WHILE THE GATE IS STILL UP — for a viewer this browser already
+ * knows. That is the whole reason the web home was empty: state.profileId is
+ * null on every single page load, so this returned before its first line of
+ * work and the deployed app drew ZERO rows and made exactly ONE network call,
+ * while the 55" Roku drew 39. restoreProfileSession() (bottom of this file)
+ * hands the returning viewer's id and cap back before this runs, so the home
+ * behind the gate is now that viewer's real home, built with their real cap,
+ * exactly the way the Roku's HomeScreen builds during its own gate.
+ *
+ * WHAT IT STILL WILL NOT DO IS BUILD FOR A STRANGER, and that is deliberate:
+ * a browser with no remembered viewer draws nothing until somebody says who
+ * they are. Two measurements settle it, and both point the same way.
+ *
+ *  1. The most restrictive cap really is empty. With no profile connected the
+ *     cap is 'general', and ratingAllowed() correctly treats an unknown tier as
+ *     unknown-not-safe. Live catalog metas carry NO contentRating at all
+ *     (measured 2026-09-06: 1 of 1 on blazing-trending-movies), so a strictly
+ *     capped pre-profile home has nothing it is allowed to draw. Relaxing that
+ *     — letting an unrated title through because its shelf looked safe — is the
+ *     one thing this app must not do to an unidentified viewer.
+ *  2. home-profile.smoke.mjs:91 and :93 already pin exactly this, by name:
+ *     "No old personal Home behind the gate" and "Home waits for a selection".
+ *
+ * See notesForOwner: the audit asked for shared shelves behind the gate, and
+ * that is a server change (a curated shelf set with real contentRating on its
+ * items), not a client one.
+ */
 async function boot() {
   if (!state.profileId) {
     if (window.BlazingProfile && !window.BlazingProfile.isOpen()) window.BlazingProfile.open();
@@ -2404,8 +2511,10 @@ async function requestUpscale() {
 }
 
 function clearEpisodeControls() {
+  const picker = $('#detail-episodes');
   const select = $('#detail-episode-select');
   const mangaButton = $('#detail-manga');
+  if (picker) picker.remove();
   if (select) select.remove();
   if (mangaButton) mangaButton.remove();
 }
@@ -2424,6 +2533,24 @@ function episodeContext(meta) {
   };
 }
 
+/**
+ * ONE FLAT LIST OF EVERY EPISODE OF EVERY SEASON WAS THE WHOLE CONTROL.
+ * Measured on the deployed app: The Simpsons rendered 876 <option> elements in
+ * a single <select> with no grouping of any kind, Grey's Anatomy 476, Breaking
+ * Bad 67. Nobody finds season 19 in that.
+ *
+ * The Roku already solves this and this copies its interaction: a season chip
+ * strip, a "Jump to newest" chip, and a per-season episode rail.
+ *
+ * WHY THE <select> IS STILL HERE. A native select cannot be driven by a remote
+ * — dpad.js moves focus by geometry and cannot open or walk a popup — so the
+ * chips and the rail are the real control and both are plain buttons. The
+ * select stays as the quick jump for a mouse, and it is now scoped to ONE
+ * season, which is what takes it from 876 options to about twenty. It is also
+ * the surface three shipped tests drive by id (anime-room.smoke.mjs:113,
+ * episode-manga.smoke.mjs:103, source-error.smoke.mjs:136), so it keeps its id,
+ * stays visible, and stays a real <select>.
+ */
 function renderEpisodeControls(meta) {
   clearEpisodeControls();
   const episodes = Array.isArray(meta && meta.videos) ? meta.videos : [];
@@ -2432,30 +2559,120 @@ function renderEpisodeControls(meta) {
     return;
   }
   if (!state.selectedEpisode || !episodes.some((episode) => episode.id === state.selectedEpisode.id)) {
-    state.selectedEpisode = episodes[0];
+    state.selectedEpisode = firstRealEpisode(episodes);
   }
+
+  const seasons = episodeSeasons(episodes);
+  // The season being BROWSED, which is not always the season being played: a
+  // viewer can look through season 4 without committing to it until they pick
+  // an episode, exactly as the Roku's strip behaves.
+  let openSeason = state.selectedEpisode.season;
+
+  const picker = el('div', 'episode-picker');
+  picker.id = 'detail-episodes';
+  const strip = el('div', 'season-strip');
+  strip.setAttribute('role', 'tablist');
+  strip.setAttribute('aria-label', 'Season');
+  const rail = el('div', 'episode-rail');
+  rail.setAttribute('aria-label', 'Episodes');
 
   const select = document.createElement('select');
   select.id = 'detail-episode-select';
-  select.className = 'quality-select';
+  select.className = 'quality-select episode-jump';
   select.setAttribute('aria-label', 'Episode');
-  for (const episode of episodes) {
-    const option = document.createElement('option');
-    option.value = episode.id;
-    option.textContent = `S${episode.season} E${episode.episode}${episode.title ? ` · ${episode.title}` : ''}`;
-    option.selected = episode.id === state.selectedEpisode.id;
-    select.appendChild(option);
-  }
-  select.addEventListener('change', () => {
-    state.selectedEpisode = episodes.find((episode) => episode.id === select.value) || episodes[0];
-    detailStatus.textContent = `Finding sources for S${state.selectedEpisode.season} E${state.selectedEpisode.episode}…`;
-    loadStreams(meta);
-  });
-  detailPlay.insertAdjacentElement('afterend', select);
 
-  // Manga is a Mature section everywhere. Hide the action entirely when this
-  // profile cannot enter the reader, and never make an episode-map request.
-  if (meta.isAnime && ratingAllowed('mature') && window.BlazingManga) {
+  function choose(episode) {
+    if (!episode || episode.id === state.selectedEpisode.id) return;
+    state.selectedEpisode = episode;
+    openSeason = episode.season;
+    paint();
+    detailStatus.textContent = `Finding sources for ${seasonLabel(episode.season)}, episode ${episode.episode}…`;
+    loadStreams(meta);
+  }
+
+  function paint() {
+    const current = seasons.find((group) => group.season === openSeason) || seasons[0];
+    openSeason = current.season;
+
+    strip.replaceChildren(...seasons.map((group) => {
+      const chip = el('button', 'season-chip');
+      chip.type = 'button';
+      chip.setAttribute('role', 'tab');
+      chip.textContent = seasonChipLabel(group.season);
+      // The chip says "S19"; the label a screen reader and a TV remote's
+      // announcement need is the whole phrase.
+      chip.setAttribute('aria-label', `${seasonLabel(group.season)}, ${group.episodes.length} episodes`);
+      const open = group.season === current.season;
+      chip.setAttribute('aria-selected', String(open));
+      chip.classList.toggle('active', open);
+      chip.addEventListener('click', () => { openSeason = group.season; paint(); });
+      return chip;
+    }));
+
+    // NEWEST IS THE LAST REAL EPISODE, never a special. Specials sort to the
+    // front of the list and are usually years old, so "newest" pointing at one
+    // would be wrong twice.
+    const real = episodes.filter((episode) => episode.season >= 1);
+    const newest = real[real.length - 1];
+    if (newest && seasons.length > 1) {
+      const jump = el('button', 'season-chip season-chip-jump');
+      jump.type = 'button';
+      jump.textContent = 'Jump to newest';
+      jump.setAttribute('aria-label', `Jump to the newest episode, ${seasonLabel(newest.season)} episode ${newest.episode}`);
+      jump.addEventListener('click', () => choose(newest));
+      strip.appendChild(jump);
+    }
+
+    rail.replaceChildren(...current.episodes.map((episode) => {
+      const button = el('button', 'episode-chip');
+      button.type = 'button';
+      button.dataset.episodeId = episode.id;
+      const number = el('span', 'episode-chip-number');
+      number.textContent = `E${episode.episode}`;
+      const title = el('span', 'episode-chip-title');
+      title.textContent = episode.title || `${seasonLabel(episode.season)}, episode ${episode.episode}`;
+      button.append(number, title);
+      const playing = episode.id === state.selectedEpisode.id;
+      button.classList.toggle('active', playing);
+      if (playing) button.setAttribute('aria-current', 'true');
+      button.addEventListener('click', () => choose(episode));
+      return button;
+    }));
+
+    select.replaceChildren(...current.episodes.map((episode) => {
+      const option = document.createElement('option');
+      option.value = episode.id;
+      option.textContent = `S${episode.season} E${episode.episode}${episode.title ? ` · ${episode.title}` : ''}`;
+      option.selected = episode.id === state.selectedEpisode.id;
+      return option;
+    }));
+
+    // BOTH STRIPS HAVE TO MOVE THEMSELVES. A remote cannot drag a scrollbar,
+    // and The Simpsons draws 39 season chips of which about six fit — so
+    // resuming season 19 would otherwise leave the strip parked on Specials with
+    // the active chip somewhere off-screen to the right. 'nearest' on the block
+    // axis so this scrolls the strip and never the dialog behind it.
+    const openChip = strip.querySelector('.season-chip.active');
+    if (openChip) openChip.scrollIntoView({ block: 'nearest', inline: 'center' });
+    const playing = rail.querySelector('.episode-chip.active');
+    if (playing) playing.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
+  select.addEventListener('change', () => {
+    choose(episodes.find((episode) => episode.id === select.value));
+  });
+
+  paint();
+  picker.append(strip, rail, select);
+  detailPlay.insertAdjacentElement('afterend', picker);
+
+  // Manga is a Mature section everywhere, and the Roku gates it on TWO things
+  // (mangaAllowedNow, MainScene.brs:5155): not a Kids profile, AND a cap that
+  // reaches 'mature'. The web checked only the cap, so a Kids profile carrying a
+  // mature cap could open the reader here and not on the television. Hide the
+  // action entirely when this profile cannot enter, and never make an
+  // episode-map request.
+  if (meta.isAnime && !state.profileIsKids && ratingAllowed('mature') && window.BlazingManga) {
     const button = document.createElement('button');
     button.id = 'detail-manga';
     button.className = 'secondary-button';
@@ -2467,7 +2684,10 @@ function renderEpisodeControls(meta) {
       closeDetail();
       window.BlazingManga.openEpisode(context);
     });
-    select.insertAdjacentElement('afterend', button);
+    // After the whole picker, not after the <select> — the select now lives
+    // inside it, so an "afterend" there would drop the button between the
+    // episode rail and the dropdown.
+    picker.insertAdjacentElement('afterend', button);
   }
 }
 
@@ -2857,6 +3077,16 @@ function buildFilterNote(ranked) {
   if (d.nourl) parts.push(`${d.nourl} with no direct link`);
   if (d.res) parts.push(`${d.res} above this screen`);
   if (d.codec || d.codec4k) parts.push(`${d.codec + d.codec4k} this browser cannot decode`);
+  // SOUND, said out loud. caps.js removes any source whose only audio track is
+  // Dolby or DTS, because this browser has no decoder for those and the row
+  // plays a perfect picture in total silence — readyState 4, no error event,
+  // nothing downstream able to catch it. That gate removed 111 of 324 rows on a
+  // real title the day it landed, and without this line the panel said "165 of
+  // 324 match" and explained only 48 of the 159 it had cut. Hiding something
+  // without naming it is the exact failure this whole function exists to
+  // prevent, so a new gate has to arrive here in the same commit or the note
+  // starts lying by omission.
+  if (d.audio) parts.push(`${d.audio} with sound this browser cannot play`);
   if (d.size) parts.push(`${d.size} too large for this connection`);
   const note = el('div', 'stream-note');
   note.textContent = `${ranked.streams.length} of ${ranked.total} sources match this device’s format limits` +
@@ -2879,6 +3109,14 @@ function describeAllRejected(ranked, caps) {
   if (d.codec || d.codec4k) {
     return `All ${ranked.total} sources for this title use a codec this browser ` +
       `cannot decode. Safari and Edge open HEVC; Chrome and Firefox often do not.`;
+  }
+  // Reachable only if the safe fallback in rankStreams did NOT fire — it
+  // readmits silent rows, marked, when removing them would leave nothing. So if
+  // this branch is ever hit, something else also rejected the readmitted rows.
+  if (d.audio) {
+    return `All ${ranked.total} sources for this title carry only Dolby or DTS sound, ` +
+      `which this browser cannot decode. Safari on a Mac or an Apple TV plays these; ` +
+      `Chrome and Firefox do not.`;
   }
   if (d.res) return `All ${ranked.total} sources are above this screen's ${caps.maxHeight}p.`;
   if (d.size) return `All ${ranked.total} sources are too large for this connection.`;
@@ -3308,13 +3546,195 @@ function closePlayer() {
  * loadContinueWatching PREPENDS its row, so it lands above whatever the shelves
  * have already drawn, whichever finishes first.
  */
+/* THREE INDEPENDENT BUGS KEPT THIS ROW OFF THE SCREEN, and it has never once
+   drawn. All three are fixed below; each on its own was enough.
+
+   1. THE WRONG BACKEND. This asked the ADD-ON
+      (addon.lyreosai.com/api/sync/progress/recent). The real history lives on
+      the FLEET at GET /profiles/:id/progress — that is what the Roku reads and
+      writes, and it is the store with the posters and the resume points in it.
+      The add-on's store holds metadata-free rows: saveProgress (blazing-addon
+      lib/sync_store.js:22) persists {imdbId, position, duration, profileId,
+      deviceId, updatedAt} and nothing else — no name, no poster, no type.
+   2. THE WRONG KEY. It read `data.items`. The add-on answers `{entries: [...]}`
+      (blazing-addon server.js:2417) and the fleet answers
+      `{progress: {items: [...]}}` (blazing-fleet server.js:1072). `data.items`
+      is undefined on both, so the `if` was never once true. Measured live
+      2026-09-06: GET /api/sync/progress/recent?profileId=test -> {"entries":[]}.
+   3. THE WRONG ID FIELD. An add-on entry carries `imdbId`, and safeMeta() drops
+      any object with no `id`. So even past bug 2 the row would have built zero
+      cards.
+
+   The fleet is asked first and the add-on is the fallback, because their
+   payloads are not equal: a fleet item already carries name, poster, background
+   and a 0-100 percentage (sanitizeProgressPayload, blazing-fleet
+   profiles.js:552), while an add-on entry carries an id and two numbers and has
+   to be filled in from /meta/ one title at a time — which is exactly what the
+   Roku does with the same rows (AddonTask.brs:176 GetMeta per entry). */
+const PROFILE_DEVICE_KEY = 'blazing-web-profile-device-v1';
+
+/**
+ * The fleet's own device credential, written by profile.js on registration.
+ *
+ * Read straight out of localStorage rather than through BlazingProfile: that
+ * module exposes only open()/isOpen()/mediaRequest(), and mediaRequest is
+ * hard-restricted to /media/* paths, so there is no way to ask it for
+ * /profiles/:id/progress today. See notesForOwner — a BlazingProfile.fleetGet()
+ * would be the cleaner home for this.
+ */
+function storedDeviceCredentials() {
+  try {
+    const value = JSON.parse(localStorage.getItem(PROFILE_DEVICE_KEY) || 'null');
+    if (!value || typeof value !== 'object') return null;
+    const id = plainText(value.id);
+    const token = plainText(value.token);
+    return id && token ? { id, token } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One history row, in the one shape this file draws: a meta buildCard()
+ * understands, plus the percentage the bar needs.
+ *
+ * `percent` is null, never 0, when the store does not know — a NaN or missing
+ * width renders as a FULL bar, which is the same trap the old row bar and the
+ * hero band both carry a comment about.
+ */
+function progressRowEntry(meta, percent, updatedAt) {
+  if (!meta) return null;
+  const pct = Number(percent);
+  return {
+    meta,
+    percent: Number.isFinite(pct) && pct > 0 ? Math.max(0, Math.min(100, pct)) : null,
+    updatedAt: Number(updatedAt) || 0,
+  };
+}
+
+/** `tt0903747:5:14` is an episode of `tt0903747`, and it is a series. */
+function progressTitleId(rawId, rawType) {
+  const id = plainText(rawId);
+  if (!id) return null;
+  const parts = id.split(':');
+  // kitsu:41370:12 is the same shape but its ROOT is two segments, not one.
+  if (/^kitsu:\d+:\d+$/.test(id)) return { id: parts.slice(0, 2).join(':'), type: 'series' };
+  if (parts.length >= 3) return { id: parts[0], type: 'series' };
+  const type = plainText(rawType).toLowerCase();
+  return { id, type: type === 'series' || type === 'tv' ? 'series' : 'movie' };
+}
+
+/**
+ * THREE payload shapes, one reader. Same call profile.js's progressItems()
+ * makes, and for the same reason — these stores have never agreed:
+ *
+ *   {progress: {items: [...]}}   the fleet   (blazing-fleet server.js:1072)
+ *   {entries: [...]}             the add-on  (blazing-addon server.js:2417)
+ *   {items: [...]}               the first fleet contract, still answered by
+ *                                older builds and by the repo's own fixtures
+ *
+ * A bare array is accepted too, because that is what sanitizeProgressPayload
+ * itself takes as input and one day something will hand it straight back.
+ */
+function progressItemsOf(body) {
+  if (Array.isArray(body)) return body;
+  if (!body || typeof body !== 'object') return [];
+  if (body.progress && Array.isArray(body.progress.items)) return body.progress.items;
+  if (Array.isArray(body.entries)) return body.entries;
+  if (Array.isArray(body.items)) return body.items;
+  return [];
+}
+
+/**
+ * One stored row -> one drawable entry, whichever store it came from.
+ *
+ * `id` OR `imdbId`: the add-on writes imdbId (lib/sync_store.js:25) and
+ * safeMeta() drops any object with no `id`, which is bug 3 above.
+ *
+ * The percentage is read from whichever of the THREE forms the store keeps, and
+ * they are genuinely all in use:
+ *
+ *   progress: 62                    the fleet's own 0-100 integer, with no
+ *                                   duration anywhere in the record
+ *                                   (blazing-fleet profiles.js:557)
+ *   position / duration             seconds, flat on the row — what the add-on
+ *                                   persists (blazing-addon sync_store.js:25)
+ *                                   and what THIS file POSTs in startSync()
+ *   progress: {position, duration}  seconds, nested; the shape the older TV
+ *                                   clients wrote and the shape this repo's own
+ *                                   fixtures still send
+ *
+ * A zero or missing duration is the store saying it does not know how long the
+ * title is, not "0% watched" — a bar of NaN width renders as a FULL one.
+ */
+function progressPercentOf(raw) {
+  const nested = raw.progress && typeof raw.progress === 'object' ? raw.progress : null;
+  const seconds = nested || raw;
+  const duration = Number(seconds.duration);
+  if (duration > 0) return (Number(seconds.position) / duration) * 100;
+  const stated = Number(raw.progress);
+  return Number.isFinite(stated) && stated > 0 ? stated : null;
+}
+
+function progressEntryOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = progressTitleId(raw.id || raw.imdbId, raw.type);
+  if (!root) return null;
+  const percent = progressPercentOf(raw);
+  const entry = progressRowEntry(
+    safeDiscoverMeta({ ...raw, id: root.id, type: root.type }),
+    percent,
+    raw.updatedAt,
+  );
+  // An add-on row is nothing but an id and two numbers, so it has no name and
+  // no poster and cannot be drawn as it stands. The Roku fills exactly these in
+  // the same way, one GetMeta per entry (AddonTask.brs:176).
+  if (entry && (!entry.meta.poster || !entry.meta.name || entry.meta.name === 'Untitled')) entry.needsMeta = true;
+  return entry;
+}
+
+async function progressFrom(url, options) {
+  const entries = progressItemsOf(await fetchJSON(url, options)).map(progressEntryOf).filter(Boolean);
+  // Only the rows that arrived bare cost a lookup, and fetchFullMeta caches.
+  // A title it cannot resolve is dropped rather than drawn as a grey rectangle
+  // with no name on it.
+  const filled = await Promise.all(entries.map(async (entry) => {
+    if (!entry.needsMeta) return entry;
+    const full = await fetchFullMeta({ id: entry.meta.id, type: entry.meta.type });
+    return full ? { ...entry, meta: full } : null;
+  }));
+  return filled.filter(Boolean);
+}
+
+function fleetProgressEntries(profileId) {
+  const credentials = storedDeviceCredentials();
+  if (!credentials) return Promise.resolve([]);
+  return progressFrom(
+    `${FLEET_BASE}/profiles/${encodeURIComponent(profileId)}/progress`
+      + `?deviceId=${encodeURIComponent(credentials.id)}`,
+    { headers: { 'X-Device-Token': credentials.token } },
+  );
+}
+
+function addonProgressEntries(profileId) {
+  return progressFrom(`${API_BASE}/api/sync/progress/recent?profileId=${encodeURIComponent(profileId)}`);
+}
+
 async function loadContinueWatching(explicitProfileId, request = homeRequest) {
   const profileId = explicitProfileId || state.profileId;
   if (!profileId) return;
   try {
-    const data = await fetchJSON(`${API_BASE}/api/sync/progress/recent?profileId=${encodeURIComponent(profileId)}`);
+    // Settled, not raced: the fleet is the source of truth, and the add-on only
+    // gets to fill an EMPTY row. Merging the two would double every title the
+    // Roku has written to both.
+    let entries = await fleetProgressEntries(profileId).catch(() => []);
+    if (!entries.length) entries = await addonProgressEntries(profileId).catch(() => []);
     if (request !== homeRequest || profileId !== state.profileId) return;
-    if (data.items && data.items.length) {
+    // Newest first. The fleet stores insertion order and does not sort (its own
+    // getProgress comment says so), so recency is this client's decision — the
+    // same call profile.js makes for the gate artwork.
+    entries.sort((a, b) => b.updatedAt - a.updatedAt);
+    if (entries.length) {
       const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
       section.dataset.rowId = 'continue-watching';
       // Exactly ONE of these, ever. boot() and the profile-selected listener can
@@ -3324,26 +3744,21 @@ async function loadContinueWatching(explicitProfileId, request = homeRequest) {
       if (stale) stale.remove();
       rowsWrap.prepend(section);
       const track = $('.row-track', section);
-      // Keep the RAW item beside the safe one. safeMeta() is an allow list and
-      // `progress` is not on it, so `m.progress` below was undefined for every
-      // card and the resume bar never drew once — the row whose whole job is to
-      // show how far you got showed no position at all. Widening the allow list
-      // would change every other caller's shape; this does not.
-      const pairs = data.items
-        .map((raw) => ({ raw, meta: safeDiscoverMeta(raw) }))
-        .filter((pair) => pair.meta && ratingAllowed(pair.meta.contentRating));
+      // The percentage travels BESIDE the meta, not inside it. safeMeta() is an
+      // allow list and no progress field is on it, so anything folded into the
+      // meta is silently dropped — which is how the row whose whole job is to
+      // show how far you got once showed no position at all. Widening the allow
+      // list would change every other caller's shape; this does not.
+      const pairs = entries.filter((pair) => pair.meta && ratingAllowed(pair.meta.contentRating));
       if (!pairs.length) { section.remove(); return; }
       const metas = pairs.map((pair) => pair.meta);
-      track.replaceChildren(...pairs.map(({ raw, meta }) => {
+      track.replaceChildren(...pairs.map(({ meta, percent }) => {
         const c = buildCard(meta);
-        const seen = raw && raw.progress;
-        // A zero or missing duration is the API saying it does not know, not
-        // "0% watched" — a bar of NaN width renders as a full one.
-        if (seen && Number(seen.duration) > 0) {
+        // null, not 0, when the store does not know — see progressRowEntry.
+        if (percent !== null) {
           const bar = document.createElement('div');
           bar.className = 'progress-bar';
-          const pct = Math.max(0, Math.min(100, (Number(seen.position) / Number(seen.duration)) * 100));
-          bar.innerHTML = `<div class="progress-fill" style="width: ${pct}%"></div>`;
+          bar.innerHTML = `<div class="progress-fill" style="width: ${percent}%"></div>`;
           c.appendChild(bar);
         }
         return c;
@@ -3366,7 +3781,7 @@ async function loadContinueWatching(explicitProfileId, request = homeRequest) {
         seedHomeHero(first.meta, {
           priority: 2,
           eyebrow: 'Continue watching',
-          progress: first.raw && first.raw.progress,
+          percent: first.percent,
         });
       }
     }
@@ -3863,6 +4278,108 @@ function loadEmbyView() {
   loadEmbyPage(true);
 }
 
+/* ---- The returning viewer -------------------------------------------------
+
+   `localStorage.profileId` has been written on every profile pick since this
+   listener was written, and NOTHING HAS EVER READ IT BACK. profile.js only ever
+   removes it (twice, on sign-out). So an approved household browser re-picked a
+   profile on every single page load, and every load started with no cap, no
+   list and no history.
+
+   What is restored, and what deliberately is not:
+
+     RESTORED  the id, the rating cap, and My List — enough to draw the right
+               home for the right viewer at first paint.
+     NOT       `unlocked`, and never an unlockable profile. A PIN is answered by
+               a person, not by localStorage; `detail.unlocked` is true only
+               when a PIN was actually entered (profile.js builds it from a live
+               unlock token), so it is exactly the flag that says "this one must
+               be asked again".
+     NOT       an adult-enabled profile. The Roku's adultAllowedNow() refuses to
+               act on anything but a live, unexpired, same-profile unlock token;
+               a stored snapshot is none of those things.
+     NOT       state.mediaProfile. Books/Music/Podcasts and the manga reader go
+               through BlazingProfile.mediaRequest(), which needs the live
+               device credentials and unlock token that only profile.js holds.
+               Leaving it null is what keeps a restored session from *looking*
+               connected to a subsystem that would then 403.
+
+   profile.js still opens its gate on every load — that is its own deliberate
+   rule and its file is not ours to change. The difference this makes is that
+   the home behind the gate is already the returning viewer's home, and a
+   profile that has since been deleted or PIN-locked simply never restores: the
+   pick that follows overwrites all of it anyway. */
+const PROFILE_SESSION_KEY = 'blazing-web-profile-session-v1';
+// A month. Long enough that a household TV-like browser never re-picks in
+// normal use, short enough that a shared or borrowed machine forgets.
+const PROFILE_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function rememberProfileSession(detail) {
+  try {
+    localStorage.setItem(PROFILE_SESSION_KEY, JSON.stringify({
+      id: String(detail.id),
+      maxRating: String(detail.maxRating || 'general').toLowerCase(),
+      isKids: detail.isKids === true,
+      // Recorded so the restore can refuse. See the note above: true here means
+      // a human answered a PIN for this profile, so a human has to answer again.
+      neededPin: detail.unlocked === true,
+      allowAdult: detail.allowAdult === true,
+      savedAt: Date.now(),
+    }));
+  } catch {
+    // Storage can be blocked or full. A browser that cannot remember simply
+    // picks again, which is exactly today's behaviour.
+  }
+}
+
+function forgetProfileSession() {
+  try {
+    localStorage.removeItem(PROFILE_SESSION_KEY);
+    localStorage.removeItem('profileId');
+  } catch {
+    // Nothing useful to remove from a blocked storage area.
+  }
+}
+
+function restoreProfileSession() {
+  let stored = null;
+  try {
+    if (localStorage.getItem('blazing-signed-out-v1') === '1') return false;
+    if (!localStorage.getItem('blazing-household-approved')) return false;
+    stored = JSON.parse(localStorage.getItem(PROFILE_SESSION_KEY) || 'null');
+  } catch {
+    return false;
+  }
+  if (!stored || typeof stored !== 'object') return false;
+  const id = plainText(stored.id);
+  if (!id) return false;
+  // A CAP OF 'adult' IS REFUSED FOR THE SAME REASON allowAdult IS. Measured on
+  // this restore before the check existed: a snapshot of {maxRating: 'adult',
+  // allowAdult: false} drew an adult-rated catalog card onto the home behind
+  // the gate, with nobody yet identified — 1 card, which is exactly the shape
+  // home-profile.smoke.mjs:91 exists to keep off that screen. The two fields
+  // are not one flag: allowAdult opens the adult SECTIONS, while maxRating
+  // 'adult' is what ratingAllowed() reads to let an adult-rated item through
+  // any ordinary shelf, and only the first was being refused. profile.js
+  // already treats them as equals for the same reason it hides the artwork
+  // (`artRestricted`, profile.js:185, is `allowAdult === true || maxRating
+  // === 'adult'`); this now matches it.
+  if (stored.neededPin === true || stored.allowAdult === true) return false;
+  if (String(stored.maxRating || '').toLowerCase() === 'adult') return false;
+  const age = Date.now() - Number(stored.savedAt || 0);
+  if (!Number.isFinite(age) || age < 0 || age > PROFILE_SESSION_MAX_AGE_MS) return false;
+  // An unrecognised tier is not a reason to guess upward. RATINGS is the whole
+  // vocabulary; anything else caps at 'general', which is what a null cap does.
+  const cap = String(stored.maxRating || '').toLowerCase();
+  state.profileCap = RATINGS.includes(cap) ? cap : 'general';
+  state.profileIsKids = stored.isKids === true;
+  state.profileId = id;
+  state.myList = readList(id);
+  updateSaveLabels();
+  renderLibrary();
+  return true;
+}
+
 // One profile change owns the list, cap, history and all Home shelves. Persisted
 // approval says which brand to show; it is never a reason to skip this refresh.
 document.addEventListener('blazing-profile-selected', (event) => {
@@ -3874,11 +4391,13 @@ document.addEventListener('blazing-profile-selected', (event) => {
   state.profileId = String(detail.id);
   state.mediaProfile = { ...detail };
   state.profileCap = detail.maxRating || 'general';
+  state.profileIsKids = detail.isKids === true;
   state.myList = readList(state.profileId);
   state.selected = null;
   state.selectedEpisode = null;
   localStorage.setItem('profileId', state.profileId);
   localStorage.setItem('blazing-household-approved', '1');
+  rememberProfileSession(detail);
   updateSaveLabels();
   renderLibrary();
   // Search and discovery were filtered for the previous viewer.
@@ -3908,10 +4427,14 @@ document.addEventListener('blazing-profile-signed-out', () => {
   state.profileId = null;
   state.mediaProfile = null;
   state.profileCap = null;
+  state.profileIsKids = false;
   state.myList = [];
   state.selected = null;
   state.selectedEpisode = null;
   state.catalogs = [];
+  // Signing out has to take the remembered session with it, or the very next
+  // load restores the viewer who just left.
+  forgetProfileSession();
   rowsWrap.replaceChildren();
   clearSearchResults();
   discoverResults.replaceChildren();
@@ -4138,5 +4661,10 @@ document.addEventListener('keydown', (event) => {
  * The call the BlazeOS Phase 1 patch removed, and the whole reason the home
  * screen has been empty. app.js is loaded with `defer`, so the DOM is parsed
  * before this line runs and every $('#id') at the top of the file has resolved.
+ *
+ * The restore runs FIRST so boot() sees the returning viewer's id and cap on
+ * its very first pass, rather than building the pre-profile home and then
+ * throwing it away a moment later.
  */
+restoreProfileSession();
 boot();
