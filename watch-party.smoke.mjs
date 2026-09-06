@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for the two watch-party changes:
 //   1. the ICE server list comes from GET /party/ice and is what the peer
 //      connections are actually built with (that is how a TURN relay reaches
@@ -38,7 +39,20 @@ const check = (name, cond, extra = '') => {
 };
 
 const STUBS = () => {
-  window.__seen = { rtcConfigs: [], sent: [] };
+  window.__seen = { rtcConfigs: [], sent: [], mediaRequests: [] };
+  const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const attempt = { constraints, state: 'pending' };
+    window.__seen.mediaRequests.push(attempt);
+    try {
+      const stream = await getUserMedia(constraints);
+      attempt.state = 'resolved';
+      return stream;
+    } catch (error) {
+      attempt.state = error.name;
+      throw error;
+    }
+  };
   class FakeWS extends EventTarget {
     constructor(url) {
       super();
@@ -78,6 +92,8 @@ const browser = await launchBrowser({
 // localStorage, so reusing one would reopen the panel instead of the dialog.
 async function joinedPage({ ice, killIce = false, peer }) {
   const ctx = await browser.newContext();
+  // The browser's fake devices still need permission in each isolated context.
+  await ctx.grantPermissions(['camera', 'microphone'], { origin: base });
   await ctx.addInitScript(STUBS);
   await ctx.route('https://fleet.lyreosai.com/**', (route) => {
     const url = route.request().url();
@@ -88,18 +104,12 @@ async function joinedPage({ ice, killIce = false, peer }) {
     if (url.includes('/party/active')) return route.fulfill({ status: 204, body: '' });
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
+  await prepareProfile(ctx);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  // profile.js's own gate overlay (.bp-layer[data-gate="required"]) sits over
-  // the whole page until a profile is picked, and Playwright correctly refuses
-  // to click through it — same root cause as the locker/upscale fixes above.
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-      detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false },
-    }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  });
+  // Select the viewer through the real profile gate.
+  await selectProfile(page);
   await page.waitForSelector('#watch-party-launch-button');
   await page.click('#watch-party-launch-button');
   await page.fill('#watch-party-join-input', 'ABC123');
@@ -107,7 +117,18 @@ async function joinedPage({ ice, killIce = false, peer }) {
   await page.waitForFunction(() => window.__ws && window.__ws.readyState === 1, null, { timeout: 8000 });
   // Wait for the call to actually go active (own tile on screen). offerTo() is a
   // no-op before that by design, so feeding peers earlier is just a race.
-  await page.waitForSelector('.wp-tile-self', { timeout: 15000 });
+  await page.waitForSelector('.wp-tile-self', { timeout: 15000 }).catch(async (error) => {
+    console.log('Call did not start:', await page.locator('.wp-panel').innerText());
+    console.log('Media diagnostic:', await page.evaluate(async () => ({
+      secureContext: window.isSecureContext,
+      mediaDevices: Boolean(navigator.mediaDevices),
+      cameraPermission: (await navigator.permissions.query({ name: 'camera' })).state,
+      microphonePermission: (await navigator.permissions.query({ name: 'microphone' })).state,
+      mediaRequests: window.__seen.mediaRequests,
+      fleet: window.BLAZING_FLEET_BASE,
+    })));
+    throw error;
+  });
   // peer-list is what makes this client offer, which is what builds the tile.
   await page.evaluate((id) => window.__feed({ type: 'peer-list', peers: [id] }), peer);
   await page.waitForSelector('.wp-tile:not(.wp-tile-self)', { timeout: 8000 });

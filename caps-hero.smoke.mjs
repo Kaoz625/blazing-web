@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 /**
  * The device probe really filters the source list, and the home hero really
  * moves — proven in a browser, not read off the source.
@@ -188,19 +189,12 @@ async function makePage(opts = {}) {
 
   ctx.on('request', (r) => { if (/(^|\.)youtube\.com|youtu\.be|ytimg\.com/.test(r.url())) seen.ytDotCom += 1; });
 
+  await prepareProfile(ctx);
+
   const page = await ctx.newPage();
   await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1200);
-  // Choose who is watching, or ratingAllowed() holds every UNRATED fixture meta
-  // under the default 'general' cap, every row empties and the screen reads
-  // "Nothing is available right now." with no error thrown.
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-      detail: { id: 'p1', name: 'Mark', maxRating: 'adult' },
-    }));
-  });
-  // profile.js's gate overlay swallows the pointer if it is left standing.
-  await page.evaluate(() => { document.querySelectorAll('.bp-layer').forEach((n) => n.remove()); });
+  await selectProfile(page);
   await page.waitForTimeout(4000);
   return { ctx, page, seen, setContinue: (body) => { continueBody = body; } };
 }

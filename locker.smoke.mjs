@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for the "My Locker" shelf (locker.js).
 //
 // Everything the fleet would answer is intercepted, so nothing real is
@@ -81,21 +82,12 @@ async function openApp({ credentials = true, listStatus = 200, listBody = FILES,
   // The add-on host is not part of this feature; keep boot quiet and fast.
   await ctx.route('https://addon.lyreosai.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+  if (credentials) await prepareProfile(ctx, {}, { id: 'dev-approved-1', token: 'tok-abc' });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  // locker.js's own start() waits for profile.js's 'blazing-profile-selected'
-  // before it ever fetches or renders the shelf (state.isKids starts true, so
-  // an unpicked profile reads as Kids and the shelf never appears at all) —
-  // same gate DEP-9/rowhero already hit. Pick a non-Kids profile and drop the
-  // gate's own overlay, which otherwise sits over the whole page and would
-  // swallow the card click in scenario 5.
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-      detail: { id: 'p1', name: 'Mark', isKids: false },
-    }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  });
+  // Select the viewer through the real profile gate.
+  if (credentials) await selectProfile(page);
   return { ctx, page, calls };
 }
 

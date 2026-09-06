@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for the Manga tab (manga.js).
 //
 // Everything the fleet would answer is intercepted, so nothing real is
@@ -88,13 +89,12 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
   });
   await ctx.route('https://addon.lyreosai.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+  const hasProfile = Object.keys(profile).length > 0;
+  if (hasProfile) await prepareProfile(ctx, profile);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  await page.evaluate((detail) => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'p1', name: 'Mark', ...detail } }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  }, profile);
+  if (hasProfile) await selectProfile(page);
   // "Manga" lives in the drawer-only "More" nav (see games.smoke.mjs for why
   // this dispatches the click directly instead of clicking a hidden button).
   await page.evaluate(() => document.querySelector('[data-view="manga"]').click());

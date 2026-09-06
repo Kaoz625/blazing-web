@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for the 4K Upscale button and for the proxy resolver
 // being a PLAYBACK FALLBACK rather than the default path (app.js).
 //
@@ -124,19 +125,13 @@ async function openApp({ statusReply, requestReply, resolveReply, streams, strea
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], metas: [], profiles: [] }) });
   });
 
+  await prepareProfile(ctx);
+
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  // ratingAllowed() defaults state.profileCap to 'general' until a profile is
-  // actually picked, and refuses this fixture's unrated META — same gate
-  // rowhero/home/locker already hit. Without it the card stays a permanent
-  // <div class="card skeleton">, never visible, so the click below times out.
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-      detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false },
-    }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  });
+  // Select the viewer through the real profile gate.
+  await selectProfile(page);
   await page.waitForSelector('.row-track .card:not(.skeleton)', { timeout: 10000 });
   await page.click('.row-track .card');
   await page.waitForSelector('#detail-dialog[open]', { timeout: 5000 });

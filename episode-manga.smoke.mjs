@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 /** A web series detail selects real episodes and opens only their mapped manga chapters. */
 import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
@@ -81,16 +82,13 @@ await ctx.route('https://upscale.lyreosai.com/**', (route) =>
 await ctx.route('https://anime-kitsu.strem.fun/**', (route) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: '{"metas":[]}' }));
 
+await prepareProfile(ctx);
+
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(String(error)));
 await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => {
-  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-    detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false },
-  }));
-  document.querySelectorAll('.bp-layer').forEach((node) => node.remove());
-});
+await selectProfile(page);
 await page.waitForSelector('.row-track .card:not(.skeleton)', { timeout: 15000 });
 await page.click('.row-track .card:not(.skeleton)');
 await page.waitForSelector('#detail-episode-select', { timeout: 10000 });

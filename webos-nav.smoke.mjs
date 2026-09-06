@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for remote-control navigation (dpad.js + app.js), the
 // piece the register calls "LG webOS has no client" over. blazing-web already
 // packages into a real .ipk (build-tvs.sh, ares-package) and already ships
@@ -73,14 +74,13 @@ await ctx.route('https://fleet.lyreosai.com/**', (route) => {
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 });
 
+await prepareProfile(ctx);
+
 const page = await ctx.newPage();
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(1500);
-await page.evaluate(() => {
-  document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'p1', name: 'Mark', maxRating: 'adult', isKids: false } }));
-  document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-});
+await selectProfile(page);
 await page.waitForSelector('#rows .card', { timeout: 10000 });
 await page.waitForTimeout(500);
 

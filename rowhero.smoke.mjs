@@ -138,24 +138,9 @@ if (process.env.DEBUG_NET) {
 await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(2500);
 
-// PICK A PROFILE FIRST, or there are no rows to measure at all. ratingAllowed()
-// defaults state.profileCap to 'general' while nobody has chosen, and it refuses
-// an UNRATED title under a kids cap — so every fixture meta below is refused,
-// every row empties, each loader removes its own section, and the screen reads
-// "Nothing is available right now." with no error thrown. That is the parental
-// gate doing its job. It cost an hour on 29 Aug 2026 to tell apart from a broken
-// home, so it is written down here: a row test must choose who is watching.
-await page.evaluate(() => {
-  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-    detail: { id: 'p1', name: 'Mark', maxRating: 'adult' },
-  }));
-});
-// And take the gate's own overlay down with it. profile.js owns that panel and
-// only removes it when a face is actually tapped; left standing it sits over the
-// whole page (.bp-layer[data-gate="required"]) and swallows the pointer, so the
-// real hover below times out. The gate's markup is profile.js's test to write,
-// not this one's.
-await page.evaluate(() => { document.querySelectorAll('.bp-layer').forEach((n) => n.remove()); });
+// Take the same path as a viewer. Removing the gate by hand leaves the app
+// inert (unable to receive input), so it cannot prove that hover works.
+await page.getByRole('button', { name: 'Choose Mark', exact: true }).click();
 await page.waitForTimeout(6000);
 
 let pass = 0, fail = 0;

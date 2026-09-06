@@ -133,12 +133,7 @@ for entry in shell:
 # shell file changing without a bump is the exact staleness sw.js's own header
 # warns about — and delete the name here. This check fails if a name is still
 # listed after it has been fixed, so the list cannot rot.
-KNOWN_MISSING_FROM_SHELL = {
-    'dpad.js',
-    'games.js',
-    'manga.js',
-    'tv-comics-reader.js',
-}
+KNOWN_MISSING_FROM_SHELL = set()
 
 if shell:
     missing = {s for s in scripts if s not in shell}

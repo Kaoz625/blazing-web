@@ -1,3 +1,4 @@
+import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 // Headless smoke test for the Games tab (games.js).
 //
 // Everything the fleet would answer is intercepted, so nothing real is
@@ -97,18 +98,12 @@ async function openApp({ configured = true, onCall } = {}) {
   });
   await ctx.route('https://addon.lyreosai.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+  await prepareProfile(ctx);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  // Same gate every other smoke test in this repo clears first (locker,
-  // watch-party, rowhero): profile.js holds the whole app behind a picker
-  // until a profile is chosen, and its overlay swallows pointer events.
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
-      detail: { id: 'p1', name: 'Mark', isKids: false, maxRating: 'adult' },
-    }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  });
+  // Select the viewer through the real profile gate.
+  await selectProfile(page);
   // "Games" lives in the drawer-only "More" nav, which styles.css hides at a
   // desktop viewport (the drawer is a mobile pattern). app.js binds every
   // [data-view] button the same way regardless of which nav it renders in
@@ -231,13 +226,11 @@ async function settledStatus(page, id, timeout = 5000) {
   });
   await ctx.route('https://addon.lyreosai.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+  await prepareProfile(ctx);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
-  await page.evaluate(() => {
-    document.dispatchEvent(new CustomEvent('blazing-profile-selected', { detail: { id: 'p1', isKids: false, maxRating: 'adult' } }));
-    document.querySelectorAll('.bp-layer').forEach((n) => n.remove());
-  });
+  await selectProfile(page);
   await page.evaluate(() => document.querySelector('[data-view="games"]').click());
   await page.waitForSelector('#games-results .card', { timeout: 10000 });
   check('a poster-less game gets the no-image placeholder', (await page.locator('#games-results .card').first().evaluate((n) => n.classList.contains('no-image'))) === true);

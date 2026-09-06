@@ -56,7 +56,8 @@
 // bump is here to evict the v23 copies rather than leave them to age out, and
 // because the rule in the block comment below says to bump whenever the shell
 // changes.
-const CACHE = 'blazing-shell-v24';
+// v25: account sign-out, profile rail and Home reload after profile selection.
+const CACHE = 'blazing-shell-v25';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -78,6 +79,10 @@ const SHELL = [
   // emby.js was never in this list, although index.html has loaded it since the
   // Emby rows were added. It was reaching devices through the HTTP cache alone.
   './emby.js',
+  './dpad.js',
+  './games.js',
+  './manga.js',
+  './tv-comics-reader.js',
   './watch-party.js',
   './locker.js',
   './manifest.webmanifest',

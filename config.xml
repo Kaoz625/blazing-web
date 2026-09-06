@@ -2,6 +2,7 @@
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="http://lyreosai.com/blazing" version="1.0.0" viewmodes="fullscreen">
     <tizen:application id="blazing.app" package="blazing.pkg" required_version="2.3"/>
     <content src="index.html"/>
+    <access origin="*" subdomains="true"/>
     <feature name="http://tizen.org/feature/screen.size.all"/>
     <icon src="icon-192.png"/>
     <name>Blazing</name>

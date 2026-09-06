@@ -188,20 +188,17 @@ const pendingScreen = (page) => page.evaluate(() => {
     sub: document.querySelector('.bp-gate-sub')?.textContent,
     mark: !!document.querySelector('.bp-gate-mark'),
     key: !!document.querySelector('.bp-gate-key'),
-    links: [...document.querySelectorAll('.bp-gate-link')].map((b) => `${b.id}${b.hidden ? '(hidden)' : ''}`),
+    links: [...document.querySelectorAll('button.bp-gate-link')].map((b) => `${b.id}${b.hidden ? '(hidden)' : ''}`),
     recheckHidden: document.getElementById('bp-gate-recheck')?.hidden,
   }));
   check('(a) the gate is the first screen, in gate view', gate.view === 'gate' && gate.welcome, `view=${gate.view} welcome=${gate.welcome}`);
-  check('(a) three pills, in order Google / Scan QR / Type code',
-    gate.pills.map((p) => p.id).join(',') === 'bp-pill-google,bp-pill-qr,bp-pill-code'
-      && gate.pills[0].label === 'Login with Google' && gate.pills[1].label === 'Scan QR to login' && gate.pills[2].label === 'Type code to open',
-    JSON.stringify(gate.pills.map((p) => p.label)));
-  check('(a) Google is disabled ("Coming soon"); the other two are live',
-    gate.pills[0]?.disabled === true && gate.pills[0]?.sub === 'Coming soon' && gate.pills[1]?.disabled === false && gate.pills[2]?.disabled === false);
-  check('(a) door mark, key, PRIVATE CLUB and the invite-only line',
-    gate.mark && gate.key && gate.title === 'Private Club' && gate.sub === 'Blazing Stream is invite only.', `${gate.title} / ${gate.sub}`);
-  check('(a) links: email sign-in, I am the owner, and Check again (hidden with no credentials)',
-    gate.links.join(',') === 'bp-gate-email,bp-gate-owner,bp-gate-recheck(hidden)', gate.links.join(','));
+  check('(a) working sign-in is first, with invite and phone paths',
+    gate.pills.map((p) => p.id).join(',') === 'bp-gate-email,bp-pill-code,bp-pill-qr'
+      && gate.pills.every((p) => p.disabled === false), JSON.stringify(gate.pills));
+  check('(a) welcome says that no app is needed',
+    gate.title === 'Welcome to Blazing Stream' && gate.sub === 'Watch right here. No app needed.');
+  check('(a) owner and pending recheck remain reachable',
+    gate.links.join(',') === 'bp-gate-owner,bp-gate-recheck(hidden)', gate.links.join(','));
   check('(a) nothing was registered before a click', s.calls('POST', '/agent/register').length === 0, s.trail());
 
   await s.page.click('#bp-pill-qr');
@@ -239,7 +236,7 @@ const pendingScreen = (page) => page.evaluate(() => {
     profilesShown: !document.querySelector('.bp-profiles')?.hidden,
   }));
   check('(b) approved → GET /profiles → the normal profile rail',
-    s.calls('GET', '/profiles').length >= 1 && rail.view === '' && rail.profilesShown && rail.qrHidden === true && /Mark/.test(rail.tile),
+    s.calls('GET', '/profiles').length >= 1 && rail.view === 'profiles' && rail.profilesShown && rail.qrHidden === true && /Mark/.test(rail.tile),
     JSON.stringify(rail));
   // The poll must STOP once approved: a late poll from the rail would be a
   // request nobody asked for.
@@ -311,7 +308,7 @@ const pendingScreen = (page) => page.evaluate(() => {
   check('(c) Enter → POST /accounts/register {code, email (lower-cased), password, name, deviceId}',
     !!reg && JSON.stringify(reg.body) === JSON.stringify(want), JSON.stringify(reg && reg.body));
   check('(c) then GET /profiles and the rail (empty, ready for Add profile)',
-    s.calls('GET', '/profiles').length >= 1 && (await view(s.page)) === '' && (await shown(s.page, '.bp-profiles')) && !(await shown(s.page, '#bp-signup')));
+    s.calls('GET', '/profiles').length >= 1 && (await view(s.page)) === 'profiles' && (await shown(s.page, '.bp-profiles')) && !(await shown(s.page, '#bp-signup')));
   check('(c) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
   await s.ctx.close();
 }
@@ -361,7 +358,7 @@ const pendingScreen = (page) => page.evaluate(() => {
     passwordCleared: document.getElementById('bp-email-password')?.value === '',
   }));
   check('(d) Enter in the password submits; 200 → GET /profiles → the rail',
-    s.calls('POST', '/accounts/login').length === 2 && s.calls('GET', '/profiles').length >= 1 && rail.view === '' && /Ana/.test(rail.tile) && rail.emailHidden === true,
+    s.calls('POST', '/accounts/login').length === 2 && s.calls('GET', '/profiles').length >= 1 && rail.view === 'profiles' && /Ana/.test(rail.tile) && rail.emailHidden === true,
     JSON.stringify(rail));
   check('(d) the password field is emptied after a successful sign-in', rail.passwordCleared);
   check('(d) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
@@ -382,7 +379,7 @@ const pendingScreen = (page) => page.evaluate(() => {
   });
   await s.page.waitForTimeout(1500);
   check('(e) a browser with credentials lands on the rail — the approver waits for a profile',
-    (await view(s.page)) === '' && (await shown(s.page, '.bp-profile')) && !(await shown(s.page, '#bp-approve')) && s.calls('GET', '/pair/peek').length === 0, s.trail());
+    (await view(s.page)) === 'profiles' && (await shown(s.page, '.bp-profile')) && !(await shown(s.page, '#bp-approve')) && s.calls('GET', '/pair/peek').length === 0, s.trail());
 
   await s.page.click('.bp-profile');
   await s.page.waitForTimeout(1200);
@@ -472,7 +469,7 @@ const pendingScreen = (page) => page.evaluate(() => {
   await s.page.waitForTimeout(1200);
   const pend = await pendingScreen(s.page);
   check('(h) 404 on /pair/start → the EXISTING pending copy: rail, "waiting for approval", QR sheet gone',
-    pend.view === '' && pend.rail && pend.qrHidden === true && /waiting for approval/i.test(pend.status), JSON.stringify(pend));
+    pend.view === 'profiles' && pend.rail && pend.qrHidden === true && /waiting for approval/i.test(pend.status), JSON.stringify(pend));
   check('(h) the sentence carries the first 8 characters of the deviceId', pend.status.includes('0f3a9c2e') && !pend.status.includes('0f3a9c2e-'), pend.status);
   check('(h) the owner and invite hatches are offered', pend.owner && pend.invite, JSON.stringify({ owner: pend.owner, invite: pend.invite }));
   const codeHidden = await s.page.evaluate(() => document.getElementById('bp-pair-code')?.hidden && document.getElementById('bp-pair-image')?.hidden);
@@ -504,7 +501,7 @@ const pendingScreen = (page) => page.evaluate(() => {
   await s.page.waitForTimeout(3200);
   const pend = await pendingScreen(s.page);
   check('(h2) 404 on /pair/status → the pending copy, QR sheet gone',
-    s.calls('GET', '/pair/status').length === 1 && pend.view === '' && pend.rail && pend.qrHidden === true && /waiting for approval/i.test(pend.status) && pend.owner && pend.invite,
+    s.calls('GET', '/pair/status').length === 1 && pend.view === 'profiles' && pend.rail && pend.qrHidden === true && /waiting for approval/i.test(pend.status) && pend.owner && pend.invite,
     JSON.stringify(pend));
   await s.page.waitForTimeout(3500);
   check('(h2) and the poll stopped', s.calls('GET', '/pair/status').length === 1, `${s.calls('GET', '/pair/status').length} polls`);
@@ -636,7 +633,7 @@ const pendingScreen = (page) => page.evaluate(() => {
     lists.length === 2 && lists[1].search.includes('deviceId=dev-1') && lists[1].token === 'tok', lists.map((l) => `${l.search} ${l.token}`).join(' | '));
   const kept = await stored(s.page);
   check('(i) localStorage still holds dev-1 / tok', kept?.id === 'dev-1' && kept?.token === 'tok', JSON.stringify(kept));
-  check('(i) and the rail is up', (await view(s.page)) === '' && /Mark/.test(await s.page.evaluate(() => document.querySelector('.bp-profile')?.textContent || '')));
+  check('(i) and the rail is up', (await view(s.page)) === 'profiles' && /Mark/.test(await s.page.evaluate(() => document.querySelector('.bp-profile')?.textContent || '')));
   check('(i) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
   await s.ctx.close();
 }
@@ -654,7 +651,10 @@ const pendingScreen = (page) => page.evaluate(() => {
       return null;
     },
   });
-  await s.page.waitForTimeout(2000);
+  await s.page.waitForFunction(() => {
+    const saved = JSON.parse(localStorage.getItem('blazing-web-profile-device-v1') || 'null');
+    return saved?.id === 'dev-new' && /waiting for approval/i.test(document.querySelector('.bp-status')?.textContent || '');
+  }, null, { timeout: 15000 });
   const regs = s.calls('POST', '/agent/register');
   check('(i2) refused reclaim (401) → a second, FRESH registration with no deviceId and no token',
     regs.length === 2 && regs[0].body?.deviceId === 'dev-1' && regs[0].token === 'tok' && regs[1].body?.deviceId === undefined && regs[1].token === '',

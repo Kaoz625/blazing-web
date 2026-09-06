@@ -178,8 +178,10 @@
       avatar: text(value.avatar),
       isKids: value.isKids === true,
       hasPin: value.hasPin === true,
-      maxRating: text(value.maxRating, 'teen'),
-      allowAdult: value.allowAdult === true,
+      maxRating: text(value.effectiveMaxRating, text(value.maxRating, 'teen')),
+      allowAdult: value.effectiveAllowAdult === undefined ? value.allowAdult === true : value.effectiveAllowAdult === true,
+      disabled: value.disabled === true,
+      artRestricted: value.allowAdult === true || text(value.maxRating).toLowerCase() === 'adult',
     };
   }
 
@@ -256,7 +258,7 @@
         background-position: center; background-size: cover; background-repeat: no-repeat;
         opacity: 0; transition: opacity .45s ease;
       }
-      .bp-art[data-shown="true"] { opacity: .5; }
+      .bp-art[data-shown="true"] { opacity: 1; }
       .bp-art::after {
         content: ""; position: absolute; inset: 0;
         background: linear-gradient(90deg, #08080a 0%, rgba(8,8,10,.88) 30%, rgba(8,8,10,.4) 66%, rgba(8,8,10,.6) 100%);
@@ -287,93 +289,35 @@
       .bp-status { min-height: 24px; margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.45; }
       .bp-status[data-state="error"] { color: #ff9aa1; }
       .bp-status[data-state="pending"] { color: #ffd289; }
-      /* ── THE PICKER ──────────────────────────────────────────────────────
-         Markus, 5 Sep 2026, looking at the live app: "why does the profile
-         picker look different? ... i dont like those grey boxes ... also
-         theres no icon selectors like netflix has."
-
-         The grey boxes were literal: a 54px rounded chip holding ONE CAPITAL
-         LETTER, sitting to the left of a name on a 72px list row. Every TV
-         client in this fleet had already moved past that — Fire TV
-         (ProfileGateActivity) and tvOS (RootView) both draw a real picture
-         from a 20-emoji set, and both offer a pencil to change it. The web was
-         the only client with neither.
-
-         SO THE TILE IS THE PICTURE NOW, not a bullet beside a name. A square
-         that fills its grid cell, the emoji drawn large inside it, the name
-         under it — the shape a TV picker has, in a column narrow enough for a
-         rail. A profile with no picture yet still falls back to its initial,
-         but at tile size that reads as a monogram rather than as a grey box.
-
-         Neutral until you are on it. Three profiles all wearing the same red
-         gradient told you nothing about which was which; the accent arrives
-         only on hover, focus, or the profile that is actually active. */
-      .bp-profiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px 14px; margin-top: 20px; }
+      /* Profile rail: shared avatars, clear names and one visible edit control. */
+      .bp-profiles { display: flex; flex-direction: column; gap: 12px; margin-top: 28px; }
       /* [hidden] has to beat the display:grid above it, and showProfiles()/
          hideAllScreens() toggle exactly that attribute. */
       .bp-profiles[hidden] { display: none; }
-      /* The slot exists ONLY so the pencil can be a sibling of the tile rather
-         than a child of it. A <button> inside a <button> is invalid HTML and
-         the parser hoists the inner one out, which would have put the pencil
-         outside the row it belongs to. Keeping .bp-profile a plain button also
-         keeps every existing harness working: gate.smoke.mjs clicks
-         .bp-profile and reads its textContent for the name, profileart
-         focuses it and fires mouseenter on it.
-
-         NO BACKTICKS IN HERE. This whole block is one JS template literal, so
-         a backtick used for markdown emphasis CLOSES it: everything after the
-         quote around .bp-profile was parsed as JavaScript, the bare word
-         "profile" in a later comment became an identifier, and boot() died
-         with "ReferenceError: profile is not defined" before it drew anything.
-         15 of the 19 smoke suites went red on a one-character typo. */
       .bp-profile-slot { position: relative; min-width: 0; }
-      .bp-profile { position: relative; display: grid; gap: 9px; width: 100%; border: 0; padding: 0; color: inherit; background: transparent; text-align: center; }
+      .bp-profile { position: relative; display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 20px; width: 100%; min-height: 72px; border: 0; padding: 0 48px 0 0; color: inherit; background: transparent; text-align: left; }
       .bp-profile:focus-visible { outline: none; }
-      .bp-avatar { display: grid; place-items: center; width: 100%; aspect-ratio: 1 / 1; border: 2px solid transparent; border-radius: 20px; color: var(--text, #f7f7f8); background: rgba(255,255,255,.07); font-size: clamp(34px, 7vw, 50px); font-weight: 900; line-height: 1; transition: background .15s, border-color .15s, box-shadow .15s; }
+      .bp-avatar { display: grid; place-items: center; width: 72px; height: 72px; border: 2px solid rgba(255,255,255,.16); border-radius: 16px; color: var(--text, #f7f7f8); background: rgba(255,255,255,.04); font-size: 40px; font-weight: 700; line-height: 1; transition: background .15s, border-color .15s, box-shadow .15s; }
       /* An initial is a letterform, not a picture: it needs less size and it
          needs the tracking a 50px emoji does not. */
       .bp-avatar[data-glyph="false"] { font-size: clamp(26px, 5.4vw, 38px); letter-spacing: .02em; }
-      /* ONE focus treatment, and it is var(--accent) with no second colour
-         beside it. --accent-strong is NOT redefined by [data-theme="kids_warm"]
-         (styles.css), so the old accent→accent-strong gradient rendered gold
-         fading into Blazing red on the kids shell. The ring is the accent, the
-         glow is --accent-glow, and both themes define both. */
       .bp-profile:hover .bp-avatar, .bp-profile:focus-visible .bp-avatar, .bp-profile[data-active="true"] .bp-avatar {
-        border-color: var(--accent, #ff3d47);
-        background: rgba(255,255,255,.13);
-        box-shadow: 0 0 0 4px var(--accent-glow, rgba(255,61,71,.35));
+        border-color: #fff;
+        background: rgba(255,255,255,.1);
+        box-shadow: 0 0 0 3px rgba(255,255,255,.2);
       }
-      /* NAMES ARE ALWAYS VISIBLE HERE, and on the two televisions they are not:
-         Fire TV and tvOS reveal the name only on the focused row. That is the
-         right call for a remote, where exactly one row is focused at all times
-         and the focused row IS the reading position. A mouse has no focus until
-         it moves, and a keyboard user tabbing in has none either — so the same
-         rule on a browser would open a grid of unlabelled squares. Always-on
-         names cost nothing on a pointer screen and are the only thing that
-         makes the grid readable before you touch it. */
-      .bp-profile-copy { display: block; min-width: 0; padding: 0 18px; }
-      .bp-profile-name { display: block; overflow: hidden; font-size: 14px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-      .bp-profile-meta { display: block; margin-top: 2px; overflow: hidden; color: var(--muted, #a3a3aa); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-      /* On the tile, not beside the name: the name row is 120px wide now and a
-         pill in it would push the name into an ellipsis. */
-      .bp-profile-tag { position: absolute; top: 8px; right: 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 2px 6px; color: #fff; background: rgba(8,8,10,.74); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
-      /* THE PENCIL. Fire TV puts it left of the avatar at 34dp, glyph "✎"
-         (U+270E), invisible until the row is focused and a red pill once the
-         pencil itself has focus; tvOS puts it left of the tile at opacity
-         0 / 0.55 / 1. Same three states here, sat beside the name because in a
-         tile grid that is where the row's own text is — left of a 120px square
-         is the next profile.
-
-         It is a real button in the DOM at all times, so Tab reaches it and
-         :focus-within brings it up before it is used. */
+      .bp-profile-copy { display: block; min-width: 0; padding: 0; }
+      .bp-profile-name { display: block; overflow: hidden; font-size: 20px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      .bp-profile-meta { display: block; margin-top: 5px; color: rgba(255,255,255,.7); font-size: 13px; }
+      .bp-profile-tag { position: absolute; left: 42px; top: 54px; border: 1px solid rgba(255,255,255,.3); border-radius: 6px; padding: 2px 4px; color: #fff; background: #141416; font-size: 9px; font-weight: 700; }
       .bp-pencil {
-        position: absolute; right: 0; bottom: 2px;
+        position: absolute; right: 0; top: 14px;
         display: grid; place-items: center;
-        width: 30px; height: 30px; min-height: 0;
+        width: 44px; height: 44px; min-height: 44px;
         border: 0; border-radius: 999px; padding: 0;
         color: var(--text, #f7f7f8); background: rgba(255,255,255,.1);
         font-size: 14px; line-height: 1;
-        opacity: 0; transition: opacity .15s, background .15s, color .15s, box-shadow .15s;
+        opacity: .7; transition: opacity .15s, background .15s, color .15s, box-shadow .15s;
       }
       .bp-profile-slot:hover .bp-pencil, .bp-profile-slot:focus-within .bp-pencil { opacity: .6; }
       .bp-pencil:hover, .bp-pencil:focus-visible { opacity: 1; color: #fff; background: var(--accent, #ff3d47); box-shadow: 0 0 0 3px var(--accent-glow, rgba(255,61,71,.35)); outline: none; }
@@ -507,12 +451,11 @@
       .bp-qr[hidden], .bp-signup[hidden], .bp-email[hidden], .bp-approve[hidden] { display: none; }
 
       .bp-gate-mark { display: block; width: min(272px, 62vw); height: auto; margin: 0 auto; }
-      .bp-gate-title { margin: 20px 0 0; color: #fff; font-size: clamp(23px, 5.4vw, 30px); font-weight: 900; letter-spacing: .2em; text-transform: uppercase; }
+      .bp-gate-title { margin: 24px 0 0; color: #fff; font-size: 32px; font-weight: 650; letter-spacing: -.035em; line-height: 1.16; }
       .bp-gate-sub { margin: 10px 0 0; color: var(--muted, #a3a3aa); font-size: clamp(15px, 3.6vw, 18px); }
       .bp-gate-key { display: block; width: 46px; height: 18px; margin: 18px auto 0; }
       .bp-gate-pills { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: 24px; }
-      /* One pill shape for all three, which is the whole point of the
-         reference screen: no option is dressed up as the important one. */
+      /* Working email sign-in leads; invite and phone pairing stay secondary. */
       .bp-pill {
         display: flex; align-items: center; gap: 14px;
         width: min(320px, 100%); min-height: 56px;
@@ -522,13 +465,12 @@
         transition: border-color .15s, background .15s;
       }
       .bp-pill:hover:not(:disabled), .bp-pill:focus-visible:not(:disabled) { border-color: rgba(255,61,71,.85); background: rgba(255,61,71,.12); }
-      /* Visibly off, and it stays off while busy toggles around it — Google
-         sign-in is not built, and a pill that looks live is a promise. */
+
       .bp-pill:disabled { opacity: .42; }
       .bp-pill-icon { flex: 0 0 auto; width: 22px; height: 22px; }
       .bp-pill-copy { min-width: 0; flex: 1; }
-      .bp-pill-label { display: block; font-size: 13px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
-      .bp-pill-sub { display: block; margin-top: 2px; color: var(--muted, #a3a3aa); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
+      .bp-pill-label { display: block; font-size: 15px; font-weight: 650; }
+      .bp-pill-sub { display: block; margin-top: 4px; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 400; line-height: 1.4; }
       .bp-gate-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 16px; }
       .bp-gate-link { min-height: 44px; border: 0; border-radius: 999px; padding: 8px 13px; color: var(--muted, #a3a3aa); background: transparent; font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
       .bp-gate-link:hover, .bp-gate-link:focus-visible { color: var(--text, #f7f7f8); }
@@ -553,6 +495,43 @@
          on the other screen, so the two can be compared by eye. */
       .bp-approve-code { text-align: center; font-size: 26px; font-weight: 900; letter-spacing: .22em; text-transform: uppercase; }
       .bp-approve-code[hidden] { display: none; }
+      .bp-layer { background: #0A0A0B; color: #fff; }
+      .bp-layer .bp-panel { border-right: 0; background: linear-gradient(90deg, rgba(10,10,11,.98), rgba(10,10,11,.8)); }
+      .bp-layer[data-view="profiles"] .bp-panel { width: min(520px, 100%); padding: 48px clamp(24px, 4vw, 56px); justify-content: flex-start; background: transparent; }
+      .bp-layer[data-view="profiles"] .bp-kicker { margin: 0 0 30px; padding-right: 48px; color: #fff; font-size: 15px; font-weight: 750; letter-spacing: .08em; }
+      .bp-heading { font-size: 32px; letter-spacing: -.025em; line-height: 1.15; }
+      .bp-status:empty { display: none; }
+      .bp-layer[data-view="gate"], .bp-layer[data-view="gate"] .bp-panel { background: #0A0A0B; }
+      .bp-layer[data-view="gate"] .bp-panel { justify-content: flex-start; padding-top: max(40px, 10vh); }
+      .bp-layer[data-view="gate"] .bp-status { order: 2; margin-top: 20px; }
+      .bp-brand-mark { display: block; width: 56px; height: 56px; margin: 0 auto; }
+      .bp-pill { width: 100%; min-height: 66px; border-color: rgba(255,255,255,.25); padding: 12px 20px; }
+      .bp-pill-primary { background: #fff; color: #0A0A0B; border-color: #fff; }
+      .bp-pill-primary .bp-pill-sub { color: #505054; }
+      .bp-pill-primary:hover:not(:disabled), .bp-pill-primary:focus-visible:not(:disabled) { background: #e7e7e9; color: #0A0A0B; border-color: #fff; }
+      .bp-field-label { display: block; margin-top: 18px; text-align: left; font-size: 14px; font-weight: 600; }
+      .bp-email .bp-input { margin-top: 8px; }
+      .bp-footer { margin-top: 28px; }
+      .bp-refresh { color: rgba(255,255,255,.75); background: transparent; border-color: rgba(255,255,255,.25); font-weight: 500; }
+      a.bp-gate-link, a.bp-secondary { display: inline-flex; align-items: center; justify-content: center; }
+      .bp-verify { background: #fff; border-color: #fff; color: #0A0A0B; }
+      .bp-layer button:focus-visible, .bp-layer input:focus-visible { outline: 2px solid #fff; outline-offset: 4px; transform: none; }
+      .bp-profile:focus-visible { outline: none !important; }
+      .bp-layer .bp-art::after { background: linear-gradient(90deg, #0A0A0B 8%, rgba(10,10,11,.62) 42%, rgba(10,10,11,.15)); }
+      @media (max-width: 600px) {
+        .bp-layer[data-view="profiles"] .bp-panel { padding: 32px 24px; background: rgba(10,10,11,.82); }
+        .bp-layer[data-view="profiles"] .bp-kicker { margin-bottom: 24px; }
+        .bp-layer .bp-panel { background: rgba(10,10,11,.82); }
+        .bp-profile { grid-template-columns: 64px minmax(0, 1fr); min-height: 64px; gap: 16px; }
+        .bp-avatar { width: 64px; height: 64px; font-size: 36px; }
+        .bp-profile-name { font-size: 18px; }
+        .bp-profile-tag { top: 48px; left: 34px; }
+        .bp-pencil { top: 10px; }
+        .bp-gate-title { font-size: 28px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bp-layer, .bp-layer *, .bp-layer *::before, .bp-layer *::after { transition: none !important; animation: none !important; }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -569,11 +548,9 @@
    * built — which is exactly the class of failure pinpad.smoke.mjs exists for.
    * A missing key is skipped, not thrown on.
    *
-   * The Google pill is deliberately absent: it is disabled for good, and
-   * setBusy(false) would switch it back on.
    */
   const BUSY_CONTROLS = [
-    'connect', 'refresh', 'close', 'back',
+    'connect', 'refresh', 'close', 'back', 'signOut',
     'pillQr', 'pillCode', 'gateEmail', 'gateOwner', 'owner', 'gateRecheck',
     // inviteFromPending fell out of this list in the gate rewrite. It sits in
     // the footer next to Refresh, so it was live during an in-flight
@@ -601,7 +578,7 @@
     // profile tiles are: they are built by renderProfileList()/showIconPicker()
     // rather than held in `ui`, so setBusy() cannot reach them by key.
     document.querySelectorAll('.bp-profile, .bp-pencil, .bp-icon, .bp-digit, .bp-action').forEach((button) => {
-      button.disabled = busy;
+      button.disabled = busy || button.dataset.unavailable === 'true';
     });
   }
 
@@ -628,9 +605,10 @@
   function updateConnectButton() {
     const profile = state.activeProfile;
     syncGateChrome();
-    ui.connect.textContent = profile ? profile.name : 'Connect profile';
+    ui.connect.textContent = profile ? `${profile.name} ▾` : 'Sign in';
     ui.connect.dataset.connected = profile ? 'true' : 'false';
-    ui.connect.setAttribute('aria-label', profile ? `Profile: ${profile.name}` : 'Connect profile');
+    ui.connect.setAttribute('aria-label', profile ? `Profile: ${profile.name}` : 'Sign in');
+    ui.connect.title = profile ? 'Switch profiles or sign out' : 'Sign in to Blazing Stream';
   }
 
   function dispatchProfileSelection(profile) {
@@ -672,6 +650,8 @@
    */
   function artEligible(profile) {
     return Boolean(profile)
+      && !profile.disabled
+      && !profile.artRestricted
       && profile.allowAdult !== true
       && String(profile.maxRating || '').toLowerCase() !== 'adult';
   }
@@ -791,7 +771,8 @@
       const slot = element('div', 'bp-profile-slot');
       const button = element('button', 'bp-profile');
       button.type = 'button';
-      button.disabled = state.busy;
+      button.disabled = state.busy || profile.disabled;
+      button.dataset.unavailable = String(profile.disabled);
       button.dataset.active = state.activeProfile && state.activeProfile.id === profile.id ? 'true' : 'false';
       button.setAttribute('aria-label', `Choose ${profile.name}${profile.hasPin ? ', PIN required' : ''}`);
 
@@ -801,7 +782,7 @@
       avatar.setAttribute('aria-hidden', 'true');
       const copy = element('span', 'bp-profile-copy');
       copy.append(element('span', 'bp-profile-name', profile.name));
-      const meta = profile.isKids ? 'Kids profile' : `${profile.maxRating} rating`;
+      const meta = profile.disabled ? 'Not available' : profile.isKids ? 'Kids' : profile.hasPin ? 'PIN required' : '';
       copy.append(element('span', 'bp-profile-meta', meta));
       button.append(avatar, copy);
       if (profile.hasPin) button.append(element('span', 'bp-profile-tag', 'PIN'));
@@ -815,7 +796,8 @@
 
       const pencil = element('button', 'bp-pencil', '✎');
       pencil.type = 'button';
-      pencil.disabled = state.busy;
+      pencil.disabled = state.busy || profile.disabled;
+      pencil.dataset.unavailable = String(profile.disabled);
       // The glyph is decoration; the label is the whole control for anyone not
       // looking at it.
       pencil.setAttribute('aria-label', `Change the picture for ${profile.name}`);
@@ -1122,10 +1104,12 @@
     state.ownerMode = false;
     clearPinEntry();
     hideAllScreens();
-    setPanelView('');
+    setPanelView('profiles');
     ui.profiles.hidden = false;
-    ui.kicker.textContent = 'Profiles';
+    ui.kicker.textContent = 'Blazing Stream';
     ui.heading.textContent = 'Who is watching?';
+    ui.copy.textContent = state.profiles.length ? 'Pick up where you left off.' : 'Add your first profile to start watching.';
+    if (ui.signOut) ui.signOut.hidden = !state.credentials;
     renderProfileList();
     if (message) setStatus(message, 'info');
   }
@@ -1181,12 +1165,12 @@
     setPanelView('gate');
     ui.welcome.hidden = false;
     ui.kicker.textContent = 'Get Access';
-    ui.heading.textContent = 'Private club';
+    ui.heading.textContent = 'Welcome to Blazing Stream';
     // Offered only once this browser has an identity to re-check. On a first
     // visit there is nothing to check again, and a button that can only say
     // "nothing happened" is worse than no button.
     if (ui.gateRecheck) ui.gateRecheck.hidden = !(state.credentials || storedCredentials());
-    setStatus(message || 'Choose how you want to get in.', type);
+    setStatus(message || '', type);
   }
 
   // Kept as a name because four call sites and one smoke test know it. The
@@ -1482,7 +1466,7 @@
       if (!credentials) return;
       const result = await request('/accounts/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
         body: JSON.stringify({ email, password, deviceId: credentials.id }),
       });
       if (!result.ok) {
@@ -1536,7 +1520,7 @@
       if (!credentials) return;
       const result = await request('/accounts/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
         body: JSON.stringify({ code: state.inviteCode, email, password, name, deviceId: credentials.id }),
       });
       if (!result.ok) {
@@ -1813,7 +1797,7 @@
       state.credentials = credentials;
       const result = await request('/devices/join', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
         body: JSON.stringify({ deviceId: credentials.id, code }),
       });
       if (!result.ok) {
@@ -1903,15 +1887,18 @@
       }
       const listing = await listProfiles(state.credentials);
       applyProfileList(listing);
-      const match = state.profiles.find((profile) => profile.id === created.id) || created;
-      selectProfile(match);
+      const match = listing.ok && state.profiles.find((profile) => profile.id === created.id);
+      if (match) {
+        setBusy(false);
+        selectProfile(match);
+      }
     } finally {
       setBusy(false);
     }
   }
 
   function selectProfile(profile) {
-    if (state.busy) return;
+    if (state.busy || profile.disabled) return;
     clearUnlock();
     if (profile.hasPin) {
       openPin(profile);
@@ -2275,9 +2262,7 @@
   function showPendingApproval(credentials) {
     state.profiles = [];
     state.approved = false;
-    state.activeProfile = null;
-    clearUnlock();
-    updateConnectButton();
+    clearActiveProfile();
     showProfiles();
     const id = text(credentials && credentials.id).slice(0, 8);
     setStatus(`This browser is waiting for approval${id ? ` (device ${id})` : ''}. Approve it in the Blazing dashboard, use "I am the owner" below, or enter an invite code.`, 'pending');
@@ -2288,6 +2273,16 @@
     // same escape hatch for a household member who is not the owner.
     if (ui.owner) ui.owner.hidden = false;
     if (ui.inviteFromPending) ui.inviteFromPending.hidden = false;
+  }
+
+  function clearActiveProfile() {
+    state.activeProfile = null;
+    clearUnlock();
+    for (const key of ['profileId', 'profileName']) {
+      try { localStorage.removeItem(key); } catch { /* Storage may be blocked. */ }
+    }
+    document.dispatchEvent(new CustomEvent('blazing-profile-signed-out'));
+    updateConnectButton();
   }
 
   function applyProfileList(result) {
@@ -2316,18 +2311,28 @@
     }
     state.profiles = rawProfiles.map(profileFrom).filter(Boolean);
     state.approved = true;
-    if (state.activeProfile && !state.profiles.some((profile) => profile.id === state.activeProfile.id)) {
-      state.activeProfile = null;
-      clearUnlock();
-      updateConnectButton();
+    try { localStorage.removeItem('blazing-signed-out-v1'); } catch { /* Storage may be blocked. */ }
+    let accessChanged = false;
+    if (state.activeProfile) {
+      const previous = state.activeProfile;
+      const refreshed = state.profiles.find((profile) => profile.id === previous.id && !profile.disabled);
+      accessChanged = !refreshed || ['maxRating', 'allowAdult', 'hasPin', 'isKids']
+        .some((key) => refreshed[key] !== previous[key]);
+      if (accessChanged) {
+        // A changed cap or PIN needs a fresh choice before any content resumes.
+        clearActiveProfile();
+      } else {
+        state.activeProfile = refreshed;
+        updateConnectButton();
+      }
     }
     showProfiles();
     if (!state.profiles.length) {
       setStatus('This approved browser has no profiles yet. Select "Add profile" below, or add one on an approved TV.', 'info');
       return;
     }
-    setStatus('Choose who is watching.', 'info');
-    window.setTimeout(() => ui.profiles.querySelector('.bp-profile')?.focus(), 0);
+    setStatus(accessChanged ? 'Profile access changed. Choose your profile again.' : '', 'info');
+    window.setTimeout(() => ui.profiles.querySelector('.bp-profile:not(:disabled)')?.focus(), 0);
     // Deliberately not awaited: the rail is already usable, and this is art.
     loadProfileArt();
   }
@@ -2469,7 +2474,7 @@
     if (ui.copy) {
       ui.copy.textContent = held
         ? 'Choose a profile to start watching.'
-        : 'Connect this browser only when you want to use a shared profile.';
+        : 'Switch profiles or sign out of this browser.';
     }
     if (ui.close) ui.close.hidden = held;
     if (ui.keepBrowsing) ui.keepBrowsing.hidden = held;
@@ -2481,7 +2486,63 @@
     ui.layer.hidden = false;
     ui.layer.setAttribute('aria-hidden', 'false');
     document.body.classList.add('no-scroll');
-    window.setTimeout(() => ui.close.focus(), 0);
+    for (const node of document.body.children) {
+      if (node !== ui.layer && node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE') node.inert = true;
+    }
+    window.setTimeout(() => focusPanel(), 0);
+  }
+
+  function panelControls() {
+    return [...ui.layer.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href]')]
+      .filter((node) => !node.classList.contains('bp-backdrop') && node.getClientRects().length);
+  }
+
+  function focusPanel() {
+    if (!ui.layer.hidden) panelControls()[0]?.focus();
+  }
+
+  function clearBrowserSession() {
+    stopPairPolling();
+    stopFleetHeartbeat();
+    clearUnlock();
+    state.activeProfile = null;
+    state.pendingProfile = null;
+    state.profiles = [];
+    state.credentials = null;
+    state.approved = false;
+    clearStoredCredentials();
+    for (const key of ['profileId', 'profileName', 'blazing-household-approved']) {
+      try { localStorage.removeItem(key); } catch { /* Storage may be blocked. */ }
+    }
+    document.dispatchEvent(new CustomEvent('blazing-profile-signed-out'));
+  }
+
+  async function signOut() {
+    if (state.busy) return;
+    setBusy(true);
+    setStatus('Signing out…');
+    const credentials = state.credentials || storedCredentials();
+    const result = credentials ? await request('/accounts/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
+      body: JSON.stringify({ deviceId: credentials.id }),
+    }) : null;
+    const rotated = result?.ok && result.body?.deviceId === credentials?.id
+      && text(result.body?.deviceToken)
+      ? { id: result.body.deviceId, token: result.body.deviceToken } : null;
+    try {
+      localStorage.setItem('blazing-signed-out-v1', '1');
+      sessionStorage.setItem('blazing-signout-note', rotated
+        ? 'You are signed out.'
+        : 'Signed out of this browser. The server did not confirm the disconnect.');
+    } catch { /* The in-memory session is still cleared below. */ }
+    clearBrowserSession();
+    if (rotated) saveCredentials(rotated);
+    // A new document drops in-flight requests, player state and profile unlocks.
+    const destination = new URL(location.href);
+    destination.searchParams.delete('pair');
+    destination.hash = '';
+    location.replace(destination.href);
   }
 
   /**
@@ -2511,30 +2572,10 @@
     ui.layer.hidden = true;
     ui.layer.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('no-scroll');
+    for (const node of document.body.children) node.inert = false;
     ui.connect.focus();
   }
 
-  // ── THE GATE'S ART. Drawn here, not fetched: no image request that can
-  // fail on a bad connection, and nothing borrowed — the door, the flame and
-  // the key are this file's own lines. #FF3D47 is the accent every Blazing
-  // client uses; #0A0A0B is the page.
-  const DOOR_MARK = `
-    <svg class="bp-gate-mark" viewBox="0 0 272 200">
-      <rect width="272" height="200" rx="28" fill="#0A0A0B"/>
-      <path d="M84 178V96a52 52 0 0 1 104 0v82" fill="none" stroke="#FF3D47" stroke-width="10" stroke-linecap="round"/>
-      <path d="M60 178h152" fill="none" stroke="#FF3D47" stroke-width="6" stroke-linecap="round" opacity=".55"/>
-      <path d="M136 152c-22 0-34-15-30-33 3-12 12-18 12-32 8 8 12 16 12 24 5-10 3-22 10-38 5 18 22 28 26 48 4 20-8 31-30 31z" fill="#FF3D47"/>
-      <path d="M136 150c-11 0-17-9-14-19 2-7 9-11 8-20 8 7 14 15 14 24 0 8-3 15-8 15z" fill="#FFB36B"/>
-    </svg>`;
-  const KEY_GLYPH = `
-    <svg class="bp-gate-key" viewBox="0 0 46 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <circle cx="8" cy="9" r="6"/>
-      <path d="M14 9h30M36 9v5M42 9v4"/>
-    </svg>`;
-  const ICON_GOOGLE = `
-    <svg class="bp-pill-icon" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <path d="M19 11a8 8 0 1 1-2.4-5.7M11 11h8"/>
-    </svg>`;
   const ICON_QR = `
     <svg class="bp-pill-icon" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="13" y="3" width="6" height="6" rx="1"/><rect x="3" y="13" width="6" height="6" rx="1"/>
@@ -2610,7 +2651,7 @@
     const searchButton = document.getElementById('search-button');
     if (!topbar || !searchButton) return false;
 
-    ui.connect = element('button', 'bp-connect', 'Connect profile');
+    ui.connect = element('button', 'bp-connect', 'Sign in');
     ui.connect.type = 'button';
     ui.connect.id = 'profile-connect-button';
     ui.connect.setAttribute('aria-haspopup', 'dialog');
@@ -2654,22 +2695,17 @@
     ui.welcome = element('section', 'bp-welcome');
     ui.welcome.id = 'bp-gate';
     ui.welcome.hidden = true;
-    const gateTitle = element('h2', 'bp-gate-title', 'Private Club');
+    const gateTitle = element('h2', 'bp-gate-title', 'Welcome to Blazing Stream');
     gateTitle.id = 'bp-gate-title';
-    const gateSub = element('p', 'bp-gate-sub', 'Blazing Stream is invite only.');
+    const gateSub = element('p', 'bp-gate-sub', 'Watch right here. No app needed.');
     gateSub.id = 'bp-gate-sub';
-    // Google is a real pill so the row reads as three equal choices, and it is
-    // disabled for good — the route behind it answers 501. It is NOT in
-    // BUSY_CONTROLS, or setBusy(false) would switch it on.
-    ui.pillGoogle = pill('bp-pill-google', ICON_GOOGLE, 'Login with Google', 'Coming soon');
-    ui.pillGoogle.disabled = true;
-    ui.pillGoogle.setAttribute('aria-disabled', 'true');
-    ui.pillQr = pill('bp-pill-qr', ICON_QR, 'Scan QR to login', 'Show a code for a signed-in phone');
-    ui.pillCode = pill('bp-pill-code', ICON_CODE, 'Type code to open', 'Invite or pairing code');
+    ui.gateEmail = pill('bp-gate-email', ICON_CODE, 'Sign in', 'Use your email and password');
+    ui.gateEmail.classList.add('bp-pill-primary');
+    ui.pillQr = pill('bp-pill-qr', ICON_QR, 'Sign in with your phone', 'Use a phone that is already signed in');
+    ui.pillCode = pill('bp-pill-code', ICON_CODE, 'Use an invite code', 'New here? Start with your invite');
     const pills = element('div', 'bp-gate-pills');
     pills.id = 'bp-gate-pills';
-    pills.append(ui.pillGoogle, ui.pillQr, ui.pillCode);
-    ui.gateEmail = button('bp-gate-link', 'Have an email login? Sign in', 'bp-gate-email');
+    pills.append(ui.gateEmail, ui.pillCode, ui.pillQr);
     // A SECOND "I am the owner", not the footer's. The footer one (ui.owner)
     // belongs to the pending screen and is what pinpad.smoke.mjs clicks; the
     // footer is display:none in gate view, so the gate needs its own. This
@@ -2680,8 +2716,18 @@
     ui.gateRecheck.hidden = true;
     const gateLinks = element('div', 'bp-gate-links');
     gateLinks.id = 'bp-gate-links';
-    gateLinks.append(ui.gateEmail, ui.gateOwner, ui.gateRecheck);
-    ui.welcome.append(svg(DOOR_MARK), gateTitle, gateSub, svg(KEY_GLYPH), pills, gateLinks);
+    gateLinks.append(ui.gateOwner, ui.gateRecheck);
+    const installLink = element('a', 'bp-gate-link', 'Get the app');
+    installLink.href = 'https://blazingstream.lyreosai.com/downloads/';
+    gateLinks.append(installLink);
+    const brandMark = document.createElement('img');
+    brandMark.className = 'bp-brand-mark';
+    brandMark.src = './icon.svg';
+    brandMark.alt = '';
+    brandMark.width = 56;
+    brandMark.height = 56;
+    const inviteHelp = element('p', 'bp-pairhelp', 'Blazing Stream is invite only. Ask your host for a code to create your account.');
+    ui.welcome.append(brandMark, gateTitle, gateSub, pills, inviteHelp, gateLinks);
     // The two first-run buttons this screen used to carry, kept as KEYS so the
     // code that knows them still finds an element. "I Have an Invite Code" is
     // the Type-code pill; "Request Access" was connectProfiles(), which is
@@ -2723,10 +2769,14 @@
     const emailTop = sheetTop('emailBack', 'bp-email-back', 'Sign in');
     ui.emailAddress = input('bp-email-address', 'email', 'Email address', 'username');
     ui.emailPassword = input('bp-email-password', 'password', 'Password', 'current-password');
+    const emailLabel = element('label', 'bp-field-label', 'Email address');
+    emailLabel.htmlFor = ui.emailAddress.id;
+    const passwordLabel = element('label', 'bp-field-label', 'Password');
+    passwordLabel.htmlFor = ui.emailPassword.id;
     const emailActions = element('div', 'bp-form-actions');
     ui.emailSubmit = button('bp-verify', 'Sign in', 'bp-email-submit');
     emailActions.append(ui.emailSubmit);
-    ui.email.append(emailTop, ui.emailAddress, ui.emailPassword, emailActions);
+    ui.email.append(emailTop, emailLabel, ui.emailAddress, passwordLabel, ui.emailPassword, emailActions);
 
     // TYPE CODE → an ACCOUNT invite → make the account. Reached only from
     // redeemInviteCode(), which holds the code in state.inviteCode.
@@ -2888,8 +2938,14 @@
     ui.inviteFromPending.hidden = true;
     ui.keepBrowsing = element('button', 'bp-secondary', 'Keep browsing');
     ui.keepBrowsing.type = 'button';
+    ui.keepBrowsing.textContent = 'Back to browsing';
+    ui.signOut = button('bp-secondary', 'Sign out', 'bp-sign-out');
+    ui.signOut.hidden = true;
     const keepBrowsing = ui.keepBrowsing;
-    footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing);
+    footer.append(ui.refresh, ui.owner, ui.inviteFromPending, keepBrowsing, ui.signOut);
+    const downloadLink = element('a', 'bp-secondary', 'Get the app');
+    downloadLink.href = 'https://blazingstream.lyreosai.com/downloads/';
+    footer.append(downloadLink);
     panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.icons, ui.profiles, ui.pin, footer);
     // Art FIRST, so the close-catcher and the rail both paint over it.
     ui.layer.append(ui.art, backdrop, panel);
@@ -2900,6 +2956,7 @@
       connectProfiles();
     });
     ui.refresh.addEventListener('click', connectProfiles);
+    ui.signOut.addEventListener('click', signOut);
     ui.owner.addEventListener('click', () => openOwnerPin('pending'));
     ui.inviteFromPending.addEventListener('click', () => showInvite());
     // The gate. ui.enterCode / ui.requestAccess are aliases of pillCode /
@@ -2969,6 +3026,19 @@
     ui.verify.addEventListener('click', verifyPin);
     document.addEventListener('keydown', (event) => {
       if (ui.layer.hidden || state.busy) return;
+      if (event.key === 'Tab') {
+        const controls = panelControls();
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || !controls.includes(document.activeElement))) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !controls.includes(document.activeElement))) {
+          event.preventDefault();
+          first?.focus();
+        }
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         // closePanel() itself refuses while the gate holds; going through it
@@ -2986,6 +3056,12 @@
       } else if (event.key === 'Enter' && state.pinDigits.length === pinLength()) {
         event.preventDefault();
         verifyPin();
+      }
+    });
+    window.addEventListener('storage', (event) => {
+      if (event.key === DEVICE_STORAGE_KEY && event.oldValue && event.newValue !== event.oldValue) {
+        document.dispatchEvent(new CustomEvent('blazing-profile-signed-out'));
+        location.reload();
       }
     });
     return true;
@@ -3006,10 +3082,17 @@
     // a silent auto-registration — "Request Access" is what creates the
     // pending device now, not a page load. A browser that already has an
     // identity (pending or approved) skips straight to it, unchanged.
-    if (storedCredentials()) {
+    let signedOut = false;
+    let note = '';
+    try {
+      signedOut = localStorage.getItem('blazing-signed-out-v1') === '1';
+      note = sessionStorage.getItem('blazing-signout-note') || '';
+      sessionStorage.removeItem('blazing-signout-note');
+    } catch { /* Storage may be blocked. */ }
+    if (storedCredentials() && !signedOut) {
       connectProfiles();
     } else {
-      showWelcome();
+      showGate(note);
     }
   }
 

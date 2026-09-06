@@ -59,9 +59,9 @@ rsync -a \
   --exclude '.git' --exclude '.wrangler' --exclude 'node_modules' \
   --exclude 'dist' --exclude '*.smoke.mjs' \
   --exclude 'build-tvs.sh' --exclude '.DS_Store' \
-  --exclude '.claude' --exclude '.omc' --exclude '.gitignore' \
+  --exclude '.claude' --exclude '.omc' --exclude '.codex' --exclude '.gitignore' \
   --exclude '*.md' --exclude '.github' --exclude '__pycache__' \
-  --exclude 'package.json' --exclude 'package-lock.json' --exclude 'scripts' \
+  --exclude 'package.json' --exclude 'package-lock.json' --exclude 'scripts' --exclude 'comet.mjs' \
   "$ROOT"/ "$STAGE"/
 
 echo "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"
@@ -69,7 +69,7 @@ echo "staged $(find "$STAGE" -type f | wc -l | tr -d ' ') files"
 # ── LG webOS ────────────────────────────────────────────────────────────────
 if command -v ares-package >/dev/null 2>&1; then
   ares-package "$STAGE" -o "$OUT" --no-minify
-  echo "OK  LG webOS: $(ls "$OUT"/*.ipk | tail -1)"
+  printf 'OK  LG webOS: %s\n' "$OUT"/*.ipk
 else
   echo "SKIP  LG webOS — ares-package not found. npm i -g @webosose/ares-cli"
 fi
@@ -84,7 +84,7 @@ if [ -x "$TIZEN" ]; then
     cp "$ROOT/config.xml" "$STAGE/config.xml"
     "$TIZEN" build-web -- "$STAGE" >/dev/null
     "$TIZEN" package -t wgt -s BlazingCert -o "$OUT" -- "$STAGE/.buildResult"
-    echo "OK  Samsung Tizen: $(ls "$OUT"/*.wgt | tail -1)"
+    printf 'OK  Samsung Tizen: %s\n' "$OUT"/*.wgt
   else
     echo "SKIP  Samsung Tizen — no BlazingCert security profile yet (see above)."
   fi
@@ -97,7 +97,7 @@ echo "Installing on a TV on THIS network:"
 echo "  LG       ares-setup-device --add tv --info \"host=<tv-ip>,port=9922,username=prisoner\""
 echo "           ares-install --device tv $OUT/*.ipk"
 echo "  Samsung  ~/tizen-studio/tools/sdb connect <tv-ip>:26101"
-echo "           $TIZEN install -n \$(basename "$OUT"/*.wgt) -- $OUT"
+printf '           "%s" install -n Blazing.wgt -- "%s"\n' "$TIZEN" "$OUT"
 echo
 echo "A TV on ANOTHER network cannot be reached by either tool. Open the site in"
-echo "the TV's own browser instead: https://blazing-web.pages.dev"
+echo "the TV's own browser instead: https://blazingstream.lyreosai.com/app/"

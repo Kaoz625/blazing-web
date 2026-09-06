@@ -15,7 +15,7 @@ const RESOLVE_TIMEOUT = 12000;
 const PLAYER_STALL_TIMEOUT = 25000;
 const TOAST_LIFETIME_MS = 4200;
 const UPSCALE_LABEL = '4K Upscale';
-const LIST_KEY = 'blazing-my-list-v1';
+const LIST_KEY = 'blazing-my-list-v2:';
 const FRESH_HOME_SHELVES = Object.freeze([
   {
     id: 'fresh-in-theaters',
@@ -50,7 +50,11 @@ async function fetchJSON(url) {
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   try {
     const response = await fetch(url, { signal: controller.signal, mode: 'cors', credentials: 'omit' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     return await response.json();
   } finally {
     clearTimeout(timeout);
@@ -458,9 +462,10 @@ function setBackground(node, value) {
     : '';
 }
 
-function readList() {
+function readList(profileId) {
+  if (!profileId) return [];
   try {
-    const stored = JSON.parse(localStorage.getItem(LIST_KEY) || '[]');
+    const stored = JSON.parse(localStorage.getItem(LIST_KEY + encodeURIComponent(profileId)) || '[]');
     return Array.isArray(stored) ? stored.map(safeMeta).filter(Boolean).slice(0, 100) : [];
   } catch {
     return [];
@@ -472,7 +477,8 @@ const state = {
   selected: null,
   selectedEpisode: null,
   route: 'home',
-  myList: readList(),
+  profileId: null,
+  myList: [],
   // The rating cap of the connected profile, or null when nobody has connected
   // one. profile.js has broadcast this on blazing-profile-selected since it was
   // written; until now NOTHING listened, so every Emby row reached every viewer
@@ -491,6 +497,8 @@ const adminView = $('#admin-view');
 const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
 const rowsWrap = $('#rows');
+let homeRequest = 0;
+let homeCatalogs = new Set();
 // No standalone hero — the first row with content claims .row-hero on its own
 // <section> (claimHeroRow, below) and every card already carries the markup
 // that reveals on a row-hero ancestor. See the comment in index.html.
@@ -800,6 +808,11 @@ function measureScrollbar() {
 }
 measureScrollbar();
 window.addEventListener('resize', measureScrollbar);
+// Home arrives after the gate, so a classic scrollbar can appear without a
+// window resize. Keep the full-width hero aligned as the document changes.
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(measureScrollbar).observe(document.documentElement);
+}
 const drawerLayer = $('#drawer-layer');
 const menuButton = $('#menu-button');
 const detailDialog = $('#detail-dialog');
@@ -825,7 +838,12 @@ let discoverRequest = 0;
 let searchRequest = 0;
 
 function persistList() {
-  localStorage.setItem(LIST_KEY, JSON.stringify(state.myList));
+  if (!state.profileId) return;
+  try {
+    localStorage.setItem(LIST_KEY + encodeURIComponent(state.profileId), JSON.stringify(state.myList));
+  } catch {
+    showToast('This browser could not save your list.', 'error');
+  }
 }
 
 function listHas(meta) {
@@ -833,7 +851,7 @@ function listHas(meta) {
 }
 
 function toggleMyList(meta) {
-  if (!meta) return;
+  if (!meta || !state.profileId) return;
   const index = state.myList.findIndex((item) => item.id === meta.id && item.type === meta.type);
   if (index >= 0) state.myList.splice(index, 1);
   else state.myList.unshift(meta);
@@ -1307,13 +1325,14 @@ function buildResultRow(title, metas) {
 function renderLibrary() {
   const target = $('#library-results');
   target.replaceChildren();
-  if (!state.myList.length) {
+  const visible = state.myList.filter((meta) => ratingAllowed(meta.contentRating));
+  if (!visible.length) {
     const message = el('p', 'empty-copy');
     message.textContent = 'Open a title and use My list to save it here.';
     target.appendChild(message);
     return;
   }
-  target.appendChild(buildResultRow('Saved titles', state.myList));
+  target.appendChild(buildResultRow('Saved titles', visible));
 }
 
 function applyRowFilter(route) {
@@ -1869,12 +1888,13 @@ function hydrateCardBackdrop(event) {
   if (backdrop && backdrop.dataset.src) backdrop.src = backdrop.dataset.src;
 }
 
-async function loadRow(catalog, section) {
+async function loadRow(catalog, section, request = homeRequest) {
   const track = $('.row-track', section);
   try {
     const data = await fetchJSON(
       `${API_BASE}/catalog/${encodeURIComponent(catalog.type)}/${encodeURIComponent(catalog.id)}.json`
     );
+    if (request !== homeRequest || !section.isConnected) return [];
     // The same cap Emby's rows already respect (appendEmbyRow). This is the
     // ordinary catalog path — Trending Now/Trending Shows and every manifest
     // catalog go through here — and it had NO rating check at all: a Kids
@@ -1894,10 +1914,11 @@ async function loadRow(catalog, section) {
   }
 }
 
-async function loadFreshHomeRow(shelf, section) {
+async function loadFreshHomeRow(shelf, section, request = homeRequest) {
   const track = $('.row-track', section);
   try {
     const data = await fetchJSON(`${FLEET_BASE}${shelf.path}`);
+    if (request !== homeRequest || !section.isConnected) return [];
     const metas = (Array.isArray(data.items) ? data.items : [])
       .map((item) => safeDiscoverMeta({ ...item, type: item.type || shelf.type }))
       .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
@@ -1924,10 +1945,10 @@ function activeCatalogs(rawCatalogs) {
 }
 
 
-async function loadSDUIRow(catalogInfo, section) {
+async function loadSDUIRow(catalogInfo, section, request = homeRequest) {
   const track = $('.row-track', section);
   if (!catalogInfo.catalogSlug) {
-    if (catalogInfo.id === 'continue') return loadContinueWatchingRow(section);
+    // The profile lifecycle loads history once, separately from catalog rows.
     section.remove();
     return [];
   }
@@ -1947,6 +1968,7 @@ async function loadSDUIRow(catalogInfo, section) {
 
   try {
     const data = await fetchJSON(fetchUrl);
+    if (request !== homeRequest || !section.isConnected) return [];
     const rawMetas = Array.isArray(data.metas) ? data.metas : (Array.isArray(data) ? data : []);
     
     const metas = rawMetas
@@ -1966,71 +1988,32 @@ async function loadSDUIRow(catalogInfo, section) {
   }
 }
 
-async function loadContinueWatchingRow(section) {
-  // Use existing logic for continue watching
-  loadContinueWatching();
-  section.remove(); // The existing logic creates its own row at the top
-  return [];
-}
-
-/**
- * The home screen.
- *
- * THIS WAS NOT CALLED. The BlazeOS Phase 1 patch replaced the body with an
- * SDUI-only version and dropped the `boot();` call in the same change, so from
- * 48f1be5 until now NOTHING built the home: no hero, no shelves, no Continue
- * Watching. The only rows that ever appeared were the three Emby ones, drawn by
- * the blazing-profile-selected listener at the bottom of this file — which is
- * why the screen looked like it worked when a profile was picked, and why a
- * check that looked at the Emby rows passed. TRENDING_ROWS, FRESH_HOME_SHELVES,
- * loadRow, loadFreshHomeRow and activeCatalogs were all left defined, orphaned.
- *
- * AND THE SDUI PATH CANNOT WORK TODAY. /api/ui/home-config answers 404 on
- * addon.lyreosai.com. The route exists in the blazing-addon repo (server.js) and
- * the deployed addon does not have it — the same gap that leaves 13 of the edu
- * catalogs dead. So SDUI is TRIED, and the real shelves are the answer when it
- * is not there. Once the addon is deployed the layout it serves takes over with
- * no client change; until then the home is the one that works.
- */
+/** Rebuild Home after a profile is selected, including on a returning browser. */
 async function boot() {
-  // ONE PICKER. This used to build a second one: a `<dialog id="profile-picker">`
-  // in index.html, filled from GET /api/profiles with plain-text buttons, opened
-  // with showModal() over the top of profile.js's real gate. It was live, not
-  // dead — this branch fires on any browser with no `profileId` yet, which is
-  // every first visit — and it is exactly the "why does the profile picker look
-  // different?" Markus hit on the live app. Its list came from the ADD-ON, not
-  // the fleet, so it showed different profiles with no PIN, no kids flag and no
-  // avatars, and picking one skipped the gate's whole unlock path.
-  //
-  // The markup is gone from index.html. The gate opens itself on every load, so
-  // the only thing left to do here is make sure it is up when there is no
-  // profile yet, and let the `blazing-profile-selected` listener at the foot of
-  // this file persist the id it chooses.
-  const profileId = localStorage.getItem('profileId');
-  if (profileId) {
-    loadContinueWatching();
-  } else if (window.BlazingProfile && !window.BlazingProfile.isOpen()) {
-    window.BlazingProfile.open();
+  if (!state.profileId) {
+    if (window.BlazingProfile && !window.BlazingProfile.isOpen()) window.BlazingProfile.open();
+    return;
   }
-
+  const request = ++homeRequest;
+  homeCatalogs = new Set();
   rowsWrap.replaceChildren();
-
-  // Fire and forget: an Emby outage costs three hidden rows, never a slow or
-  // broken home screen. Each row appends itself when it arrives.
-  loadEmbyRows();
-
-  if (await bootFromSDUI()) return;
-  await bootFromShelves();
+  resetHomeHero();
+  loadContinueWatching(state.profileId, request);
+  loadEmbyRows(request);
+  const described = await bootFromSDUI(request);
+  if (request !== homeRequest) return;
+  if (!described) await bootFromShelves(request);
 }
 
+function claimHomeCatalog(type, id) {
+  const key = `${type}/${id}`;
+  if (homeCatalogs.has(key)) return false;
+  homeCatalogs.add(key);
+  return true;
+}
 
-/**
- * Returns true only when the server actually described a layout AND at least one
- * of its rows had something in it. A 404, a throw, or a layout whose every row
- * came back empty all return false, so the caller falls through to the shelves
- * instead of leaving the viewer on an empty screen with a heading over it.
- */
-async function bootFromSDUI() {
+/** Load the server's preferred row order; local shelves fill out the Home below. */
+async function bootFromSDUI(request = homeRequest) {
   try {
     // BrightMinds Kids ('safe') is the real, intentional public face of this
     // domain — not a bug, not a placeholder. The bug was HOW a device left
@@ -2046,9 +2029,8 @@ async function bootFromSDUI() {
     // profile — a pending/public device never reaches that point), not by a
     // flag nobody ever sets.
     const mode = localStorage.getItem('blazing-household-approved') ? 'blazing' : 'safe';
-    const uiRes = await fetch(`${API_BASE}/api/ui/home-config?mode=${mode}`);
-    if (!uiRes.ok) return false;
-    const uiConfig = await uiRes.json();
+    const uiConfig = await fetchJSON(`${API_BASE}/api/ui/home-config?mode=${mode}`);
+    if (request !== homeRequest) return false;
     if (!uiConfig || !Array.isArray(uiConfig.homeRows) || !uiConfig.homeRows.length) return false;
 
     if (uiConfig.appName) {
@@ -2116,14 +2098,16 @@ async function bootFromSDUI() {
           name: row.label,
           catalogSlug: row.catalogSlug,
         };
+        if (catalogInfo.catalogSlug && !claimHomeCatalog(catalogInfo.type, catalogInfo.catalogSlug)) return [];
         const section = buildRowSkeleton(catalogInfo);
         rowsWrap.appendChild(section);
-        return loadSDUIRow(catalogInfo, section);
+        return loadSDUIRow(catalogInfo, section, request);
       });
 
-    const rows = await Promise.all(jobs);
-    const first = rows.find((metas) => metas && metas.length)?.[0];
-    if (!first) return false;            // described a layout, served nothing
+    // Once the layout has reserved its catalog IDs, start other shelves too.
+    // One slow or empty SDUI source must not hold up the rest of Home.
+    await Promise.all([Promise.all(jobs), bootFromShelves(request)]);
+    if (request !== homeRequest) return false;
     applyRowFilter(state.route);
     return true;
   } catch (err) {
@@ -2138,35 +2122,39 @@ async function bootFromSDUI() {
  * catalog the addon's own manifest advertises. Recovered from 48f1be5^ — all of
  * these helpers were still in the file, just never called again.
  */
-async function bootFromShelves() {
+async function bootFromShelves(request = homeRequest) {
   const trendingJobs = TRENDING_ROWS.map((catalog) => {
+    if (!claimHomeCatalog(catalog.type, catalog.id)) return Promise.resolve([]);
     const section = buildRowSkeleton(catalog);
     section.dataset.softRow = 'true';
     rowsWrap.appendChild(section);
-    return loadRow(catalog, section);
+    return loadRow(catalog, section, request);
   });
 
   const freshJobs = FRESH_HOME_SHELVES.map((shelf) => {
     const section = buildRowSkeleton({ id: shelf.id, name: shelf.title, type: shelf.type });
     section.dataset.freshShelf = 'true';
     rowsWrap.appendChild(section);
-    return loadFreshHomeRow(shelf, section);
+    return loadFreshHomeRow(shelf, section, request);
   });
   const freshDone = Promise.all(freshJobs);
 
   const catalogDone = fetchJSON(`${API_BASE}/manifest.json`)
     .then((manifest) => {
+      if (request !== homeRequest) return [];
       state.catalogs = activeCatalogs(Array.isArray(manifest.catalogs) ? manifest.catalogs : []);
       const jobs = state.catalogs.map((catalog) => {
+        if (!claimHomeCatalog(catalog.type, catalog.id)) return Promise.resolve([]);
         const section = buildRowSkeleton(catalog);
         rowsWrap.appendChild(section);
-        return loadRow(catalog, section);
+        return loadRow(catalog, section, request);
       });
       return Promise.all(jobs);
     })
     .catch(() => []);
 
   const [freshRows, catalogRows, trendingRows] = await Promise.all([freshDone, catalogDone, Promise.all(trendingJobs)]);
+  if (request !== homeRequest) return;
   // trendingRows was AWAITED and then thrown away by a two-name destructure, so
   // a home whose only populated rows were Trending Now and Trending Shows -- the
   // ordinary case when the discover shelves are quiet -- counted as "nothing"
@@ -2560,20 +2548,25 @@ async function resolveEduStream(id) {
  */
 const FOREIGN_DUB = /(?:^|[^a-z0-9])(?:rus|russian|ita|italian|latino|french|dublado|hindi|tamil|telugu)(?:[^a-z0-9]|$)/i;
 
+let streamsRequest = 0;
+
 async function loadStreams(meta) {
+  const request = ++streamsRequest;
+  const contentId = state.selected === meta && state.selectedEpisode
+    ? state.selectedEpisode.id : meta.id;
+  const isCurrent = () => request === streamsRequest && state.selected === meta
+    && (state.selectedEpisode?.id || meta.id) === contentId && detailDialog.open;
   const container = $('#detail-streams');
   container.innerHTML = '';
+  resetQualitySelect();
   if (isMwp(meta)) return;
 
   detailStatus.textContent = 'Loading streams...';
   try {
-    const contentId = state.selected === meta && state.selectedEpisode
-      ? state.selectedEpisode.id : meta.id;
     // `let`, because the capability filter below replaces this list with the
     // rows this device can actually decode.
     let streams = await resolveStreams(meta, contentId);
-    if (state.selected !== meta) return;
-    if (state.selectedEpisode && state.selectedEpisode.id !== contentId) return;
+    if (!isCurrent()) return;
     if (!streams.length) {
       detailStatus.textContent = 'No compatible stream available.';
       return;
@@ -2610,7 +2603,7 @@ async function loadStreams(meta) {
     let ranked = null;
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
-      if (state.selected !== meta) return;
+      if (!isCurrent()) return;
       ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks });
       streams = ranked.streams.map((info) => info.raw);
       if (!streams.length) {
@@ -2698,7 +2691,22 @@ async function loadStreams(meta) {
       container.appendChild(row);
     }
   } catch (err) {
-    detailStatus.textContent = 'Failed to load streams.';
+    if (!isCurrent()) return;
+    const retryable = !err.status || err.status === 408 || err.status === 429 || err.status >= 500;
+    detailStatus.textContent = retryable
+      ? 'Sources did not load. Try again.'
+      : 'Sources are not available for this title.';
+    if (retryable) {
+      const retry = el('button', 'secondary-button');
+      retry.type = 'button';
+      retry.textContent = 'Retry sources';
+      retry.addEventListener('click', () => {
+        if (!isCurrent()) return;
+        retry.disabled = true;
+        loadStreams(meta);
+      });
+      container.replaceChildren(retry);
+    }
     telemetry('error', { where: 'app.loadStreams', code: 'fetch', message: String((err && err.message) || err).slice(0, 200) });
   }
 }
@@ -3110,11 +3118,12 @@ function openPlayer(title, rawUrl, opts) {
     return;
   }
   startSync({ id: state.selected?.id });
-  const profileId = localStorage.getItem('profileId');
+  const profileId = state.profileId;
   if (profileId && state.selected?.id) {
     fetch(`${API_BASE}/api/sync/progress/${state.selected.id}?profileId=${profileId}`)
       .then(r => r.json())
       .then(d => {
+        if (session !== playSession || profileId !== state.profileId) return;
         if (d.position && d.position > 60) {
           const b = $('#resume-btn');
           b.hidden = false;
@@ -3137,6 +3146,11 @@ function openPlayer(title, rawUrl, opts) {
  * scroll. The one reference left in the tree was the comment at watchPlayerLoad.
  */
 function closePlayer() {
+  ++playSession;
+  clearPlayerWatchdog();
+  stopSync();
+  destroyHls();
+  $('#resume-btn').hidden = true;
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -3155,12 +3169,12 @@ function closePlayer() {
  * loadContinueWatching PREPENDS its row, so it lands above whatever the shelves
  * have already drawn, whichever finishes first.
  */
-async function loadContinueWatching(explicitProfileId) {
-  const profileId = explicitProfileId || localStorage.getItem('profileId');
+async function loadContinueWatching(explicitProfileId, request = homeRequest) {
+  const profileId = explicitProfileId || state.profileId;
   if (!profileId) return;
   try {
-    const res = await fetch(`${API_BASE}/api/sync/progress/recent?profileId=${profileId}`);
-    const data = await res.json();
+    const data = await fetchJSON(`${API_BASE}/api/sync/progress/recent?profileId=${encodeURIComponent(profileId)}`);
+    if (request !== homeRequest || profileId !== state.profileId) return;
     if (data.items && data.items.length) {
       const section = buildRowSkeleton({ id: 'continue-watching', name: 'Continue Watching', type: 'mixed' });
       section.dataset.rowId = 'continue-watching';
@@ -3178,7 +3192,8 @@ async function loadContinueWatching(explicitProfileId) {
       // would change every other caller's shape; this does not.
       const pairs = data.items
         .map((raw) => ({ raw, meta: safeDiscoverMeta(raw) }))
-        .filter((pair) => pair.meta);
+        .filter((pair) => pair.meta && ratingAllowed(pair.meta.contentRating));
+      if (!pairs.length) { section.remove(); return; }
       const metas = pairs.map((pair) => pair.meta);
       track.replaceChildren(...pairs.map(({ raw, meta }) => {
         const c = buildCard(meta);
@@ -3226,7 +3241,7 @@ function startSync(meta) {
   stopSync();
   syncInterval = setInterval(() => {
     if (!video.duration || video.paused) return;
-    const profileId = localStorage.getItem('profileId');
+    const profileId = state.profileId;
     if (!profileId) return;
     fetch(`${API_BASE}/api/sync/progress`, {
       method: 'POST',
@@ -3609,8 +3624,11 @@ function ratingAllowed(tier) {
   return tierIndex <= capIndex;
 }
 
-async function appendEmbyRow(title, type, load) {
-  const metas = (await load()).map(embyMeta).filter(Boolean)
+async function appendEmbyRow(title, type, load, request = homeRequest) {
+  let items;
+  try { items = await load(); } catch { return; }
+  if (request !== homeRequest) return;
+  const metas = items.map(embyMeta).filter(Boolean)
     .filter((meta) => ratingAllowed(meta.contentRating));
   // An empty row is NOT drawn. A shelf that says "Emby" over six grey rectangles
   // reads as broken; no shelf reads as "not today".
@@ -3632,11 +3650,11 @@ async function appendEmbyRow(title, type, load) {
  * dead Emby must not hold up the home screen. Each row appends itself when it
  * arrives, in whatever order they arrive.
  */
-function loadEmbyRows() {
+function loadEmbyRows(request = homeRequest) {
   if (!window.BlazingEmby) return;
-  appendEmbyRow('Emby · Latest Movies', 'movie', () => window.BlazingEmby.latest('movie', 12));
-  appendEmbyRow('Emby · Latest Shows', 'series', () => window.BlazingEmby.latest('series', 12));
-  appendEmbyRow('Emby · Live TV', 'tv', () => window.BlazingEmby.livetv(12));
+  appendEmbyRow('Emby · Latest Movies', 'movie', () => window.BlazingEmby.latest('movie', 12), request);
+  appendEmbyRow('Emby · Latest Shows', 'series', () => window.BlazingEmby.latest('series', 12), request);
+  appendEmbyRow('Emby · Live TV', 'tv', () => window.BlazingEmby.livetv(12), request);
 }
 
 /**
@@ -3646,9 +3664,11 @@ function loadEmbyRows() {
  * client until tonight.
  */
 const embyBrowseState = { type: 'movie', sort: 'added', skip: 0, total: 0, loading: false };
+let embyRequest = 0;
 
 async function loadEmbyPage(reset) {
-  if (!window.BlazingEmby || embyBrowseState.loading) return;
+  if (!window.BlazingEmby || (embyBrowseState.loading && !reset)) return;
+  const request = ++embyRequest;
   const results = $('#emby-results');
   const status = $('#emby-status');
   const loadMore = $('#emby-load-more');
@@ -3662,6 +3682,7 @@ async function loadEmbyPage(reset) {
   const { metas, total, hasMore } = await window.BlazingEmby.browse(embyBrowseState.type, {
     skip: embyBrowseState.skip, limit: 48, sort: embyBrowseState.sort,
   });
+  if (request !== embyRequest) return;
   embyBrowseState.loading = false;
   embyBrowseState.total = total;
   // SAME filter appendEmbyRow applies to the Home teaser rows — this is still
@@ -3700,97 +3721,54 @@ function loadEmbyView() {
   loadEmbyPage(true);
 }
 
-// A profile switch changes the rating cap — the same reason Emby's Home rows
-// reload on 'blazing-profile-selected' (see the listener near loadEmbyRows).
-// Re-fetches from the top rather than trying to re-filter what's on screen:
-// simpler, and this is a library browse, not a scroll position worth
-// preserving across a profile change.
-document.addEventListener('blazing-profile-selected', () => {
-  if ($('#emby-view').dataset.loaded !== 'true') return;
-  loadEmbyPage(true);
-});
-
-/**
- * Switching profile must change what is on screen.
- *
- * The rows already drawn were filtered against the OLD cap, so they are thrown
- * away and refetched rather than left standing. Dropping them first also means a
- * shelf that empties under a stricter cap disappears instead of sitting there as
- * a title over nothing — appendEmbyRow refuses to draw an empty row.
- */
+// One profile change owns the list, cap, history and all Home shelves. Persisted
+// approval says which brand to show; it is never a reason to skip this refresh.
 document.addEventListener('blazing-profile-selected', (event) => {
   const detail = (event && event.detail) || {};
-  const next = detail.maxRating || null;
-  if (next === state.profileCap) return;
-  state.profileCap = next;
-  for (const section of document.querySelectorAll('[data-emby-row="true"]')) section.remove();
-  loadEmbyRows();
-});
-
-/**
- * Picking a real profile is only reachable once profile.js's own gate has
- * confirmed this device is approved — a pending or public device never gets
- * past "waiting for approval" to a profile list at all. So the moment this
- * fires, the device has earned 'blazing' mode: the household's own Blazing
- * Stream, not the public BrightMinds shell. Persisted, so a RETURNING
- * approved device renders 'blazing' from the very first paint next time
- * instead of flashing BrightMinds first.
- */
-document.addEventListener('blazing-profile-selected', () => {
-  if (localStorage.getItem('blazing-household-approved')) return;
+  if (!detail.id) return;
+  stopSync();
+  if (!player.hidden) closePlayer();
+  if (detailDialog.open) closeDetail();
+  state.profileId = String(detail.id);
+  state.profileCap = detail.maxRating || 'general';
+  state.myList = readList(state.profileId);
+  state.selected = null;
+  state.selectedEpisode = null;
+  localStorage.setItem('profileId', state.profileId);
   localStorage.setItem('blazing-household-approved', '1');
-  // Only the catalog/SDUI rows (buildRowSkeleton's plain <section class="row">,
-  // built by loadRow/loadFreshHomeRow/loadSDUIRow) — NOT [data-emby-row="true"]
-  // sections, which are the OTHER 'blazing-profile-selected' listener's job
-  // (see loadEmbyRows() above). Both listeners fire for the same event; a
-  // blanket rowsWrap.replaceChildren() here raced that listener's own
-  // clear-then-refetch and duplicated every Emby row (appendEmbyRow's fetch is
-  // async, so "clear" and "the row lands" are never in the same tick).
-  for (const section of rowsWrap.querySelectorAll('section:not([data-emby-row="true"])')) {
-    section.remove();
-  }
-  (async () => {
-    if (!(await bootFromSDUI())) await bootFromShelves();
-  })();
+  updateSaveLabels();
+  renderLibrary();
+  // Search and discovery were filtered for the previous viewer.
+  ++searchRequest;
+  ++discoverRequest;
+  clearSearchResults();
+  discoverResults.replaceChildren();
+  if ($('#emby-view').dataset.loaded === 'true') loadEmbyPage(true);
+  boot();
 });
 
-/**
- * Continue Watching, for the profile that was just picked.
- *
- * THIS ROW HAD NEVER RENDERED FOR ANYBODY. loadContinueWatching() returns at its
- * first line unless `localStorage.profileId` is set, and profile.js — the gate
- * every real device goes through — never wrote that key. The only writers were
- * boot()'s legacy #profile-picker, a second dialog that has since been deleted
- * (see boot()). So `profileId` was null on every device, on every visit, and the
- * row was skipped in silence. Markus, 2026-08-30:
- * "embry continue watching all the posters." There were no posters to hover.
- *
- * THIS LISTENER IS NOW THE ONLY WRITER, which is why deleting that dialog cost
- * nothing: the gate dispatches on every pick, including the first.
- *
- * The event carries the id, so take it from there and persist it — the next
- * boot() then draws the row on the first paint instead of waiting for a pick.
- *
- * Registered AFTER the household listener above on purpose: that one removes
- * every `section:not([data-emby-row])`, and Continue Watching is one of those. It
- * ran on a first-time device and wiped a row nothing rebuilt.
- *
- * It also runs on EVERY selection, outside that listener's own early return, so
- * switching profile swaps the row instead of leaving the previous profile's
- * history on screen under a new name.
- */
-document.addEventListener('blazing-profile-selected', (event) => {
-  const id = ((event && event.detail) || {}).id;
-  if (!id) return;
-  localStorage.setItem('profileId', String(id));
-  const stale = rowsWrap.querySelector('[data-row-id="continue-watching"]');
-  if (stale) stale.remove();
-  // The full-bleed band is the other place this profile's history is on screen,
-  // and it does not clear itself — see resetHomeHero for why the priority latch
-  // silently refuses the second seed. Same line as `stale.remove()` above, for
-  // the same reason and at the same moment.
+document.addEventListener('blazing-profile-signed-out', () => {
+  ++homeRequest;
+  ++searchRequest;
+  ++discoverRequest;
+  ++embyRequest;
+  embyBrowseState.loading = false;
+  stopSync();
+  closePlayer();
+  closeDetail();
   resetHomeHero();
-  loadContinueWatching(String(id));
+  state.profileId = null;
+  state.profileCap = null;
+  state.myList = [];
+  state.selected = null;
+  state.selectedEpisode = null;
+  state.catalogs = [];
+  rowsWrap.replaceChildren();
+  clearSearchResults();
+  discoverResults.replaceChildren();
+  $('#emby-results').replaceChildren();
+  renderLibrary();
+  updateSaveLabels();
 });
 
 /* ---- Comics ------------------------------------------------------------- */
