@@ -37,25 +37,52 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // working as the count grows. REMOVING one is meant to be a deliberate act —
 // delete the suite and lower this number in the same commit, so the diff says
 // out loud that the repo now proves less than it did.
-const MIN_SUITES = 18;
+//
+// 6 Sep 2026: the floor had drifted from its own rule. It still said 18 while
+// 25 suites existed, so SEVEN could have gone missing and this still reported a
+// green "18/18 passed" — the exact silent no-op the paragraph above exists to
+// stop, just further down the slope it warns about. Raised to the real count.
+const MIN_SUITES = 25;
+
+// The unit tests were not run AT ALL. This runner is what `npm test` calls and
+// what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
+// media-library.test.mjs, stream-evidence.test.mjs and stream-preferences.test.mjs
+// (41 assertions between them) were invisible to every push. They passed when a
+// human ran them by hand, which is precisely why nobody noticed they were not
+// part of the gate.
+//
+// They are spawned the same way as a smoke, with no --test flag and no special
+// case: a file importing node:test executes on a plain `node file.mjs` and
+// exits 1 when an assertion fails. Both halves of that were measured before
+// wiring it up, because a unit file that ran nothing and exited 0 would add
+// fake green to the gate and be worse than leaving it out.
+const MIN_UNITS = 3;
 
 const filters = process.argv.slice(2);
-const all = (await readdir(ROOT))
-  .filter((f) => f.endsWith('.smoke.mjs'))
-  .sort();
+const entries = (await readdir(ROOT)).sort();
+const smokes = entries.filter((f) => f.endsWith('.smoke.mjs'));
+const units = entries.filter((f) => f.endsWith('.test.mjs'));
 
-if (all.length < MIN_SUITES) {
-  console.error(`FAIL  found only ${all.length} *.smoke.mjs in ${ROOT}; expected at least ${MIN_SUITES}.`);
+if (smokes.length < MIN_SUITES) {
+  console.error(`FAIL  found only ${smokes.length} *.smoke.mjs in ${ROOT}; expected at least ${MIN_SUITES}.`);
   console.error('      A check that matches nothing must go red, not pass for free.');
   process.exit(1);
 }
+
+if (units.length < MIN_UNITS) {
+  console.error(`FAIL  found only ${units.length} *.test.mjs in ${ROOT}; expected at least ${MIN_UNITS}.`);
+  console.error('      A check that matches nothing must go red, not pass for free.');
+  process.exit(1);
+}
+
+const all = [...smokes, ...units];
 
 const suites = filters.length
   ? all.filter((f) => filters.some((s) => f.includes(s)))
   : all;
 
 if (!suites.length) {
-  console.error(`FAIL  no *.smoke.mjs matched ${filters.join(' ')}`);
+  console.error(`FAIL  no *.smoke.mjs or *.test.mjs matched ${filters.join(' ')}`);
   process.exit(1);
 }
 
@@ -96,7 +123,9 @@ function run(file) {
   });
 }
 
-console.log(`${suites.length} smoke suite${suites.length === 1 ? '' : 's'}, node ${process.version}\n`);
+const smokeCount = suites.filter((f) => f.endsWith('.smoke.mjs')).length;
+const unitCount = suites.length - smokeCount;
+console.log(`${smokeCount} smoke suite${smokeCount === 1 ? '' : 's'} + ${unitCount} unit file${unitCount === 1 ? '' : 's'}, node ${process.version}\n`);
 
 const results = [];
 for (const file of suites) {
