@@ -430,7 +430,15 @@ ok(!/REMUX\.HEVC/i.test(dom.text),
   'the undecodable 4K HEVC remux is not in the panel at all');
 ok(/HASHONLY/i.test(dom.text) === false,
   'the infoHash-only row is not in the panel');
-ok(/play on this device/.test(dom.note),
+// Assert the INTENT — that the note names what was hidden and why — not the
+// lead-in wording, which is viewer-facing copy and moves. This check greped
+// for "play on this device" until 5f9f460 reworded that sentence to "match
+// this device's format limits" and left the assertion behind. The app was
+// never broken; the test was, and it took the public Pages deploy red with it
+// for six pushes. The "hidden:" clause and its reason list are the part that
+// carries the meaning, so that is what is pinned here.
+ok(/hidden:/.test(dom.note)
+  && /no direct link|above this screen|cannot decode|too large/.test(dom.note),
   'the panel says what was hidden and why', `("${dom.note.slice(0, 90)}")`);
 
 /* ══════════════════════════════════════════════ LETTER B — the moving hero */

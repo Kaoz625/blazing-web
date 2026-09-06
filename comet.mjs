@@ -135,7 +135,28 @@ export async function launchBrowser({ timeoutMs = Math.max(1000, Math.min(180000
       );
     }
     console.log('[comet] not macOS — using Playwright chromium (CI has no Comet).');
-    return chromium.launch();
+    // A CI runner has no camera and no microphone. getUserMedia therefore
+    // rejects with NotFoundError, so any WebRTC harness waits for a self-tile
+    // that can never appear and dies on a TimeoutError that names the timeout
+    // rather than the missing hardware. watch-party.smoke.mjs failed exactly
+    // that way on every push from 5 Sep 2026 while passing locally against
+    // Comet every time — which is the signature of a host gap, not a defect.
+    // These two flags hand Chromium a synthetic camera/microphone pair.
+    //
+    // CI-only by construction: on macOS the Comet branch above returns first
+    // and never reaches this line, so a real machine still uses real devices.
+    //
+    // extraArgs is forwarded here too. It was silently dropped on this path,
+    // so any caller that passed an argument got it honoured on macOS and
+    // quietly ignored on CI — the kind of split that hides a failure until it
+    // only reproduces in one place.
+    return chromium.launch({
+      args: [
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream',
+        ...extraArgs,
+      ],
+    });
   }
 
   const port = await freePort();
