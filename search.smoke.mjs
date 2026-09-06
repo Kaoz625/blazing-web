@@ -195,10 +195,12 @@ check('the profile gate cleared', await page.evaluate(() => {
 // They appeared in FOUR separate nav blocks, and line 57 had the Family button
 // JAMMED onto the same line as #search-button — so a careless deletion takes the
 // search button with it. Both halves are asserted.
-for (const view of ['stories', 'podcasts', 'family']) {
+for (const view of ['stories', 'family']) {
   const n = await page.locator(`[data-view="${view}"]`).count();
   check(`no "${view}" tab anywhere`, n === 0, `${n} found`);
 }
+check('Podcasts has its authorized library destination in the drawer',
+  (await page.locator('.drawer-nav [data-view="podcasts"]').count()) === 1);
 check('the search button survived the tab removal',
   (await page.locator('#search-button').count()) > 0);
 check('delight.js is not shipped', !(await page.content()).includes('delight.js'));
@@ -229,10 +231,10 @@ const barKeys = await page.evaluate(() => {
   const bar = document.querySelector('nav, .nav, header nav, .top-nav') || document.body;
   return [...bar.querySelectorAll('[data-view]')].map((b) => b.dataset.view);
 });
-const wanted = ['movies', 'shows', 'anime', 'roadmaps', 'library', 'games', 'search'];
-const firstSeven = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, 7);
-check('bar order is Movies, TV Shows, Anime, Roadmaps, Library, Games, Search',
-  JSON.stringify(firstSeven) === JSON.stringify(wanted), firstSeven.join(','));
+const wanted = ['movies', 'shows', 'anime', 'books', 'roadmaps', 'library', 'games', 'search'];
+const firstEight = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, 8);
+check('bar order is Movies, TV Shows, Anime, Books & Audio, Roadmaps, Library, Games, Search',
+  JSON.stringify(firstEight) === JSON.stringify(wanted), firstEight.join(','));
 check('no Home chip in the bar — it is not in the canonical eleven',
   !barKeys.includes('home'), barKeys.join(','));
 // Removing the chip must not remove the destination.
@@ -249,6 +251,7 @@ check('Home is still in the drawer',
 // #home-view with the rows filtered; the rest own a section.
 const CHIP_VIEW = {
   movies: 'home-view', shows: 'home-view', anime: 'anime-room-view',
+  books: 'media-view',
   roadmaps: 'roadmaps-view', library: 'library-view',
   games: 'games-view', search: 'search-view',
 };

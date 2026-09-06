@@ -17,7 +17,7 @@
  *   GET /manga/discover?limit=<n>       -> { popular: [Manga], latest: [Manga] }
  *   GET /manga/search?q=<q>&limit=<n>   -> { manga: [Manga] }
  *   GET /manga/<id>/chapters?limit=<n>  -> { chapters: [Chapter] | { list:[Chapter], error, via }, error? }
- *   GET /manga/chapter/<id>/pages       -> { pages: [path|url], error? }
+ *   GET /manga/chapter/<id>/pages       -> { pages: [path|url] | { list:[path|url], error }, error? }
  *   Manga:   { id, title, aliases[], description, year, status,
  *              originalLanguage, lastChapter, cover, source }
  *   Chapter: { id, chapter, volume, title, pages, readable }
@@ -528,8 +528,12 @@
     if (!allowed() || request !== state.readerRequest) return;
     if (!data) return readerFail('Could not load this chapter’s pages.');
 
-    const why = plainText(data.error);
-    const pages = (Array.isArray(data.pages) ? data.pages : []).map(absolute).filter(Boolean);
+    // Older Suwayomi fleet builds wrap their {list,error} result in pages.
+    // Read both shapes while devices and the fleet roll out independently.
+    const result = data.pages;
+    const why = plainText(data.error || result?.error);
+    const list = Array.isArray(result) ? result : Array.isArray(result?.list) ? result.list : [];
+    const pages = list.filter((page) => typeof page === 'string').map(absolute).filter(Boolean);
     if (!pages.length) return readerFail(why || 'Could not load this chapter’s pages.');
 
     readerState.pages = pages;

@@ -111,6 +111,7 @@
     // see the tile — and a still-pending browser must never see it.
     approved: false,
     activeProfile: null,
+    mediaGeneration: 0,
     pendingProfile: null,
     // True while the pad is asking for the OWNER PIN rather than a profile PIN.
     ownerMode: false,
@@ -583,6 +584,7 @@
   }
 
   function clearUnlock() {
+    ++state.mediaGeneration;
     state.unlockToken = null;
     state.unlockExpiresAt = 0;
     if (state.unlockTimer) {
@@ -598,6 +600,7 @@
     const delay = Math.max(0, Math.min(expiresAt - Date.now() + 100, 2147483647));
     state.unlockTimer = window.setTimeout(() => {
       clearUnlock();
+      document.dispatchEvent(new CustomEvent('blazing-profile-unlock-expired'));
       if (!ui.layer.hidden) setStatus('This profile unlock has expired.', 'info');
     }, delay);
   }
@@ -612,6 +615,7 @@
   }
 
   function dispatchProfileSelection(profile) {
+    ++state.mediaGeneration;
     document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
       detail: {
         id: profile.id,
@@ -3107,7 +3111,44 @@
    * flag and no avatars. Both are deleted; app.js now calls this instead, so
    * there is exactly one picker and it is this one.
    */
+  async function mediaRequest(path, { signal } = {}) {
+    if (typeof path !== 'string' || !/^\/media\/(books|music|podcasts)(?:\/[^?#]*)?(?:\?[^#]*)?$/.test(path)) {
+      throw Object.assign(new Error('Invalid library request.'), { status: 400 });
+    }
+    const profile = state.activeProfile, credentials = state.credentials;
+    if (!state.approved || !profile || profile.disabled || !credentials?.id || !credentials.token) {
+      throw Object.assign(new Error('Choose a profile to open this library.'), { status: 403, code: 'profile-required' });
+    }
+    if (profile.hasPin && (!state.unlockToken || state.unlockExpiresAt <= Date.now())) {
+      throw Object.assign(new Error('Choose your profile and enter its PIN again.'), { status: 403, code: 'profile-unlock-required' });
+    }
+    const generation = state.mediaGeneration;
+    const isCurrent = () => generation === state.mediaGeneration && state.activeProfile === profile && state.credentials === credentials;
+    const url = new URL(`${FLEET_BASE}${path}`);
+    url.searchParams.set('deviceId', credentials.id);
+    url.searchParams.set('profileId', profile.id);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    const timeout = window.setTimeout(abort, 20000);
+    try {
+      const headers = { Accept: 'application/json', 'X-Device-Token': credentials.token };
+      if (profile.hasPin) headers['X-Unlock-Token'] = state.unlockToken;
+      const response = await fetch(url.href, { headers, signal: controller.signal, mode: 'cors', credentials: 'omit', cache: 'no-store', redirect: 'error' });
+      if (!isCurrent()) throw new DOMException('Profile changed', 'AbortError');
+      const body = await response.json();
+      if (!isCurrent()) throw new DOMException('Profile changed', 'AbortError');
+      if (!response.ok) throw Object.assign(new Error(body?.error || 'This library could not be reached.'), { status: response.status, code: body?.error });
+      return body;
+    } finally {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    }
+  }
+
   window.BlazingProfile = {
+    mediaRequest,
     open() {
       if (!ui.layer) return false;
       openPanel();

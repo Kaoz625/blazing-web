@@ -479,6 +479,7 @@ const state = {
   selectedEpisode: null,
   route: 'home',
   profileId: null,
+  mediaProfile: null,
   myList: [],
   // The rating cap of the connected profile, or null when nobody has connected
   // one. profile.js has broadcast this on blazing-profile-selected since it was
@@ -809,6 +810,14 @@ function measureScrollbar() {
 }
 measureScrollbar();
 window.addEventListener('resize', measureScrollbar);
+function measureMediaPlayer() {
+  const host = $('#media-player-host');
+  const height = host?.hidden ? 0 : host?.getBoundingClientRect().height || 0;
+  document.body.classList.toggle('has-audio-player', height > 0);
+  document.documentElement.style.setProperty('--media-player-height', `${Math.ceil(height)}px`);
+}
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measureMediaPlayer).observe($('#media-player-host'));
+window.addEventListener('resize', measureMediaPlayer);
 // Home arrives after the gate, so a classic scrollbar can appear without a
 // window resize. Keep the full-width hero aligned as the document changes.
 if (typeof ResizeObserver !== 'undefined') {
@@ -879,7 +888,8 @@ function closeDrawer() {
 
 function updateNavigation(route) {
   $$('[data-view]').forEach((button) => {
-    const active = button.dataset.view === route || (button.dataset.view === 'anime' && ['manga', 'comics', 'anime-search'].includes(route));
+    const active = button.dataset.view === route || (button.dataset.view === 'anime' && ['manga', 'comics', 'anime-search'].includes(route))
+      || (button.closest('.topnav') && button.dataset.view === 'books' && ['music', 'podcasts'].includes(route));
     button.classList.toggle('active', active);
     if (button.closest('nav')) button.setAttribute('aria-current', active ? 'page' : 'false');
   });
@@ -1063,6 +1073,51 @@ document.addEventListener('click', (event) => {
 // round trip already happened once for this query.
 let searchAllCards = [];
 let searchActiveGenre = null;
+let mediaSearchAbort = null;
+
+async function loadMediaSearch(query, request) {
+  mediaSearchAbort?.abort();
+  mediaSearchAbort = new AbortController();
+  const signal = mediaSearchAbort.signal, profileId = state.profileId;
+  const host = $('#search-media-results');
+  host.replaceChildren();
+  host.hidden = !ratingAllowed('mature') || !profileId;
+  if (host.hidden) return;
+  const isCurrent = () => !signal.aborted && request === searchRequest && profileId === state.profileId;
+  await Promise.all(['books', 'music', 'podcasts'].map(async (kind) => {
+    const section = el('section', 'media-search-section');
+    const heading = el('h2'); heading.textContent = kind[0].toUpperCase() + kind.slice(1);
+    const status = el('p', 'media-library-status'); status.setAttribute('role', 'status'); status.textContent = 'Searching…';
+    const grid = el('div', 'media-search-grid'); section.append(heading, status, grid); host.append(section);
+    try {
+      const data = await window.BlazingProfile.mediaRequest(`/media/${kind}?q=${encodeURIComponent(query)}&limit=8`, { signal });
+      if (!isCurrent()) return;
+      if (!Array.isArray(data?.items)) throw new Error('Library unavailable');
+      const items = data.items.filter((item) => typeof item?.id === 'string' && typeof item.title === 'string').slice(0, 8);
+      status.textContent = items.length ? '' : 'No matches in this library.';
+      for (const item of items) {
+        const card = el('button', 'media-search-card'); card.type = 'button';
+        card.setAttribute('aria-label', `${kind === 'books' ? 'Read' : 'Open'} ${plainText(item.title)}`);
+        const poster = safeHttpsUrl(item.poster);
+        if (poster) { const image = el('img'); image.src = poster; image.alt = ''; image.loading = 'lazy'; card.append(image); }
+        const title = el('span'); title.textContent = plainText(item.title); card.append(title);
+        card.addEventListener('click', () => { if (isCurrent()) showRoute(kind, { initialItem: item }); });
+        grid.append(card);
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (error?.status === 401 || error?.status === 403) {
+        status.textContent = 'Choose your profile to open this library. ';
+        const choose = el('button', 'secondary-button'); choose.type = 'button'; choose.textContent = 'Choose profile';
+        choose.addEventListener('click', () => window.BlazingProfile.open()); status.append(choose);
+        return;
+      }
+      status.textContent = `${heading.textContent} could not be reached. `;
+      const retry = el('button', 'secondary-button'); retry.type = 'button'; retry.textContent = 'Retry';
+      retry.addEventListener('click', () => { if (isCurrent()) loadMediaSearch(query, request); }); status.append(retry);
+    }
+  }));
+}
 
 function bindSearch() {
   const form = $('#search-form');
@@ -1121,6 +1176,10 @@ function bindSearchMic() {
 }
 
 function clearSearchResults() {
+  ++searchRequest;
+  mediaSearchAbort?.abort();
+  $('#search-media-results').replaceChildren();
+  $('#search-media-results').hidden = true;
   searchAllCards = [];
   searchActiveGenre = null;
   $('#search-chip-row').hidden = true;
@@ -1173,7 +1232,7 @@ function renderSearchCards() {
   const status = $('#search-status');
   status.textContent = searchActiveGenre
     ? `${cards.length} result${cards.length === 1 ? '' : 's'} in ${searchActiveGenre}.`
-    : `${cards.length} result${cards.length === 1 ? '' : 's'}.`;
+    : `${cards.length} result${cards.length === 1 ? '' : 's'} in movies and TV.`;
   // buildCard, the same builder #discover-results uses, and the cards land in
   // #search-results in merge order. dpad.js walks real focusable elements in DOM
   // order, so that order is what the remote follows on a television.
@@ -1223,8 +1282,8 @@ async function runSearch(event) {
   const status = $('#search-status');
   const results = $('#search-results');
   if (!query) {
-    status.textContent = 'Type a title first.';
     clearSearchResults();
+    status.textContent = 'Type a title first.';
     return;
   }
   // The chip mirrors the field rather than replacing it (DebridStream keeps
@@ -1237,6 +1296,7 @@ async function runSearch(event) {
   // A newer query must never be overwritten by an older one finishing late —
   // the same rule openDiscover() follows.
   const request = ++searchRequest;
+  loadMediaSearch(query, request);
   searchActiveGenre = null;
   status.textContent = `Searching for “${query}”…`;
   results.replaceChildren(el('div', 'spinner big'));
@@ -1361,9 +1421,20 @@ const BROWSE_HEADINGS = Object.freeze({
   anime: ['Browse', 'Anime', 'The anime shelves, subbed and dubbed.'],
 });
 
-function showRoute(route) {
+function showRoute(route, mediaOptions = {}) {
   const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
+  const mediaRoute = ['books', 'music', 'podcasts'].includes(route);
+  $('#media-view').hidden = !mediaRoute;
+  $('#media-view').dataset.kind = route;
+  if (mediaRoute) window.BlazingMediaLibrary?.mount(route, {
+    host: $('#media-library-host'), playerHost: $('#media-player-host'), navigate: showRoute,
+    initialQuery: mediaOptions.initialQuery, initialItem: mediaOptions.initialItem,
+    profile: state.mediaProfile,
+    request: (path, options) => window.BlazingProfile.mediaRequest(path, options),
+    pauseVideo: () => { if (!player.hidden) closePlayer(); },
+  });
+  else window.BlazingMediaLibrary?.leave();
   const roomRoute = ['anime', 'manga', 'comics', 'anime-search'].includes(route);
   $('#anime-room-header').hidden = !roomRoute;
   $('#anime-room-view').hidden = route !== 'anime' && route !== 'anime-search';
@@ -3136,6 +3207,7 @@ function attachViaHlsJs(url) {
 }
 
 function openPlayer(title, rawUrl, opts) {
+  window.BlazingMediaLibrary?.pause();
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
   // What the server said the container is. Native shells get it forwarded so
@@ -3800,6 +3872,7 @@ document.addEventListener('blazing-profile-selected', (event) => {
   if (!player.hidden) closePlayer();
   if (detailDialog.open) closeDetail();
   state.profileId = String(detail.id);
+  state.mediaProfile = { ...detail };
   state.profileCap = detail.maxRating || 'general';
   state.myList = readList(state.profileId);
   state.selected = null;
@@ -3817,6 +3890,11 @@ document.addEventListener('blazing-profile-selected', (event) => {
   boot();
 });
 
+document.addEventListener('blazing-profile-unlock-expired', () => {
+  state.mediaProfile = null;
+  clearSearchResults();
+});
+
 document.addEventListener('blazing-profile-signed-out', () => {
   ++homeRequest;
   ++searchRequest;
@@ -3828,6 +3906,7 @@ document.addEventListener('blazing-profile-signed-out', () => {
   closeDetail();
   resetHomeHero();
   state.profileId = null;
+  state.mediaProfile = null;
   state.profileCap = null;
   state.myList = [];
   state.selected = null;

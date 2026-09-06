@@ -59,12 +59,14 @@
 // v25: account sign-out, profile rail and Home reload after profile selection.
 // v26: a shared anime/manga/comics room and profile-scoped reading progress.
 // v27: profile language choices, real player tracks and measured sample labels.
-const CACHE = 'blazing-shell-v27';
+// v28: books, music and podcasts through the profile-protected media library.
+const CACHE = 'blazing-shell-v28';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
 const SHELL = [
   './stream-preferences.js', './stream-evidence.js',
+  './media-library.js',
   './',
   './index.html',
   './styles.css',

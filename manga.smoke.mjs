@@ -66,7 +66,7 @@ const PAGE_IMAGE = await readFile(join(ROOT, 'icon-192.png'));
 const browser = await launchBrowser();
 const readerOnly = process.env.MANGA_SMOKE_CASE === 'reader';
 
-async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, onCall } = {}) {
+async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, pagesBody = { pages: { list: PAGES.pages, error: '' } }, onCall } = {}) {
   const ctx = await browser.newContext();
   const calls = [];
   await ctx.route('https://fleet.lyreosai.com/**', (route) => {
@@ -85,7 +85,7 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(chaptersBody) });
     }
     if (url.includes('/pages')) {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PAGES) });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pagesBody) });
     }
     if (url.includes('/party/active')) return route.fulfill({ status: 204, body: '' });
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
@@ -105,7 +105,7 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chapte
   // "Manga" lives in the drawer-only "More" nav (see games.smoke.mjs for why
   // this dispatches the click directly instead of clicking a hidden button).
   await page.evaluate(() => document.querySelector('[data-view="manga"]').click());
-  return { ctx, page, calls };
+  return { ctx, page, calls, setPagesBody: (value) => { pagesBody = value; } };
 }
 
 /**
@@ -155,7 +155,7 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
 
 // --- 2: an Adult profile sees the shelves -----------------------------------
 {
-  const { ctx, page } = await openApp();
+  const { ctx, page, setPagesBody } = await openApp();
   await page.waitForSelector('#manga-rows .row', { timeout: 10000 });
   check('two shelves render', (await page.locator('#manga-rows .row').count()) === 2);
   const titles = await page.locator('#manga-rows .row-title').allTextContents();
@@ -190,6 +190,8 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
   await page.click('#manga-chapters-list .stream-row >> nth=0');
   await page.waitForFunction(() => !document.getElementById('manga-reader').hidden, null, { timeout: 5000 });
   await page.waitForSelector('#manga-reader .comic-page[src]', { timeout: 10000 });
+  await page.waitForFunction(() => { const image = document.querySelector('#manga-reader .comic-page'); return image.complete && image.naturalWidth > 0 && window.BlazingManga.history()[0]?.index === 0; });
+  check('the deployed nested pages.list response loads an image and saves progress', true);
   const firstSrc = await page.locator('#manga-reader .comic-page').getAttribute('src');
   check('the first page is the fleet-relative path, absolute-ised', firstSrc === 'https://fleet.lyreosai.com/manga/image?ch=c1&p=1', firstSrc);
   check('the counter reads 1 / 3', (await page.locator('#manga-reader .comic-counter').textContent()) === '1 / 3');
@@ -213,6 +215,27 @@ for (const profile of [{ isKids: true }, { isKids: false, maxRating: 'teen' }]) 
   await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(150);
   check('paging past the last page is a no-op, not an error', (await page.locator('#manga-reader .comic-counter').textContent()) === '3 / 3');
+
+  // The fleet repair restores the documented flat array for all native clients.
+  // An existing web page must read that response too, without losing its place.
+  await page.waitForFunction(() => { const image = document.querySelector('#manga-reader .comic-page'); return image.complete && image.naturalWidth > 0 && window.BlazingManga.history()[0]?.index === 2; });
+  await page.locator('#manga-reader .comic-close').click();
+  setPagesBody(PAGES);
+  await page.locator('#manga-chapters-list [role="button"]').first().click();
+  await page.waitForFunction(() => { const image = document.querySelector('#manga-reader .comic-page'); return image.complete && image.naturalWidth > 0 && window.BlazingManga.history()[0]?.index === 2; });
+  check('the flat pages array reopens the saved third page', (await page.locator('#manga-reader .comic-counter').textContent()) === '3 / 3');
+
+  await page.locator('#manga-reader .comic-close').click();
+  setPagesBody({ pages: { list: [], error: 'This source could not return the chapter images.' } });
+  await page.locator('#manga-chapters-list [role="button"]').first().click();
+  await page.waitForFunction(() => document.querySelector('#manga-reader .comic-label').textContent.includes('could not return the chapter images'));
+  check('a nested empty-page response keeps the source reason', true);
+  check('failed pages do not replace the last loaded reading position', await page.evaluate(() => window.BlazingManga.history()[0]?.index === 2));
+
+  await page.locator('#manga-reader .comic-close').click();
+  setPagesBody(PAGES);
+  await page.locator('#manga-chapters-list [role="button"]').first().click();
+  await page.waitForFunction(() => { const image = document.querySelector('#manga-reader .comic-page'); return image.complete && image.naturalWidth > 0; });
 
   // --- 6: a profile downgrade mid-read closes the reader immediately ----------
   const closedOnDowngrade = await page.evaluate(() => {

@@ -6,7 +6,7 @@
  * same things."
  *
  * The nav itself never drifted — the header and the drawer are one piece of
- * markup shared by all 15 destinations, so it cannot. This file pins it anyway,
+ * markup shared by all destinations, so it cannot. This file pins it anyway,
  * because "cannot drift" stops being true the moment somebody renders it per
  * view. What HAD drifted was the content, in three places:
  *
@@ -53,7 +53,7 @@ const META = (n, pre) => ({
   })),
 });
 
-// All 15, in nav order. `heading: false` is the ONE deliberate exemption.
+// All destinations, in nav order. `heading: false` is the ONE deliberate exemption.
 const VIEWS = [
   { id: 'home', heading: 'Home' },
   { id: 'movies', heading: 'Movies' },
@@ -64,6 +64,9 @@ const VIEWS = [
   { id: 'emby', heading: true },
   { id: 'comics', heading: true },
   { id: 'manga', heading: true },
+  { id: 'books', heading: 'Books & Audio' },
+  { id: 'music', heading: 'Books & Audio' },
+  { id: 'podcasts', heading: 'Books & Audio' },
   { id: 'games', heading: true },
   { id: 'trailers', heading: true },
   { id: 'requests', heading: true },
@@ -113,6 +116,7 @@ await ctx.route('https://fleet.lyreosai.com/**', (route) => {
     body: JSON.stringify({ profiles: [{ id: 'p1', name: 'Mark', maxRating: 'adult', hasPin: false }] }) });
   if (u.includes('/discover/filter/')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(META(6, 'fresh')) });
   if (u.includes('/emby/')) return route.fulfill({ status: 200, contentType: 'application/json', body: '{"metas":[]}' });
+  if (u.includes('/media/')) return route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' });
   return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 });
 await ctx.route('https://upscale.lyreosai.com/**', (route) =>
@@ -136,7 +140,7 @@ const navOf = () => page.evaluate(() => ({
 }));
 const baseline = await navOf();
 ok(baseline.top.length > 0 && baseline.drawer.split(',').length === VIEWS.length,
-  'the drawer offers every one of the 15 destinations', `(${baseline.drawer.split(',').length})`);
+  'the drawer offers every destination', `(${baseline.drawer.split(',').length})`);
 
 const titles = new Set();
 for (const view of VIEWS) {
@@ -157,11 +161,13 @@ for (const view of VIEWS) {
       .filter((b) => b.classList.contains('active') || b.getAttribute('aria-current') === 'page');
     return { views: [...new Set(marked.map((b) => b.dataset.view))].join(','), want: v };
   }, view.id);
-  const expectedActive = view.id === 'manga' || view.id === 'comics' ? ['anime', view.id].sort().join(',') : view.id;
+  const expectedActive = view.id === 'manga' || view.id === 'comics' ? ['anime', view.id].sort().join(',')
+    : view.id === 'music' || view.id === 'podcasts' ? ['books', view.id].sort().join(',') : view.id;
   ok(active.views.split(',').sort().join(',') === expectedActive, `${view.id}: its room and current section are marked active`, `(${active.views || 'none'})`);
 
   const head = await page.evaluate((v) => {
     const section = ['anime', 'manga', 'comics'].includes(v) ? document.getElementById('anime-room-header')
+      : ['books', 'music', 'podcasts'].includes(v) ? document.getElementById('media-view')
       : document.querySelector(`#${v}-view`) || (['movies', 'shows'].includes(v) ? document.getElementById('home-view') : null);
     if (!section || section.hidden) return null;
     const h = section.querySelector('.page-heading h1, .anime-room-intro h1');
@@ -186,9 +192,7 @@ for (const view of VIEWS) {
   }
 }
 
-// Four routes, four different titles — not one title reused, which would leave
-// them as indistinguishable as having none at all.
-ok(titles.size === 4, 'the four browse routes each say a different thing', `(${[...titles].join(' / ')})`);
+ok(titles.size === 5, 'browse routes and the book/audio room each have a clear title', `(${[...titles].join(' / ')})`);
 
 // ── Admin says why it is empty ──────────────────────────────────────────────
 await page.evaluate(() => document.querySelector('[data-view="admin"]').click());
@@ -221,7 +225,7 @@ ok(req.lazy, 'and carries the same loading="lazy" decoding="async" as every othe
 ok(req.inlineBg === 0, 'no card paints its poster as a CSS background any more', `(${req.inlineBg})`);
 ok(req.marked === 1, 'a result with no poster is marked .no-image, not left blank', `(${req.marked})`);
 
-ok(errors.length === 0, 'no page threw on the way through all 15', errors.slice(0, 2).join(' ; '));
+ok(errors.length === 0, 'no page threw on the way through all destinations', errors.slice(0, 2).join(' ; '));
 
 await browser.close();
 server.close();
