@@ -118,9 +118,31 @@ try {
   await reader.focus();await page.keyboard.press('ArrowDown');
   await page.waitForFunction(()=>document.querySelector('.media-book-text')?.scrollTop>0);
   check(await reader.evaluate(node=>document.activeElement===node),'reader arrow scroll stays inside the book');
-  await page.keyboard.press('PageDown');
-  await page.waitForFunction(()=>document.querySelector('.media-book-text')?.scrollTop>0);
-  const position=await reader.evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight));
+  // Move a long way down the book DETERMINISTICALLY, then let the app persist
+  // it. This used to press PageDown and wait for `scrollTop > 0`.
+  //
+  // Both halves were wrong, and together they hid each other. ArrowDown above
+  // already left scrollTop > 0, so the wait returned before the keypress was
+  // handled at all; and PageDown does not scroll this reader in chromium in
+  // the first place. Measured 6 Sep 2026 on chromium: `position` came out
+  // 0.000218 while the app went on to save and correctly restore ratio 0.0204,
+  // so the 0.02 comparison below missed by 0.0002 and reported "the book does
+  // not reopen where you left it" — about an app that was behaving perfectly.
+  // Comet handles PageDown, so this only ever went red on CI, where there is
+  // no Comet.
+  //
+  // Keyboard scrolling is NOT what this section is for: the ArrowDown check
+  // above already proves the reader takes arrow keys and keeps focus. What is
+  // being proved here is that a reopened book lands where the viewer left it,
+  // so the position is set outright and the restore is measured against it.
+  // A fraction well away from both 0 and 1 also means a reader that silently
+  // reopened at the top could not pass by being within tolerance of it.
+  const position=await reader.evaluate(node=>{
+    node.scrollTop=Math.round((node.scrollHeight-node.clientHeight)*0.4);
+    node.dispatchEvent(new Event('scroll',{bubbles:true}));
+    return node.scrollTop/(node.scrollHeight-node.clientHeight);
+  });
+  await page.waitForFunction(ratio=>{const node=document.querySelector('.media-book-text');return node&&Math.abs(node.scrollTop/(node.scrollHeight-node.clientHeight)-ratio)<0.001;},position);
   await shot('media-reader-desktop');
   await page.getByRole('button',{name:'Close book',exact:true}).click();
   await room().getByRole('button',{name:'Read Field notes',exact:true}).click();await reader.waitFor();
