@@ -219,11 +219,18 @@ check('brightminds.js is not shipped', !(await page.content()).includes('brightm
 // chip while you are looking at Home does nothing. It stays reachable via
 // #brand-button (data-view="home") and the drawer, both asserted below.
 //
-// Four canonical entries are also absent, and that is the rule that outranks
-// the count: never ship a chip that does not go somewhere real. Live TV,
-// YouTube, Adult and Settings have NO branch in showRoute() and no view section
-// in index.html, so a chip for any of them would blank the screen. Give one a
-// real view and it goes in — then update this list. Do not add it first.
+// Three canonical entries are also absent, and that is the rule that outranks
+// the count: never ship a chip that does not go somewhere real. Live TV, Adult
+// and Settings have NO branch in showRoute() and no view section in index.html,
+// so a chip for any of them would blank the screen. Give one a real view and it
+// goes in — then update this list. Do not add it first.
+//
+// YOUTUBE WAS THE FOURTH AND IT IS NOW BUILT (6 Sep 2026): youtube.js,
+// #youtube-view, and a `route === 'youtube'` branch in showRoute(). It moved
+// out of the left-out loop below and into `wanted`, in DESIGN.md's position —
+// after Library, before Games — and the loop over `wanted` proves the chip
+// really opens #youtube-view rather than blanking the screen. That promotion is
+// the exact sequence the paragraph above describes, done in the right order.
 //
 // Labels only — a data-view value is the router key and renaming one breaks
 // navigation, so this checks the ORDER of the keys.
@@ -231,10 +238,15 @@ const barKeys = await page.evaluate(() => {
   const bar = document.querySelector('nav, .nav, header nav, .top-nav') || document.body;
   return [...bar.querySelectorAll('[data-view]')].map((b) => b.dataset.view);
 });
-const wanted = ['movies', 'shows', 'anime', 'books', 'roadmaps', 'library', 'games', 'search'];
-const firstEight = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, 8);
-check('bar order is Movies, TV Shows, Anime, Books & Audio, Roadmaps, Library, Games, Search',
-  JSON.stringify(firstEight) === JSON.stringify(wanted), firstEight.join(','));
+// LIVETV JOINED THIS LIST THE SAME WAY YOUTUBE DID, and in the same order the
+// paragraph above describes: its view was built first, then it moved out of the
+// left-out loop below into `wanted`, in DESIGN.md's position — after Library and
+// before YouTube — and the loop over `wanted` proves the chip really opens
+// #livetv-view rather than blanking the screen.
+const wanted = ['movies', 'shows', 'anime', 'books', 'roadmaps', 'library', 'livetv', 'youtube', 'games', 'search'];
+const firstChips = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, wanted.length);
+check('bar order is Movies, TV Shows, Anime, Books & Audio, Roadmaps, Library, Live TV, YouTube, Games, Search',
+  JSON.stringify(firstChips) === JSON.stringify(wanted), firstChips.join(','));
 check('no Home chip in the bar — it is not in the canonical eleven',
   !barKeys.includes('home'), barKeys.join(','));
 // Removing the chip must not remove the destination.
@@ -253,6 +265,8 @@ const CHIP_VIEW = {
   movies: 'home-view', shows: 'home-view', anime: 'anime-room-view',
   books: 'media-view',
   roadmaps: 'roadmaps-view', library: 'library-view',
+  livetv: 'livetv-view',
+  youtube: 'youtube-view',
   games: 'games-view', search: 'search-view',
 };
 for (const key of wanted) {
@@ -265,9 +279,14 @@ for (const key of wanted) {
   check(`the "${key}" chip opens #${CHIP_VIEW[key]}`, shown);
 }
 
-// The four canonical entries that were LEFT OUT. If someone adds a chip for one
+// The canonical entries that are still LEFT OUT. If someone adds a chip for one
 // of these before building its view, this fails — which is the point.
-for (const key of ['live', 'livetv', 'youtube', 'adult', 'settings']) {
+// 'livetv' came OFF this list the day #livetv-view was built. 'live' stays as a
+// near-miss key nobody should introduce, and Adult and Settings are the two
+// canonical destinations still genuinely missing — Adult deliberately, until it
+// has a gate, because a chip that opens an ungated adult section is worse than
+// no chip at all.
+for (const key of ['live', 'adult', 'settings']) {
   check(`no "${key}" chip until it has a view`,
     (await page.locator(`[data-view="${key}"]`).count()) === 0);
 }

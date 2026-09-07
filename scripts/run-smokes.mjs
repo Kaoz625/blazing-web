@@ -42,7 +42,12 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // 25 suites existed, so SEVEN could have gone missing and this still reported a
 // green "18/18 passed" — the exact silent no-op the paragraph above exists to
 // stop, just further down the slope it warns about. Raised to the real count.
-const MIN_SUITES = 25;
+//
+// Raised again the same evening, from 25 to 28, when youtube.smoke.mjs,
+// youtube-play.smoke.mjs and livetv.smoke.mjs landed. THE RULE IS: this number
+// is the real count, always. A floor left behind is not a conservative floor,
+// it is three suites that may quietly stop existing.
+const MIN_SUITES = 28;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

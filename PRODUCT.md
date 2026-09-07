@@ -16,6 +16,13 @@ register: product
 > YouTube, Adult and Settings — were never built at all, while the Roku built
 > all eleven from DESIGN.md. Measured 6 Sep 2026: Roku 39 home rows and 11 nav
 > items, web 0 rows and 8 nav items. Markus, looking at the two side by side:
+>
+> **YOUTUBE IS BUILT, 6 Sep 2026.** `youtube.js` plus `#youtube-view`: the
+> fleet's fifteen shelves, search, channel pages with Follow, playlists and a
+> Keep watching row, played through `/proxy/yt-resolve` and hls.js — no iframe,
+> because an iframe cannot run on Roku, Apple TV, Fire TV, webOS, Tizen or
+> VegaOS. Three of the eleven are still missing on this client: Live TV, Adult
+> and Settings.
 > *"i still dont understand how and why everything looks like their own app like
 > there is not one device that has my app where the app is the same."*
 >

@@ -60,7 +60,17 @@
 // v26: a shared anime/manga/comics room and profile-scoped reading progress.
 // v27: profile language choices, real player tracks and measured sample labels.
 // v28: books, music and podcasts through the profile-protected media library.
-const CACHE = 'blazing-shell-v28';
+// v29: the YouTube destination (youtube.js, and the nav chip + view in
+// index.html). Without a bump an installed PWA keeps serving v28's index.html,
+// which has no #youtube-view in it, so the new chip would hide every view and
+// land on a blank screen — the exact failure the topnav comment warns about,
+// arriving through the cache instead of through the markup.
+// v30: the Live TV destination (livetv.js, plus the nav chip and #livetv-view
+// in index.html) and the restored adult session. Same reason as v29: without a
+// bump an installed PWA keeps serving v29's index.html, which has no
+// #livetv-view, so the new chip would hide every view and land on a blank
+// screen — the failure arriving through the cache rather than the markup.
+const CACHE = 'blazing-shell-v30';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -86,6 +96,8 @@ const SHELL = [
   './emby.js',
   './dpad.js',
   './games.js',
+  './youtube.js',
+  './livetv.js',
   './manga.js',
   './anime-room.js',
   './tv-comics-reader.js',

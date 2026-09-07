@@ -1607,3 +1607,287 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .comic-reader .comic-label { flex-basis: 100%; }
   .comic-reader .comic-counter { margin-right: auto; }
 }
+
+/* ── YouTube ────────────────────────────────────────────────
+   A YouTube tile is 16:9 and it is WIDE. Every other card in this app is the
+   2:3 poster in .card above, and reusing that class here was tried first: a
+   hqdefault thumbnail object-fit: cover'd into a portrait box crops both
+   sides off the frame, and a YouTube frame is almost always centre-composed,
+   so what survives is the middle third of somebody's face. The Roku hit the
+   same wall from the other side — YouTubeItem was rebuilt from a 336x300 tile
+   to 2.8's WIDE slot for exactly this reason.
+
+   ONE ACCENT, AND IT IS THE APP'S. Theme.brs deleted "Games green, Adult
+   magenta, YouTube red" by name, because a focus ring that changes hue by
+   section teaches the eye that focus means different things in different
+   places. There is no YouTube red anywhere below; focus is --accent, the same
+   ring .card gets, so a d-pad user reads the same signal in every room. */
+.yt-sections {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 1100px;
+  margin: 16px auto 4px;
+  padding: 0 var(--gutter);
+}
+.yt-section {
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(28,28,31,.8);
+  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.yt-section:hover { color: #fff; background: var(--surface-focus); }
+.yt-section.active {
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), var(--accent-strong));
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+.yt-section:focus-visible, .yt-chip:focus-visible, .yt-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.yt-rows { margin-top: 18px; }
+.yt-row .row-title { font-size: 17px; }
+
+/* The tile. 232px wide keeps four across a 1024 tablet and eight across a
+   1920 television, which is the density YouTubeScreen's WIDE slot lands at. */
+.yt-card {
+  position: relative;
+  flex: 0 0 auto;
+  width: 232px;
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: none;
+  text-align: left;
+  scroll-snap-align: start;
+  transition: transform var(--transition);
+}
+.yt-card:hover, .yt-card:focus-visible { transform: translateY(-4px); z-index: 2; }
+.yt-card:active { transform: scale(.98); }
+.yt-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(0,0,0,.3);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.yt-card:hover .yt-thumb, .yt-card:focus-visible .yt-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
+}
+.yt-thumb-img { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); }
+/* Same rule as .card.no-image: a dead thumbnail has to be MARKED, because an
+   empty rectangle reads exactly like a tile that is still loading. */
+.yt-thumb.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 34px; font-weight: 900; }
+.yt-thumb.no-image .yt-thumb-img { visibility: hidden; }
+.yt-duration {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: #fff;
+  background: rgba(0,0,0,.82);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.yt-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 8px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+.yt-card-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Channel chips. These are the ONLY way into a channel page, and that is
+   deliberate: a channel link on every card would double the DOWN presses
+   between rows on a remote, because dpad.js moves by geometry. */
+.yt-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 10px var(--gutter); }
+.yt-chips-label { color: var(--quiet); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.yt-chip {
+  min-height: 34px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 6px 13px;
+  color: var(--muted);
+  background: rgba(28,28,31,.8);
+  font-size: 13px;
+  font-weight: 700;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.yt-chip:hover { color: #fff; border-color: var(--accent); background: var(--surface-focus); }
+
+.yt-channel {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  max-width: 1100px;
+  margin: 18px auto 0;
+  padding: 16px var(--gutter);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.yt-channel-art { flex: 0 0 auto; width: 72px; height: 72px; overflow: hidden; border-radius: 999px; background: var(--surface-focus); }
+.yt-channel-art.no-image::before { content: "B"; display: grid; place-items: center; width: 100%; height: 100%; color: rgba(255,255,255,.34); font-size: 26px; font-weight: 900; }
+.yt-channel-avatar { display: block; width: 100%; height: 100%; object-fit: cover; }
+.yt-channel-text { flex: 1 1 auto; min-width: 0; }
+.yt-channel-name { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
+.yt-channel-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.yt-playlist-form { margin-bottom: 18px; }
+
+@media (max-width: 640px) {
+  .yt-card { width: 188px; }
+  .yt-channel { flex-wrap: wrap; }
+  .yt-channel-art { width: 56px; height: 56px; }
+  /* Measured at 390x844: the fleet sends fifteen shelves, so the wrapped chip
+     rail took EIGHT lines and pushed the first row of videos below the fold —
+     the phone opened on a wall of buttons and no content. One scrolling line
+     instead. It stays wrapped on a television, where the width is there and a
+     d-pad reads a grid more easily than a scroller. */
+  .yt-sections {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .yt-sections::-webkit-scrollbar { display: none; }
+  .yt-section { flex: 0 0 auto; }
+}
+
+/* ── Live TV ────────────────────────────────────────────────────────────────
+   A channel is not a poster. Every other grid in this app is built around
+   2:3 artwork; a live channel has a wide, transparent, often square logo and
+   a name that has to be readable because the logos are inconsistent and many
+   are missing entirely (and every http one is dropped as mixed content — see
+   livetv.js safeHttpsUrl). So these tiles are wide, the art box is fixed and
+   letterboxed with `object-fit: contain`, and the NAME is the primary label
+   rather than a caption under an image. */
+.livetv-groups {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 1100px;
+  margin: 16px auto 4px;
+  padding: 0 var(--gutter);
+}
+.livetv-chip {
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  background: rgba(28,28,31,.8);
+  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.livetv-chip:hover { color: #fff; background: var(--surface-focus); }
+/* aria-pressed IS the state, so the styling reads the same attribute a screen
+   reader does — there is no second `.active` class to keep in step with it. */
+.livetv-chip[aria-pressed="true"] {
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), var(--accent-strong));
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+.livetv-chip:focus-visible, .livetv-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.livetv-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+  max-width: 1100px;
+  margin: 20px auto 0;
+  padding: 0 var(--gutter);
+}
+.livetv-card {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  /* 44px is the floor every control in this app meets; two text rows beside a
+     64px logo clears it comfortably. */
+  min-height: 76px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  background: rgba(28,28,31,.72);
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+.livetv-card:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.2); transform: translateY(-2px); }
+.livetv-card-art {
+  grid-row: 1 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.45);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--muted);
+  overflow: hidden;
+}
+/* `contain`, never `cover`: these logos are wordmarks on transparent
+   backgrounds and cropping one cuts the name in half. */
+.livetv-card-art img { width: 100%; height: 100%; object-fit: contain; }
+.livetv-card-name {
+  align-self: end;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  /* Provider names are long and full of separators. Two lines, then ellipsis —
+     one line hid the part that distinguishes "CA - CNN HD" from "CHL: CNN HD". */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.livetv-card-meta {
+  align-self: start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .livetv-results { grid-template-columns: 1fr; }
+  .livetv-groups {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .livetv-groups::-webkit-scrollbar { display: none; }
+  .livetv-chip { flex: 0 0 auto; }
+}

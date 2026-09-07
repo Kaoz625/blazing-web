@@ -68,35 +68,38 @@
     <button id="brand-button" class="brand" type="button" data-view="home" aria-label="Blazing home">
       <span class="brand-mark" aria-hidden="true">B</span><span>Blazing</span>
     </button>
-    <!-- SEVEN chips, and they are the CANONICAL list in the CANONICAL ORDER.
+    <!-- EIGHT chips, and they are the CANONICAL list in the CANONICAL ORDER.
          DESIGN.md line 74 quotes Markus verbatim:
 
            Movies · TV Shows · Anime · Roadmaps · Library · Live TV · YouTube ·
            Games · Adult · Search · Settings
 
-         Of those eleven this bar carries the seven that go somewhere real:
-         Movies, TV Shows, Anime, Roadmaps, Library, Games, Search — in that
-         relative order, Games between Library and Search exactly as the list
-         has it.
+         Of those eleven this bar carries the eight that go somewhere real:
+         Movies, TV Shows, Anime, Roadmaps, Library, YouTube, Games, Search —
+         in that relative order, YouTube between Library and Games exactly as
+         the list has it.
 
-         The four that are LEFT OUT are left out on purpose, and adding them
-         back is a regression, not a fix. Live TV, YouTube, Adult and Settings
-         have NO route in showRoute() (app.js) — grep the file, there is no
-         `route === 'live'`, `'youtube'`, `'adult'` or `'settings'` branch and
-         no #live-view / #youtube-view / #adult-view / #settings-view section in
-         this page. A chip for any of them would highlight itself, fire
-         telemetry, hide every view and leave the reader on a blank screen. A
-         chip that goes nowhere is worse than a missing chip: it is a promise
-         the app breaks on a television. Give one of them a real view and it
-         earns its place here; until then it does not.
+         The three still LEFT OUT are left out on purpose, and adding one back
+         before it has a view is a regression, not a fix. Live TV, Adult and
+         Settings have NO route in showRoute() (app.js) — grep the file, there
+         is no `route === 'live'`, `'adult'` or `'settings'` branch and no
+         #live-view / #adult-view / #settings-view section in this page. A chip
+         for any of them would highlight itself, fire telemetry, hide every view
+         and leave the reader on a blank screen. A chip that goes nowhere is
+         worse than a missing chip: it is a promise the app breaks on a
+         television. Give one of them a real view and it earns its place here;
+         until then it does not.
 
-         GAMES is here because it is the only one of the four that DOES have a
-         destination: showRoute() flips #games-view and calls
-         window.BlazingGames.mount(), and games.js is loaded at the foot of this
-         file. It stays in the drawer's "More" list as well — at 992px and below
-         styles.css hides this whole nav, so the drawer is the only way to reach
-         it on a phone, and navparity.smoke.mjs pins the drawer at 15
-         destinations.
+         GAMES and YOUTUBE are here because they DO have destinations.
+         showRoute() flips #games-view and #youtube-view and calls
+         window.BlazingGames.mount() / window.BlazingYouTube.mount(); games.js
+         and youtube.js are both loaded at the foot of this file. YouTube was
+         the fourth name on that left-out list until 6 Sep 2026 — the Roku had
+         shipped source/lib/YouTube.brs and YouTubeScreen for weeks while grep
+         for '/youtube/' in this repo found nothing at all. Both stay in the
+         drawer's "More" list as well — at 992px and below styles.css hides this
+         whole nav, so the drawer is the only way to reach either on a phone,
+         and navparity.smoke.mjs pins the drawer at 19 destinations.
 
          HOME IS DELIBERATELY NOT HERE. It is not in the canonical eleven: a
          Home chip while you are looking at Home does nothing. Home is still
@@ -128,6 +131,24 @@
       <button type="button" data-view="books">Books &amp; Audio</button>
       <button type="button" data-view="roadmaps">Roadmaps</button>
       <button type="button" data-view="library">Library</button>
+      <!-- YOUTUBE IS CANONICAL, and it sits between Library and Games because
+           that is where DESIGN.md's eleven put it: "Library · Live TV · YouTube ·
+           Games". It was the one canonical chip this client had no view behind —
+           the Roku has shipped source/lib/YouTube.brs and YouTubeScreen for
+           weeks, and grep for '/youtube/' in this repo used to find nothing at
+           all. Live TV and Adult are still missing from this bar; they are two
+           other views, not this one. -->
+      <!-- LIVE TV SITS BEFORE YOUTUBE because that is DESIGN.md line 74's order:
+           "Library · Live TV · YouTube · Games". It was the second of the three
+           canonical chips this client had no view behind — the fleet has served
+           /live/groups and /live/channels over a 38,899-channel index all along
+           and the Roku's LiveTvScreen has browsed it for weeks. Adult is the one
+           still missing, and it stays missing until it has a gate: profile.js
+           computes the effectiveAllowAdult signal (line 183) but nothing renders
+           an adult section yet, and shipping the chip first would be a chip that
+           either does nothing or does too much. -->
+      <button type="button" data-view="livetv">Live TV</button>
+      <button type="button" data-view="youtube">YouTube</button>
       <button type="button" data-view="games">Games</button>
       <button type="button" data-view="search">Search</button>
     </nav>
@@ -151,8 +172,10 @@
            the magnifier is the only other way in at this width.
 
            Do not "resync" this list to the bar. navparity.smoke.mjs counts
-           `.drawer-nav [data-view]` and asserts 15, and deleting a button here
-           strands a destination on every phone. -->
+           `.drawer-nav [data-view]` and asserts one entry per destination it
+           walks — 19 today — and deleting a button here strands a destination
+           on every phone. That number said 15 for three weeks while the real
+           count was 18, which is what a hand-copied total always does. -->
       <nav class="drawer-nav" aria-label="Browse">
         <button type="button" data-view="search">Search</button>
         <button type="button" data-view="home">Home</button>
@@ -170,10 +193,10 @@
            already here. All of them reach a view or a Discover filter; none of
            them is in the canonical eleven, so none of them belongs in the bar.
 
-           GAMES IS THE EXCEPTION AND IS INTENTIONALLY DUPLICATED. It is
-           canonical, so it is also a chip up in .topnav — but .topnav is
-           display:none at 992px and below, so removing it from here would delete Games
-           from every phone and break navparity.smoke.mjs's count of 15. -->
+           GAMES AND YOUTUBE ARE THE EXCEPTIONS AND ARE INTENTIONALLY DUPLICATED.
+           Both are canonical, so both are also chips up in .topnav — but
+           .topnav is display:none at 992px and below, so removing either from
+           here would delete it from every phone and break navparity. -->
       <nav class="drawer-nav" aria-label="More">
         <!-- No emoji on these. The seven in the nav above have none, Admin
              right here has none, and the Channels list below has none, so five
@@ -181,6 +204,16 @@
              emoji as an icon set. Same destinations, same order: only the
              decoration is gone. -->
         <button type="button" data-view="emby">Emby Library</button>
+        <!-- DUPLICATED ON PURPOSE, exactly like Games above it. YouTube is
+             canonical so it is a chip in .topnav — and .topnav is display:none
+             at 992px and below, so leaving it out here would delete YouTube from
+             every phone. -->
+        <button type="button" data-view="youtube">YouTube</button>
+        <!-- DUPLICATED ON PURPOSE, for the same reason as Games and YouTube
+             above: Live TV is canonical, so it is a chip in .topnav — and
+             .topnav is display:none at 992px and below, so leaving it out of
+             this drawer would delete Live TV from every phone. -->
+        <button type="button" data-view="livetv">Live TV</button>
         <button type="button" data-view="education">Education</button>
         <button type="button" data-view="comics">Comics</button>
         <button type="button" data-view="manga">Manga</button>
@@ -652,6 +685,59 @@
       <div id="edu-results" class="search-results"></div>
     </section>
 
+    <!-- ── YouTube View ──
+         Shell only. Everything inside #yt-sections, #yt-channel and #yt-rows is
+         built by youtube.js, for the reason the Roku wrote down after its own
+         menu drifted: the section list comes from whatever /youtube/home
+         actually returned, never from a list kept in a second file. The fleet
+         went from seven shelves to fifteen once already and the hardcoded menu
+         did not notice.
+
+         NO IFRAME LIVES HERE, and there is no place for one to go. A YouTube
+         embed cannot run on Roku, Apple TV, Fire TV, webOS, Tizen or VegaOS, so
+         every video in this view is resolved to a plain URL by our own addon and
+         played by the app's one <video> element down in #player. -->
+    <section id="youtube-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">YouTube</p>
+        <h1>YouTube</h1>
+        <p>Shelves, search, channels and playlists — played through our own resolver, never an embed.</p>
+      </div>
+      <form id="yt-search-form" class="search-form" role="search">
+        <input id="yt-search-input" name="ytq" type="search" autocomplete="off" placeholder="Search YouTube" />
+        <button class="primary-button" type="submit">Search</button>
+      </form>
+      <nav id="yt-sections" class="yt-sections" aria-label="YouTube sections"></nav>
+      <div id="yt-channel" class="yt-channel" hidden></div>
+      <p id="yt-status" class="search-status" role="status"></p>
+      <div id="yt-rows" class="rows yt-rows"></div>
+    </section>
+
+    <!-- ── Live TV ──
+         SEARCH SITS ABOVE THE GROUP CHIPS ON PURPOSE, and it is not a style
+         choice. Browsing this index from the top is nearly worthless: one page
+         of 500 measured 470 placeholder rows ("- NO EVENT STREAMING - | 8K
+         EXCLUSIVE | BR: DISNEY+ PPV 101") to 30 real ones. Search asks the
+         SERVER, so it reaches all 38,899 channels rather than whatever paged
+         in. livetv.js hides the decoration-only rows but still reports the
+         server's own total — see its header for why under-reporting a
+         catalogue sends people hunting a bug that is not there. -->
+    <section id="livetv-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Live TV</p>
+        <h1>Live TV</h1>
+        <p>Every channel the household subscribes to. Search by name — CNN, BBC, CBS.</p>
+      </div>
+      <form id="livetv-search-form" class="search-form" role="search">
+        <input id="livetv-search-input" name="ltq" type="search" autocomplete="off" placeholder="Search channels" />
+        <button class="primary-button" type="submit">Search</button>
+      </form>
+      <nav id="livetv-groups" class="livetv-groups" aria-label="Channel groups"></nav>
+      <p id="livetv-status" class="search-status" role="status"></p>
+      <div id="livetv-results" class="search-results livetv-results"></div>
+      <button type="button" id="livetv-load-more" class="primary-button" hidden>Load more</button>
+    </section>
+
   </main>
 
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
@@ -743,5 +829,13 @@
   <script src="./manga.js" defer></script>
   <script src="./anime-room.js" defer></script>
   <script src="./games.js" defer></script>
+  <!-- AFTER app.js, and that is an ordering requirement rather than a habit:
+       youtube.js hands its resolved URL to window.BlazingPlayer, which app.js
+       defines beside its own openPlayer. Both are `defer`, so they run in
+       document order and app.js is finished before this file's IIFE starts. -->
+  <script src="./youtube.js" defer></script>
+  <!-- Same ordering requirement as youtube.js above: livetv.js plays through
+       window.BlazingPlayer, which app.js defines. -->
+  <script src="./livetv.js" defer></script>
 </body>
 </html>

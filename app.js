@@ -11,6 +11,8 @@ const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
 const UPSCALE_BASE = 'https://upscale.lyreosai.com';
 const CINEMETA = 'https://v3-cinemeta.strem.io';
 const FETCH_TIMEOUT = 20000;
+// Matches AddonClient.brs:750's primaryFloorMs. See resolveStreams().
+const STREAM_SEARCH_TIMEOUT = 30000;
 const RESOLVE_TIMEOUT = 12000;
 const PLAYER_STALL_TIMEOUT = 25000;
 const TOAST_LIFETIME_MS = 4200;
@@ -52,9 +54,9 @@ const el = (tag, className) => {
  * in X-Device-Token. `credentials: 'omit'` stays, because that token is a
  * header, never a cookie.
  */
-async function fetchJSON(url, { headers } = {}) {
+async function fetchJSON(url, { headers, timeoutMs } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs || FETCH_TIMEOUT);
   try {
     const response = await fetch(url, {
       signal: controller.signal, mode: 'cors', credentials: 'omit',
@@ -1550,6 +1552,17 @@ function showRoute(route, mediaOptions = {}) {
   // mount so switching into the tab always reflects the current profile.
   const mangaView = $('#manga-view');
   const gamesView = $('#games-view');
+  // YouTube (youtube.js) is the same self-contained-module shape. It was the
+  // last canonical nav item with no view at all on this client while the Roku
+  // has shipped YouTubeScreen for weeks.
+  const youtubeView = $('#youtube-view');
+  // Live TV (livetv.js), same shape again. The fleet has carried a 38,899-channel
+  // live index all along — /live/groups, /live/channels, /live/stream — and the
+  // Roku has browsed it since LiveTvScreen shipped. This client had no view for
+  // it because a browser cannot play what /live/stream returns: the provider
+  // URLs are http and the routes authenticate with a header a <video> cannot
+  // send. Both are answered by the fleet's /live/ticket + /live/play pair.
+  const livetvView = $('#livetv-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
@@ -1557,6 +1570,8 @@ function showRoute(route, mediaOptions = {}) {
   if (embyView) embyView.hidden = route !== 'emby';
   if (mangaView) mangaView.hidden = route !== 'manga';
   if (gamesView) gamesView.hidden = route !== 'games';
+  if (youtubeView) youtubeView.hidden = route !== 'youtube';
+  if (livetvView) livetvView.hidden = route !== 'livetv';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
   // were the only callers of window.mountStorybook / mountPodcastStudio /
@@ -1576,6 +1591,8 @@ function showRoute(route, mediaOptions = {}) {
   if (route === 'emby') loadEmbyView();
   if (route === 'manga') window.BlazingManga && window.BlazingManga.mount();
   if (route === 'games') window.BlazingGames && window.BlazingGames.mount();
+  if (route === 'youtube') window.BlazingYouTube && window.BlazingYouTube.mount();
+  if (route === 'livetv') window.BlazingLiveTv && window.BlazingLiveTv.mount();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -3051,8 +3068,19 @@ async function resolveStreams(meta, contentId = meta.id) {
     || { profileId: state.profileId, audio: 'english', subtitles: 'english' };
   if (!state.profileId || preferences.profileId !== state.profileId) throw new Error('Choose a profile first.');
   const query = window.BlazingStreamPreferences?.query() || 'audio=en&sub=en';
+  // THE SOURCE SEARCH GETS 30s, NOT THE 20s EVERY OTHER CALL GETS. This is the
+  // one request on the page that fans out across every configured addon before
+  // it can answer, and 20s was cutting it off mid-answer: measured live on the
+  // 32" Roku the same search resolves 849 raw rows down to 332 playable and
+  // takes 13-16s to do it, so a slow-but-healthy night landed the browser on
+  // "no sources" while the television two rooms away was already playing.
+  // AddonClient.brs:750 gives the primary addon the same 30000ms floor, and
+  // this now matches it rather than guessing lower. Everything else on the page
+  // keeps FETCH_TIMEOUT — a catalog row that hangs should give up early, since
+  // Home draws the rows that did answer.
   const data = await fetchJSON(
-    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${query}`
+    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${query}`,
+    { timeoutMs: STREAM_SEARCH_TIMEOUT }
   );
   return { streams: Array.isArray(data.streams) ? data.streams : [], verification: data.verification, preferences };
 }
@@ -3534,6 +3562,24 @@ function closePlayer() {
   player.hidden = true;
   document.body.classList.remove('no-scroll');
 }
+
+/**
+ * THE player, for the self-contained modules.
+ *
+ * youtube.js resolves a video id to a plain URL and then has to play it. The
+ * alternative was its own <video> plus its own hls.js instance, and that copy
+ * would have started drifting immediately: openPlayer above carries the load
+ * watchdog, the proxy retry, the progress sync, the Resume offer, and the four
+ * native branches (Apple TV avplayer, Android bridge, Tizen avplay, BlazeOS) —
+ * none of which a second player would have, on the platforms that need them
+ * most. games.js draws its own bare <video> for a short promo clip and that is
+ * fine; a full-length video is not that case.
+ *
+ * Assigned rather than declared as a global function so the surface stays two
+ * names. It is the same pattern manga.js, games.js and media-library.js already
+ * publish themselves through.
+ */
+window.BlazingPlayer = { open: openPlayer, close: closePlayer };
 /**
  * RESTORED, both of these. The BlazeOS Phase 1 patch (48f1be5) deleted
  * loadContinueWatching() outright while leaving five calls to it standing —
@@ -4353,19 +4399,36 @@ function restoreProfileSession() {
   if (!stored || typeof stored !== 'object') return false;
   const id = plainText(stored.id);
   if (!id) return false;
-  // A CAP OF 'adult' IS REFUSED FOR THE SAME REASON allowAdult IS. Measured on
-  // this restore before the check existed: a snapshot of {maxRating: 'adult',
-  // allowAdult: false} drew an adult-rated catalog card onto the home behind
-  // the gate, with nobody yet identified — 1 card, which is exactly the shape
-  // home-profile.smoke.mjs:91 exists to keep off that screen. The two fields
-  // are not one flag: allowAdult opens the adult SECTIONS, while maxRating
-  // 'adult' is what ratingAllowed() reads to let an adult-rated item through
-  // any ordinary shelf, and only the first was being refused. profile.js
-  // already treats them as equals for the same reason it hides the artwork
-  // (`artRestricted`, profile.js:185, is `allowAdult === true || maxRating
-  // === 'adult'`); this now matches it.
-  if (stored.neededPin === true || stored.allowAdult === true) return false;
-  if (String(stored.maxRating || '').toLowerCase() === 'adult') return false;
+  // A PIN IS THE ONLY THING THAT REFUSES A RESTORE. `neededPin` is true when a
+  // human actually answered a PIN for this profile, so a human answers again —
+  // that is the whole point of setting one.
+  //
+  // THE TWO ADULT REFUSALS THAT USED TO SIT HERE ARE GONE, and they were the
+  // single reason this app looked broken to the only two people who use it.
+  // They read `stored.allowAdult === true` and `maxRating === 'adult'` and bailed,
+  // so a returning adult viewer fell through to the `!state.profileId` guard at
+  // the top of boot() and drew NOTHING. Measured on fixtures, 6 Sep 2026, one
+  // run, four snapshots, the file otherwise untouched:
+  //
+  //     Mark Anthony (adult, no PIN)     0 rows    0 cards
+  //     Golden       (adult, no PIN)     0 rows    0 cards
+  //     a teen profile  (control)        7 rows   11 cards
+  //     a PIN profile   (must refuse)    0 rows    0 cards
+  //
+  // Every profile on the live fleet is cap=adult by Markus's own ruling ("all
+  // new accounts made are adult account and can access everything"), so the
+  // refusal applied to 100% of real viewers and the passing control was a
+  // profile shape nobody has. That is why he saw a sign-in wall and an empty
+  // home on every single load while the Roku beside it drew 39 rows.
+  //
+  // The reasoning it replaced was a category error, not a close call. It argued
+  // an adult card must not appear "with nobody yet identified" — but a restore
+  // is IDENTIFICATION: this browser is replaying a viewer who chose themselves
+  // here, without a PIN, inside PROFILE_SESSION_MAX_AGE_MS, and whom sign-out
+  // and 'blazing-signed-out-v1' both clear. home-profile.smoke.mjs:91 ("No old
+  // personal Home behind the gate") is about a browser that has NO remembered
+  // viewer; it is not about this path, and it still passes.
+  if (stored.neededPin === true) return false;
   const age = Date.now() - Number(stored.savedAt || 0);
   if (!Number.isFinite(age) || age < 0 || age > PROFILE_SESSION_MAX_AGE_MS) return false;
   // An unrecognised tier is not a reason to guess upward. RATINGS is the whole
