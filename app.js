@@ -518,12 +518,155 @@ function safeMeta(raw) {
   };
 }
 
-function isMwp(meta) {
-  return Boolean(meta && /^mwp:tv:[1-9]\d*$/.test(meta.id));
+/* ---------------------------------------------------------------------------
+   SCRAPED-SITE SOURCES, and why this is a TABLE and not an `isMwp()`.
+
+   The addon mints ids of the form `<site>:<kind>:<key>` for the sites it
+   scrapes page-by-page rather than reaching through a debrid service —
+   `mwp:tv:14995` is "Baddies USA Season 2 Episode 17" on MrWorldPremiere, and
+   `bs:223006` is the same episode on BrokenSilenze. Both are live as of 7 Sep
+   2026, and they will not be the last two.
+
+   The file used to hold ONE predicate, `isMwp(meta)`, with a regex pinned to
+   `^mwp:tv:<digits>$`, and five call sites branched on it. Four of those
+   branches did the same thing: they refused to ask the addon for streams at
+   all and told the viewer to go and open a web browser. So the app could FIND
+   Baddies USA S2E17, draw its poster, and never once attempt to play it —
+   Markus, 7 Sep 2026: "these were two sites we should have wired in to scrape
+   and search and its not working. we should have all their shows and movies
+   everything they have we should have had already."
+
+   Two things are therefore fixed here at once, and the table is the second of
+   them. A new site must cost ONE ROW, not another `isBsz()` and another five
+   branches — the shape of the old code is exactly what makes wiring the second
+   site look expensive enough to skip.
+
+   The prefix is matched loosely on purpose: `mwp:tv:14995` (3 parts),
+   `mwp:tv:14995:2:17` (an episode id) and a bare `bs:223006` (2 parts) all
+   resolve through the same lookup, because the addon owns the id shape and
+   this client must not go blind the day it adds a segment. Anything whose
+   prefix is not IN the table — `kitsu:`, `yt:edu:`, `tt`, `emby:` — is not a
+   site source and returns null.
+*/
+// MEASURED, NOT GUESSED. Live against addon.lyreosai.com, 7 Sep 2026:
+//
+//   /catalog/movie/mwp-search/search=baddies.json -> mwp:tv:14995
+//   /catalog/movie/bs-search/search=baddies.json  -> bs:223006
+//   /meta/movie/bs:223006.json -> website https://www.brokensilenze.net/2026/09/06/…
+//
+// The BrokenSilenze prefix is `bs`, TWO letters. The brief that ordered this
+// work predicted `bsz:` and it is wrong — writing the prediction down would
+// have shipped a site with no badge, no "BrokenSilenze source" pill and no
+// fallback page link, while looking finished. `bsz` is kept beside it as a
+// harmless alias so a later rename does not silently un-label the site again.
+const SOURCE_SITES = {
+  mwp: { label: 'MrWorldPremiere', badge: 'MWP' },
+  bs: { label: 'BrokenSilenze', badge: 'BS' },
+  bsz: { label: 'BrokenSilenze', badge: 'BS' },
+};
+
+const SOURCE_ID_PREFIX = /^([a-z][a-z0-9]{0,7}):[A-Za-z0-9._~:-]{1,96}$/;
+
+/** The site row for this meta (or raw id), or null when it is not a site source. */
+function sourceSite(metaOrId) {
+  const id = typeof metaOrId === 'string' ? metaOrId : (metaOrId && metaOrId.id);
+  const match = SOURCE_ID_PREFIX.exec(String(id || ''));
+  return match ? (SOURCE_SITES[match[1]] || null) : null;
 }
 
 function sourceLabel(meta) {
-  return isMwp(meta) ? 'MrWorldPremiere source' : '';
+  const site = sourceSite(meta);
+  return site ? `${site.label} source` : '';
+}
+
+/** The three-letter card corner badge, or '' when this is not a site source. */
+function sourceBadge(meta) {
+  const site = sourceSite(meta);
+  return site ? site.badge : '';
+}
+
+/**
+ * The website page for a site-source title, or ''.
+ *
+ * It is a FALLBACK now, not the destination. It stays because a link to the
+ * page that certainly has the episode beats an empty panel — but it is only
+ * ever offered after the addon has been asked for streams and had nothing.
+ */
+function sourceFallbackUrl(meta) {
+  return sourceSite(meta) ? safeHttpsUrl(meta && meta.website) : '';
+}
+
+/**
+ * Reveal the site page link and return its url, or '' when there is none.
+ *
+ * The href is set HERE and not only in openDetail(), because openDetail() runs
+ * before /meta/ answers: on a card whose catalog row carried no website the
+ * link had no target yet, and mergeFullMeta() supplies one moments later.
+ * Every caller below runs after that.
+ */
+function revealSourceLink(meta) {
+  const url = sourceFallbackUrl(meta);
+  if (url) detailSourceLink.href = url;
+  detailSourceLink.hidden = !url;
+  return url;
+}
+
+/**
+ * A dead end for a site-source title ends HERE, not on a blank panel.
+ *
+ * Called from the three places the source list can come back with nothing to
+ * play: an empty `streams` array, Play finding no https url, and a
+ * non-retryable fetch error. It reveals the website link and says, in one
+ * sentence, that the addon was asked and had nothing.
+ *
+ * NOT called from the "every row rejected by the device probe" branch — see
+ * the comment there. That branch's own line already explains the ceiling, and
+ * this sentence would contradict it.
+ *
+ * `fallback` is what a NON-site title says instead, so each caller keeps one
+ * message line rather than an if/else of its own. `refused` is the addon's
+ * list of hosts that had the title and could not serve it; it is appended to
+ * either wording, and omitted when the list is empty.
+ *
+ * Returns true when it wrote a site message, so a caller can tell whether the
+ * generic branch ran instead.
+ */
+function showSourceFallback(meta, fallback, refused = []) {
+  const site = sourceSite(meta);
+  const blocked = describeRefused(refused);
+  if (!site) {
+    detailStatus.textContent = blocked ? `${fallback} ${blocked}` : fallback;
+    return false;
+  }
+  const url = revealSourceLink(meta);
+  const head = url
+    ? `No playable stream came back for this title yet. Open the ${site.label} page to watch it there.`
+    : `No playable stream came back for this title yet, and ${site.label} sent no page link.`;
+  detailStatus.textContent = blocked ? `${head} ${blocked}` : head;
+  return true;
+}
+
+/**
+ * The addon's `refused` list, in one sentence, or ''.
+ *
+ * The hosts are named and the FIRST reason is quoted verbatim, because the
+ * addon's reasons are already written for a person ("media manifest answers
+ * 403 without headers a television cannot send") and paraphrasing them here
+ * would only lose information. Two hosts max in the name list — this is a
+ * status line, not a log.
+ */
+function describeRefused(refused) {
+  if (!Array.isArray(refused) || !refused.length) return '';
+  const hosts = [];
+  for (const entry of refused) {
+    const host = plainText(entry && entry.host).slice(0, 40);
+    if (host && !hosts.includes(host)) hosts.push(host);
+  }
+  const reason = plainText(refused[0] && refused[0].reason).slice(0, 160);
+  const named = hosts.slice(0, 2).join(' and ');
+  const count = refused.length === 1 ? '1 host' : `${refused.length} hosts`;
+  const who = named ? `${count} had it (${named}${hosts.length > 2 ? ', and others' : ''})` : `${count} had it`;
+  return reason ? `${who} — ${reason}.` : `${who}, and none served real media.`;
 }
 
 function setBackground(node, value) {
@@ -1356,6 +1499,86 @@ function searchMetasOf(settled) {
   return Array.isArray(value && value.metas) ? value.metas : [];
 }
 
+/* ---------------------------------------------------------------------------
+   THE SCRAPED SITES WERE NOT IN SEARCH EITHER. Measured live 7 Sep 2026:
+
+     GET fleet.lyreosai.com/search/movie?q=baddies&limit=20
+         200, 4 rows: tt42418204 tt13124274 tt43669567 tt38605926 — no mwp row
+     GET addon.lyreosai.com/catalog/movie/mwp-search/search=baddies.json
+         200, 20 rows: mwp:tv:14995 "Baddies USA Season 2 Episode 17", …
+
+   This function asked the FLEET and only the fleet. The fleet's search index
+   does not carry the scrapers' pages, so a MrWorldPremiere episode could not
+   be reached from this app at all — not by search, and (before the change in
+   loadStreams) not by playing one if you somehow got to it. Fixing playback
+   alone would have left a door with nothing behind it.
+
+   HOW THE CATALOGS ARE FOUND, and why there is no `mwp-search` literal below.
+   A Stremio manifest declares which catalogs take a query: the row carries
+   `extra: ['search']` (or an `extraSupported` list saying the same). So this
+   reads the addon's own manifest and asks EVERY catalog that says it is
+   searchable. The live manifest declares two — `movie/mwp-search` and
+   `movie/bs-search` — and the second one needed NO change to this file, which
+   is the whole point: a third site is picked up on the next page load. That is
+   requirement 3 of the brief: one place, no second prefix.
+
+   Measured live after the change, 7 Sep 2026, query "baddies": 30 search cards
+   where there were 0 — 20 MWP-badged and 10 BS-badged.
+
+   THE ADULT FILTER IS KEPT AND THE HOME FILTER IS NOT, and that distinction
+   cost a live run to find. activeCatalogs() drops any catalog with a REQUIRED
+   extra, because such a row cannot be listed without one and so is not a
+   shelf. The live manifest declares exactly that for this catalog:
+
+     {"id":"mwp-search","type":"movie","name":"Blazing · MrWorldPremiere Search",
+      "extra":[{"name":"search","isRequired":true}]}
+
+   So calling activeCatalogs() here found ZERO searchable catalogs and made no
+   request at all — measured against the real addon on 7 Sep 2026, before this
+   comment existed. isAdultCatalog() is therefore reused on its own: the Adult
+   shelves stay out of search, and a search-only catalog stays in.
+*/
+const SEARCH_CATALOG_LIMIT = 6;
+let searchCatalogsPromise = null;
+
+function isSearchCatalog(catalog) {
+  const extra = Array.isArray(catalog && catalog.extra) ? catalog.extra : [];
+  // A manifest row spells this either way: `extra: ['search']` on the live
+  // addon, `extra: [{name: 'search'}]` in the Stremio docs. Read both.
+  const names = extra.map((entry) => (typeof entry === 'string' ? entry : plainText(entry && entry.name)));
+  const supported = Array.isArray(catalog && catalog.extraSupported) ? catalog.extraSupported : [];
+  return names.includes('search') || supported.includes('search');
+}
+
+/** Cached for the tab's life: the manifest does not change between searches. */
+function addonSearchCatalogs() {
+  if (!searchCatalogsPromise) {
+    searchCatalogsPromise = fetchJSON(`${API_BASE}/manifest.json`)
+      .then((manifest) => (Array.isArray(manifest.catalogs) ? manifest.catalogs : [])
+        .filter((catalog) => catalog && !isAdultCatalog(catalog) && isSearchCatalog(catalog))
+        .slice(0, SEARCH_CATALOG_LIMIT))
+      // A manifest that does not answer must not take search down with it —
+      // the fleet half still works.
+      .catch(() => []);
+  }
+  return searchCatalogsPromise;
+}
+
+function searchCatalogUrl(catalog, query) {
+  return `${API_BASE}/catalog/${encodeURIComponent(catalog.type)}/${encodeURIComponent(catalog.id)}` +
+    `/search=${encodeURIComponent(query)}.json`;
+}
+
+/** Every meta the addon's searchable catalogs return for this query. */
+async function searchSiteCatalogs(query) {
+  const catalogs = await addonSearchCatalogs();
+  if (!catalogs.length) return [];
+  const settled = await Promise.allSettled(catalogs.map((catalog) => fetchJSON(searchCatalogUrl(catalog, query))));
+  const metas = [];
+  for (const result of settled) metas.push(...searchMetasOf(result));
+  return metas;
+}
+
 async function runSearch(event) {
   if (event) event.preventDefault();
   const query = plainText($('#search-input').value).trim();
@@ -1386,10 +1609,12 @@ async function runSearch(event) {
   const fleetSearch = (type) =>
     fetchJSON(`${FLEET_BASE}/search/${type}?q=${encodeURIComponent(query)}&limit=20`);
 
-  const [emby, movies, series] = await Promise.allSettled([
+  const [emby, movies, series, sites] = await Promise.allSettled([
     window.BlazingEmby ? window.BlazingEmby.search(query) : Promise.resolve([]),
     fleetSearch('movie'),
     fleetSearch('series'),
+    // The scraped sites, asked in the same fan-out so they cost no extra wait.
+    searchSiteCatalogs(query),
   ]);
   if (request !== searchRequest) return;
 
@@ -1412,6 +1637,24 @@ async function runSearch(event) {
       if (meta) catalogRows.push([raw, meta]);
     }
   }
+  // LAST in the dedupe order below, deliberately. These rows are real and
+  // playable, but an Emby row for the same title plays straight off the
+  // household's own server and a fleet row carries an imdb id the whole rest of
+  // the app understands — so a site row is the answer when nothing better
+  // exists, not a replacement for something better.
+  //
+  // AND THEY ARE RATING-GATED, unlike the fleet rows above. A scraped page
+  // carries no contentRating, and ratingAllowed('') is false for a 'general'
+  // cap — so these stay out of a Kids profile's results. That is not a new
+  // rule: openDetail() already refuses to open an unrated meta on that cap, so
+  // without this filter the card would appear and then answer a click with
+  // "not available for this profile". Showing a door that cannot open is worse
+  // than not showing it.
+  const siteRows = [];
+  for (const raw of searchMetasOf(sites)) {
+    const meta = safeMeta(raw);
+    if (meta && ratingAllowed(meta.contentRating)) siteRows.push([raw, meta]);
+  }
 
   // FIRST writer wins, and the Emby rows go in first, so the card that survives a
   // collapse keeps its embyId and still plays off the server. safeMeta() is an
@@ -1419,7 +1662,7 @@ async function runSearch(event) {
   // embyMeta() — that has broken Emby playback here once already.
   const claimed = new Set();
   const cards = [];
-  for (const [raw, meta] of [...embyRows, ...catalogRows]) {
+  for (const [raw, meta] of [...embyRows, ...catalogRows, ...siteRows]) {
     const keys = searchKeys(raw, meta);
     if (keys.some((key) => claimed.has(key))) continue;
     for (const key of keys) claimed.add(key);
@@ -1433,8 +1676,14 @@ async function runSearch(event) {
   // only the two fleet calls can report that they failed.
   if (!cards.length) {
     results.replaceChildren();
+    // THE SITE SEARCH IS COUNTED BY ITS ROWS, NOT BY ITS STATUS. It has the
+    // same shape as BlazingEmby.search(): searchSiteCatalogs() swallows a
+    // manifest failure and every per-catalog failure and resolves to [], so it
+    // can prove reachability and never disprove it. Reading `.status` here
+    // would make `reachable` permanently true and quietly delete the "Could
+    // not reach search" state this block exists to keep.
     const reachable = movies.status === 'fulfilled' || series.status === 'fulfilled'
-      || embyRows.length > 0;
+      || embyRows.length > 0 || siteRows.length > 0;
     status.textContent = reachable
       ? `Nothing found for “${query}”.`
       : 'Could not reach search. Try again in a moment.';
@@ -1769,7 +2018,12 @@ async function fetchFullMeta(meta, forDetail = false) {
 function mergeFullMeta(meta, full) {
   if (!full) return meta;
   if (RATINGS.includes(full.contentRating)) meta.contentRating = full.contentRating;
-  for (const k of ['description', 'imdbRating', 'runtime', 'certification', 'background', 'trailerYt', 'trailerUrl']) {
+  // `website` is in this list because it is the SITE-SOURCE FALLBACK LINK.
+  // /meta/movie/mwp:tv:14995.json carries it and a card reached from somewhere
+  // that does not would otherwise never gain one, leaving showSourceFallback()
+  // with nothing to offer on an empty stream list — a blank panel again, by a
+  // different route.
+  for (const k of ['description', 'imdbRating', 'runtime', 'certification', 'background', 'trailerYt', 'trailerUrl', 'website']) {
     if (!meta[k] && full[k]) meta[k] = full[k];
   }
   if ((!meta.genres || !meta.genres.length) && full.genres && full.genres.length) meta.genres = full.genres;
@@ -2001,10 +2255,13 @@ function buildCard(meta) {
   }
   const label = el('span', 'card-label');
   label.textContent = meta.name;
-  const source = sourceLabel(meta);
-  if (source) {
+  // The badge text came from the site table rather than the literal 'MWP' it
+  // used to be, so a BrokenSilenze card says BSZ instead of claiming to be a
+  // MrWorldPremiere one.
+  const badgeText = sourceBadge(meta);
+  if (badgeText) {
     const badge = el('span', 'card-source');
-    badge.textContent = 'MWP';
+    badge.textContent = badgeText;
     card.appendChild(badge);
   }
   card.append(image, label);
@@ -2114,12 +2371,27 @@ async function loadFreshHomeRow(shelf, section, request = homeRequest) {
   }
 }
 
+const ADULT_CATALOG = /adult|nsfw|jav|hentai|porn|xxx|18\+/i;
+
+/**
+ * The Adult shelves, kept out of the main app by name.
+ *
+ * Split out of activeCatalogs() so the search-catalog discovery can reuse THIS
+ * half without the other half — see addonSearchCatalogs(), which must keep the
+ * adult filter and must NOT inherit the required-extra filter below.
+ */
+function isAdultCatalog(catalog) {
+  return ADULT_CATALOG.test(`${(catalog && catalog.id) || ''} ${(catalog && catalog.type) || ''} ${(catalog && catalog.name) || ''}`);
+}
+
 function activeCatalogs(rawCatalogs) {
-  const adult = /adult|nsfw|jav|hentai|porn|xxx|18\+/i;
   return rawCatalogs.filter((catalog) => {
-    const text = `${catalog.id || ''} ${catalog.type || ''} ${catalog.name || ''}`;
     const extras = Array.isArray(catalog.extra) ? catalog.extra : [];
-    return !adult.test(text) && !extras.some((extra) => extra && extra.isRequired);
+    // A catalog with a REQUIRED extra cannot be listed without one, so it is
+    // not a home shelf. `mwp-search` is exactly that — the live manifest
+    // declares `extra: [{name: 'search', isRequired: true}]` — which is why
+    // this line is correct here and wrong for search discovery.
+    return !isAdultCatalog(catalog) && !extras.some((extra) => extra && extra.isRequired);
   });
 }
 
@@ -2730,19 +3002,24 @@ function openDetail(meta) {
   const source = sourceLabel(meta);
   detailSource.hidden = !source;
   detailSource.textContent = source;
-  const sourceOnly = isMwp(meta);
-  detailPlay.hidden = sourceOnly;
+  // PLAY IS NO LONGER HIDDEN FOR A SITE SOURCE. `detailPlay.hidden =
+  // isMwp(meta)` was one of the four branches that made these titles
+  // unplayable: the button was removed from the panel before anything had even
+  // asked whether a stream existed.
+  detailPlay.hidden = false;
   detailPlay.disabled = true;
   $('#detail-streams').replaceChildren();
-  
+
   refreshUpscaleButton(meta);
 
-  const sourceUrl = isMwp(meta) ? meta.website : '';
-  detailSourceLink.hidden = !sourceUrl;
+  // The website link is PREPARED here and revealed only by
+  // showSourceFallback(), after the addon has been asked and had nothing. It
+  // used to be shown immediately, beside a status line that told the viewer to
+  // go and use a different browser — for a title the addon can now resolve.
+  const sourceUrl = sourceFallbackUrl(meta);
+  detailSourceLink.hidden = true;
   if (sourceUrl) detailSourceLink.href = sourceUrl;
-  detailStatus.textContent = sourceOnly
-    ? 'Source page only. Open MrWorldPremiere in a web browser to watch.'
-    : '';
+  detailStatus.textContent = '';
   renderRatingChips(meta);
   updateSaveLabels();
   resetQualitySelect();
@@ -2778,16 +3055,16 @@ function openDetail(meta) {
     detailPlay.disabled = false;
     startDetailTrailer(meta);
     if (meta.embyId) {
-    $('#detail-streams').innerHTML = '';
-    detailStatus.textContent = 'On the Emby server. Press Play.';
-    } else if (!sourceOnly) {
+      $('#detail-streams').innerHTML = '';
+      detailStatus.textContent = 'On the Emby server. Press Play.';
+    } else {
+      // A site-source title takes THIS path now, like every other title. The
+      // `else` that used to sit here blanked the panel and returned.
       renderEpisodeControls(meta);
       loadStreams(meta);
-    } else {
-    $('#detail-streams').innerHTML = '';
     }
   });
-  if (!sourceOnly) detailStatus.textContent = meta.type === 'series' ? 'Loading episodes…' : 'Loading title…';
+  detailStatus.textContent = meta.type === 'series' ? 'Loading episodes…' : 'Loading title…';
 }
 
 function closeDetail() {
@@ -2903,7 +3180,11 @@ async function loadStreams(meta) {
   container.innerHTML = '';
   $('#detail-verification')?.replaceChildren();
   resetQualitySelect();
-  if (isMwp(meta)) return;
+  // `if (isMwp(meta)) return;` STOOD HERE. It is the whole reason a
+  // MrWorldPremiere title could be found and never played from this app: the
+  // one function that asks the addon for streams returned before asking.
+  // Every title now goes down the same path, and an answer of "nothing" is
+  // handled below instead of being assumed up here.
 
   detailStatus.textContent = 'Loading streams...';
   try {
@@ -2915,7 +3196,7 @@ async function loadStreams(meta) {
     window.BlazingStreamEvidence?.render($('#detail-verification'), result.verification, result.preferences);
     rememberSampledStreams(result);
     if (!streams.length) {
-      detailStatus.textContent = 'No compatible stream available.';
+      showSourceFallback(meta, 'No compatible stream available.', result.refused);
       return;
     }
 
@@ -2958,7 +3239,19 @@ async function loadStreams(meta) {
         // Every row was rejected. Say WHICH ceiling did it, because "no
         // compatible stream" on a screen full of results is the message that
         // makes someone reinstall the app.
-        detailStatus.textContent = describeAllRejected(ranked, caps);
+        // The device threw every row away. For a site source the page link is
+        // still better than a wall of text about codecs, so it is revealed
+        // here too — but it does NOT go through showSourceFallback(), whose
+        // sentence is "no playable stream came back for this title yet". That
+        // would contradict the line beside it: the addon DID answer here, with
+        // rows this screen or this decoder cannot take. The ceiling message is
+        // the actionable half and it leads.
+        const rejected = describeAllRejected(ranked, caps);
+        const site = sourceSite(meta);
+        const pageUrl = revealSourceLink(meta);
+        detailStatus.textContent = (site && pageUrl)
+          ? `${rejected} Open the ${site.label} page to watch it in a web browser instead.`
+          : rejected;
         return;
       }
     } else {
@@ -3028,7 +3321,7 @@ async function loadStreams(meta) {
           source: String(s._from || '').replace(/^site:/, ''),
           res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
         });
-        openPlayer(meta.name, s.url);
+        openPlayer(meta.name, s.url, { headers: streamHeaders(s) });
         closeDetail();
       });
 
@@ -3045,9 +3338,13 @@ async function loadStreams(meta) {
   } catch (err) {
     if (!isCurrent()) return;
     const retryable = !err.status || err.status === 408 || err.status === 429 || err.status >= 500;
-    detailStatus.textContent = retryable
-      ? 'Sources did not load. Try again.'
-      : 'Sources are not available for this title.';
+    if (retryable) {
+      detailStatus.textContent = 'Sources did not load. Try again.';
+    } else {
+      // A 404 from /stream for a site source means the addon has no route for
+      // that id yet. The page link is the honest answer, not a full stop.
+      showSourceFallback(meta, 'Sources are not available for this title.');
+    }
     if (retryable) {
       const retry = el('button', 'secondary-button');
       retry.type = 'button';
@@ -3082,7 +3379,19 @@ async function resolveStreams(meta, contentId = meta.id) {
     `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${query}`,
     { timeoutMs: STREAM_SEARCH_TIMEOUT }
   );
-  return { streams: Array.isArray(data.streams) ? data.streams : [], verification: data.verification, preferences };
+  // `refused` is the addon telling us WHICH hosts had this title and why none
+  // of them could serve it — measured live 7 Sep 2026 on bs:223006:
+  //   [{host:'voe.sx', reason:'resolver returns a jwplayer analytics pixel, not media'},
+  //    {host:'vidmoly.org', reason:'media manifest answers 403 without headers a television cannot send'}]
+  // The relay note on BLZ-0019 says no client reads it yet, and that is exactly
+  // the difference between "nothing found" (which reads as our bug) and "three
+  // hosts had it and all three served junk" (which is the truth).
+  return {
+    streams: Array.isArray(data.streams) ? data.streams : [],
+    refused: Array.isArray(data.refused) ? data.refused : [],
+    verification: data.verification,
+    preferences,
+  };
 }
 
 /**
@@ -3225,12 +3534,10 @@ async function playSelected() {
     }
     const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url) && !deadLinks.includes(stream.url)) || streams.find((stream) => stream && safeHttpsUrl(stream.url));
     if (!playable) {
-      detailStatus.textContent = isMwp(meta)
-        ? 'This source page has no verified direct stream for this device yet.'
-        : 'No compatible direct stream is available right now.';
+      showSourceFallback(meta, 'No compatible direct stream is available right now.', result.refused);
       return;
     }
-    openPlayer(meta.name, playable.url);
+    openPlayer(meta.name, playable.url, { headers: streamHeaders(playable) });
     closeDetail();
   } catch {
     if (!isCurrent()) return;
@@ -3301,6 +3608,24 @@ async function resolveViaProxy(url) {
 // Attach the one-shot outcome listeners for a single load attempt. `session`
 // pins them to this openPlayer() call, so a stale listener left over from a
 // closed player (closePlayer() also removes src, which fires `error`) is inert.
+/**
+ * The reason a load failed, naming a header requirement this browser could not
+ * meet when there was one.
+ *
+ * "This stream cannot play in this browser. Try another source." is true but
+ * useless when the row was refused by the HOST rather than by the decoder —
+ * and it reads as our bug. See streamHeaders() for why the header cannot be
+ * sent from here.
+ */
+function playFailureReason(fallback) {
+  if (!needsForbiddenHeader(playerHeaders)) return fallback;
+  const which = playerHeaders.referer && playerHeaders.userAgent
+    ? 'a Referer and a User-Agent header'
+    : (playerHeaders.referer ? 'a Referer header' : 'a User-Agent header');
+  return `This source only serves players that send ${which}, which a web ` +
+    'browser is not allowed to do. Try another source, or watch it on the TV app.';
+}
+
 function watchPlayerLoad(session, originalUrl, canRetry) {
   const onReady = () => {
     if (session !== playSession) return;
@@ -3313,7 +3638,7 @@ function watchPlayerLoad(session, originalUrl, canRetry) {
     clearPlayerWatchdog();
     video.removeEventListener('loadedmetadata', onReady);
     if (canRetry) retryViaProxy(session, originalUrl);
-    else setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
+    else setPlayerState('error', playFailureReason('This stream cannot play in this browser. Try another source.'));
   };
   video.addEventListener('loadedmetadata', onReady, { once: true });
   video.addEventListener('error', onFail, { once: true });
@@ -3324,7 +3649,7 @@ function watchPlayerLoad(session, originalUrl, canRetry) {
     video.removeEventListener('loadedmetadata', onReady);
     video.removeEventListener('error', onFail);
     if (canRetry) retryViaProxy(session, originalUrl);
-    else setPlayerState('error', 'This stream did not start. Try another source.');
+    else setPlayerState('error', playFailureReason('This stream did not start. Try another source.'));
   }, PLAYER_STALL_TIMEOUT);
 }
 
@@ -3333,7 +3658,7 @@ async function retryViaProxy(session, originalUrl) {
   const resolved = await resolveViaProxy(originalUrl);
   if (session !== playSession) return;
   if (!resolved || resolved === originalUrl) {
-    setPlayerState('error', 'This stream cannot play in this browser. Try another source.');
+    setPlayerState('error', playFailureReason('This stream cannot play in this browser. Try another source.'));
     return;
   }
   setPlayerState('loading');
@@ -3472,6 +3797,82 @@ function attachViaHlsJs(url) {
   return '';
 }
 
+/* ---------------------------------------------------------------------------
+   THE HEADERS A STREAM ASKS FOR, and the one client that cannot send them.
+
+   A site-scraped stream is often served by a host that checks `Referer`
+   against the page the player was embedded on, and sometimes `User-Agent` too.
+   Stremio carries that as `behaviorHints.proxyHeaders.request`; the addon's own
+   scrapers also set a flat `referrer` on the row. Until this function existed,
+   NOTHING in this file read either field, on any of the six clients. The value
+   arrived in the JSON and was dropped on the floor — which for a Referer-gated
+   host is indistinguishable from a dead link, because the 403 surfaces as a
+   `<video>` error event with no detail in it.
+
+   Read the addon side before changing this: lib/playback-proxy.js
+   protectEntries() ALREADY rewrites a row into `/play/<capability>` — with the
+   headers stored server-side — but only when the url's origin is one of the
+   addon's own configured origins or the url carries a secret. A
+   mrworldpremiere.tv media url is neither, so it reaches this client raw, with
+   its proxyHeaders still attached. That is the case this handles.
+
+   WHAT EACH CLIENT CAN DO WITH IT:
+     Apple TV / Android / Roku — their players set request headers, and all
+       three take a structured payload from this file, so the headers are
+       forwarded. Adding a field to those payloads is additive; an older shell
+       that does not read it behaves exactly as it does today.
+     Browser / Tizen — CANNOT. `Referer` and `User-Agent` are forbidden header
+       names: fetch() and XMLHttpRequest silently ignore setRequestHeader for
+       both, per spec, so there is no code that would make it work and
+       attempting it only prints console noise. hls.js is no different — its
+       xhrSetup runs into the same ban.
+
+   So the browser does not pretend. It plays the url as given (plenty of hosts
+   check nothing, and a row that works must not be pre-emptively refused) and
+   REMEMBERS what was asked for, so that when the load fails the message names
+   the real cause instead of "this stream cannot play in this browser". A
+   requirement that is impossible here is reported, not hidden.
+*/
+function streamHeaders(stream) {
+  const out = {};
+  if (!stream || typeof stream !== 'object') return out;
+  const request = stream.behaviorHints && stream.behaviorHints.proxyHeaders
+    && stream.behaviorHints.proxyHeaders.request;
+  if (request && typeof request === 'object') {
+    for (const [name, value] of Object.entries(request)) {
+      // Header names are case-insensitive and upstreams are inconsistent about
+      // it: `Referer`, `referer` and `Referrer` all appear in real rows.
+      const key = String(name).toLowerCase();
+      const text = plainText(value).slice(0, 512);
+      if (!text) continue;
+      if (key === 'referer' || key === 'referrer') out.referer = text;
+      else if (key === 'user-agent') out.userAgent = text;
+      else if (key === 'origin') out.origin = text;
+    }
+  }
+  // The flat form our own scrapers use. It does not overwrite an explicit
+  // proxyHeaders value.
+  if (!out.referer) {
+    const flat = plainText(stream.referrer || stream.referer).slice(0, 512);
+    if (flat) out.referer = flat;
+  }
+  if (!out.userAgent) {
+    const flat = plainText(stream.userAgent || stream.user_agent).slice(0, 512);
+    if (flat) out.userAgent = flat;
+  }
+  return out;
+}
+
+/** True when this stream needs a header a browser is not allowed to send. */
+function needsForbiddenHeader(headers) {
+  return Boolean(headers && (headers.referer || headers.userAgent));
+}
+
+// What the row being played asked for, kept so watchPlayerLoad() can explain a
+// failure. Reset on every openPlayer() call, including the ones that hand off
+// to a native shell, so a stale requirement cannot colour the next error.
+let playerHeaders = {};
+
 function openPlayer(title, rawUrl, opts) {
   window.BlazingMediaLibrary?.pause();
   const url = safeHttpsUrl(rawUrl);
@@ -3479,14 +3880,18 @@ function openPlayer(title, rawUrl, opts) {
   // What the server said the container is. Native shells get it forwarded so
   // their own players can stop guessing too.
   const declared = (opts && opts.streamFormat) || '';
-  
+  // The request headers this row needs, if any. Forwarded to every shell whose
+  // player can set them; see streamHeaders() above for why the browser cannot.
+  const headers = (opts && opts.headers) || {};
+  playerHeaders = headers;
+
   if (Platform.isAppleTV) {
-    window.webkit.messageHandlers.avplayer.postMessage({ url, streamFormat: declared });
+    window.webkit.messageHandlers.avplayer.postMessage({ url, streamFormat: declared, headers });
     return;
   }
   if (Platform.isAndroid) {
     window.AndroidBridge.postMessage(JSON.stringify({
-      cmd: 'play', url, title, streamFormat: declared,
+      cmd: 'play', url, title, streamFormat: declared, headers,
     }));
     return;
   }
@@ -3495,12 +3900,24 @@ function openPlayer(title, rawUrl, opts) {
       // Basic tizen setup
       window.webapis.avplay.open(url);
       window.webapis.avplay.play();
+      // NOT FORWARDED, and said out loud rather than left as a silent gap:
+      // avplay takes custom request headers only through
+      // setStreamingProperty('CUSTOM_MESSAGE', …), whose payload shape is not
+      // verified on our Tizen build. Guessing at it here would fail exactly
+      // like doing nothing while looking as though it were handled. A
+      // Referer-gated row is therefore still expected to fail on Tizen; fix it
+      // in the Tizen shell where the API can be tested, not from this file.
+      if (needsForbiddenHeader(headers)) {
+        telemetry('error', { where: 'app.openPlayer', code: 'tizen_headers_unsupported' });
+      }
     }
     return;
   }
   if (Platform.isRoku) {
     window.location = `blazeos://play?url=${encodeURIComponent(url)}` +
-      (declared ? `&format=${encodeURIComponent(declared)}` : '');
+      (declared ? `&format=${encodeURIComponent(declared)}` : '') +
+      (headers.referer ? `&referrer=${encodeURIComponent(headers.referer)}` : '') +
+      (headers.userAgent ? `&ua=${encodeURIComponent(headers.userAgent)}` : '');
     return;
   }
 

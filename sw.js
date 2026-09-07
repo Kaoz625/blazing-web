@@ -73,7 +73,7 @@
 // bump an installed PWA keeps serving v29's index.html, which has no
 // #livetv-view, so the new chip would hide every view and land on a blank
 // screen — the failure arriving through the cache rather than the markup.
-const CACHE = 'blazing-shell-v31';
+const CACHE = 'blazing-shell-v32';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

@@ -47,7 +47,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // youtube-play.smoke.mjs and livetv.smoke.mjs landed. THE RULE IS: this number
 // is the real count, always. A floor left behind is not a conservative floor,
 // it is three suites that may quietly stop existing.
-const MIN_SUITES = 29;
+//
+// Raised 29 -> 30 on 7 Sep 2026 when site-source.smoke.mjs landed. Same rule:
+// this number is the real count, always.
+const MIN_SUITES = 30;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
