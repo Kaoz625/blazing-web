@@ -895,7 +895,39 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: rgba(10,10,10,.78); transition: background var(--transition);
 }
 .detail-close:hover { background: rgba(255,61,71,.3); }
-.detail-body { position: relative; z-index: 0; width: min(550px, 100%); padding: 60px 28px 30px; }
+/* THE SHEET SCROLLS, so the source list is ONE page.
+   Every other box in this dialog is `overflow: hidden` (.detail-dialog and
+   .detail-card both), which used to leave `.detail-streams` as the only
+   scrollable thing in the sheet — a 250px porthole onto a list 35,000px long.
+   Measured before this change, 1440x900, a title with 336 sources: 2 rows
+   visible at a time out of 336. Markus, 7 Sep 2026: "i think we should just
+   keep the source list onto one page that way your seeing more than 5 sources
+   at the detail page."
+   Moving the scroll up here makes the whole sheet one continuous page: the
+   heading and the actions scroll away and the sources get the full height of
+   the dialog, in one scrollbar instead of two nested ones. The max-height
+   MATCHES .detail-dialog's own, so the body can use the entire sheet and the
+   card's min-height still holds a short title open.
+   `overscroll-behavior: contain` so reaching the end of the list does not
+   start scrolling the home page behind the dialog. */
+.detail-body {
+  position: relative; z-index: 0; width: min(550px, 100%); padding: 60px 28px 30px;
+  max-height: min(760px, calc(100vh - 24px));
+  max-height: min(760px, calc(100dvh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Reserved, so the sheet does not shift sideways between a title with four
+     sources and one with 336. */
+  scrollbar-gutter: stable;
+  /* The same thin dark bar as .season-strip and .episode-rail. The default
+     scrollbar here is a bright white column down the middle of a near-black
+     sheet — seen in a screenshot the moment this box became scrollable. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.22) transparent;
+}
+.detail-body::-webkit-scrollbar { width: 6px; }
+.detail-body::-webkit-scrollbar-track { background: transparent; }
+.detail-body::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255,255,255,.22); }
 .detail-body h2 { margin: 0; font-size: clamp(27px, 5vw, 43px); line-height: 1.04; letter-spacing: -.05em; }
 .detail-copy { margin: 14px 0 0; color: #dddde0; font-size: 15px; line-height: 1.55; }
 #detail-copy.is-collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
@@ -1228,13 +1260,23 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .toast-out { opacity: 0; transform: translateY(8px); transition: opacity .2s ease-in, transform .2s ease-in; }
 
 /* ── Streams list ────────────────────────────────────────── */
+/* ONE PAGE, NO PORTHOLE, NO PAGER.
+   `max-height: 250px; overflow-y: auto;` stood here and it is the whole of the
+   "only about 5 sources" complaint: the list was never paginated, all 336 rows
+   were always in the DOM, they were just being shown through a 250px window
+   inside a sheet that could not scroll. The scroll now belongs to .detail-body
+   (see the note there) and this box simply grows, so every source is reached by
+   scrolling the sheet — no pager, no "show more", nothing hidden.
+   No windowing: the rows are already all built up front (loadStreams appends
+   every one), so letting them lay out costs height, not work. 336 rows is
+   about 25,000px of ordinary flex children and it scrolls at 60fps.
+   Shared with #manga-chapters-list, which has the same dialog skeleton and the
+   same problem on a title with hundreds of chapters. */
 .detail-streams {
   margin-top: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 250px;
-  overflow-y: auto;
 }
 .stream-row {
   background: rgba(20,20,22,.6);

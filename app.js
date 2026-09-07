@@ -1008,11 +1008,34 @@ if (homeHeroMute) {
 if ($('#home-hero-play')) {
   $('#home-hero-play').addEventListener('click', () => {
     if (!homeHeroMeta) return;
-    // openDetail is synchronous and sets state.selected, which playSelected
-    // reads. Going straight to playSelected without it would find no selection
-    // and return without a word.
-    openDetail(homeHeroMeta);
-    playSelected();
+    // OPENING A TITLE NEVER STARTS THE FEATURE ANY MORE.
+    //
+    // This handler was `openDetail(homeHeroMeta); playSelected();` — the ONE
+    // path in this whole app where the detail sheet appeared and the film began
+    // on its own. It read as an autoplay rather than as a Play press because of
+    // the DELAY between the two halves: openDetail() is synchronous, so the
+    // sheet is up and its trailer is running within a frame, and only then does
+    // playSelected() await fetchFullMeta() + resolveStreams(), which takes
+    // 0.5-16s on live data (measured: tt34564059 answers 336 rows). So the
+    // viewer got a detail page, started watching the trailer, and seconds later
+    // the full-screen player dropped on top of it unasked.
+    //
+    // Markus, 7 Sep 2026: "lets also kill the auto play of movies and shows
+    // when you first click the detail page. maybe im watching the trailer and
+    // still havent decided to watch the movie yet or not but then the movie
+    // starts playing i dont like that."
+    //
+    // WHY NOT "play here, without opening the sheet", which would keep the
+    // label literal: every progress and failure line this path writes goes into
+    // the sheet — 'Checking direct streams...', the codec-ceiling sentence from
+    // describeAllRejected(), the source-page fallback — and playSelected()'s own
+    // isCurrent() cancels on `detailDialog.open` being false. Playing from a
+    // closed sheet would therefore be up to 30 seconds of silence with nowhere
+    // to say what happened, which is a worse bug than the one being fixed.
+    //
+    // So the button goes to the title with Play already focused: one more press
+    // starts it, and that press is the viewer's decision, not ours.
+    openDetail(homeHeroMeta, { focusPlay: true });
   });
 }
 if ($('#home-hero-info')) {
@@ -2989,7 +3012,16 @@ function setDetailCopy(text) {
   toggle.textContent = 'Show more';
 }
 
-function openDetail(meta) {
+/**
+ * Open the detail sheet for one title. It NEVER starts the feature.
+ *
+ * `opts.focusPlay` puts the keyboard/remote focus on the Play button once the
+ * meta has settled. That is the whole of what the home hero's Play button gets
+ * now — see the handler on #home-hero-play for why it is focus and not
+ * playback. A trailer still autoplays behind the title (startDetailTrailer),
+ * because that is the part Markus asked to keep.
+ */
+function openDetail(meta, opts) {
   if (!ratingAllowed(meta.contentRating)) return showToast('This title is not available for this profile.', 'error');
   state.selected = meta;
   $('#detail-verification')?.replaceChildren();
@@ -3053,6 +3085,10 @@ function openDetail(meta) {
   fullMeta.finally(() => {
     if (state.selected !== meta || !ratingAllowed(meta.contentRating)) return;
     detailPlay.disabled = false;
+    // AFTER the line above, never before it: openDetail() disables Play until
+    // the meta settles, and a disabled button refuses focus silently — so a
+    // focus() up in the synchronous half would look shipped and do nothing.
+    if (opts && opts.focusPlay && detailDialog.open) detailPlay.focus();
     startDetailTrailer(meta);
     if (meta.embyId) {
       $('#detail-streams').innerHTML = '';

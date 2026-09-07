@@ -73,7 +73,14 @@
 // bump an installed PWA keeps serving v29's index.html, which has no
 // #livetv-view, so the new chip would hide every view and land on a blank
 // screen — the failure arriving through the cache rather than the markup.
-const CACHE = 'blazing-shell-v32';
+// v33: the detail sheet no longer starts the film by itself (app.js) and the
+// source list is one page instead of a 250px porthole (styles.css). BOTH are
+// shell files, and the CSS half is the reason this bump is not optional: a
+// browser holding v32's styles.css would keep the `max-height: 250px` on
+// .detail-streams beside a fresh app.js, so the list would still show about
+// five sources and the fix would read as never shipped. That is the same shape
+// as the v24 note — a fix that cannot reach an installed app without a bump.
+const CACHE = 'blazing-shell-v33';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

@@ -50,7 +50,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 //
 // Raised 29 -> 30 on 7 Sep 2026 when site-source.smoke.mjs landed. Same rule:
 // this number is the real count, always.
-const MIN_SUITES = 30;
+//
+// Raised 30 -> 31 the same day when detail-autoplay.smoke.mjs landed.
+const MIN_SUITES = 31;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
