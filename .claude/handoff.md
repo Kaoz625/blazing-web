@@ -239,3 +239,53 @@ Its sentence is "no playable stream came back for this title yet", which would s
 "All 12 sources are above this screen's 1080p" and contradict it — the addon DID answer there.
 That branch reveals the link with revealSourceLink() and writes its own line. If you ever unify
 them, unify the WORDING too.
+
+## THE ONE BLOCKER, and it is NOT this change
+
+GitHub Pages (kaoz625.github.io/blazing-web) is still serving the OLD app.js. The custom domain
+IS live and verified — that deploy is by hand and it went through. Pages is gated on the 33-suite
+browser run in .github/workflows/pages.yml, and that gate was ALREADY RED BEFORE THIS COMMIT:
+
+    run 34081309393   03:56 today, commit febc0a2 (not mine)   31/32   FAIL youtube.smoke.mjs
+    run 34116558773   attempt 1, commit 8d770c9               32/33   FAIL youtube.smoke.mjs
+                      attempt 2 (rerun)                        32/33   FAIL stream-controls.smoke.mjs
+                      attempt 3 (rerun)                        32/33   FAIL youtube.smoke.mjs
+
+Every run is 32 of 33. site-source.smoke.mjs PASSED on CI on all three attempts, all 10 gates,
+3.2s. The failure is never in the code this commit touched.
+
+THE DIAGNOSIS, so nobody has to re-derive it. The repeat offender is one check:
+
+    FAIL  Keep watching survives a reload  — Trending
+
+"Trending" first means BOTH per-profile rows are missing (the healthy order, captured on a
+passing run, is: Keep watching | New from your channels | Trending | Music | Live Now). So this
+is not a slow-machine race that a longer wait fixes — I tried a 15s poll and it still failed.
+Both missing rows come from the same async chain:
+
+  - youtube.smoke.mjs's own selectProfile() clicks the tile and then waits a FIXED 1500ms. It
+    does NOT wait for `blazing-profile-selected` to dispatch. profile.js does async work before
+    dispatching, so the YouTube nav can be clicked while state.profileId is still null.
+  - mount() then runs renderHome() with profileId null. historyKey() (youtube.js:233) becomes
+    `blazing-yt-history-v1:signed-out`, which is empty, so there is no Keep watching row.
+  - loadHome()'s tail re-renders, but it early-returns on `generation !== state.generation`, and
+    the profile listener's own re-render is guarded by `if (view && !view.hidden)` — which is
+    false while the view is still closed. So the two per-profile rows can be missed with nothing
+    left to redraw them inside the test's window.
+
+Local rate, 5 consecutive runs of youtube.smoke.mjs on this Mac: 4 pass, 1 fail — and the one
+failure was a DIFFERENT family (the Follow flow: "pressing Follow flips the button — Follow /
+false", 38/42), which sits on the same profile/subs chain. So the suite is unstable in at least
+two places.
+
+IT IS ALSO A REAL USER-FACING BUG, not only a test bug: someone who picks their profile and
+clicks YouTube straight away gets no Keep watching row and no New from your channels row.
+
+WHERE TO FIX IT: youtube.js, the `blazing-profile-selected` listener (~line 845) — re-render when
+the per-profile data lands instead of only when the view happens to be open — and/or have mount()
+wait for a profileId. I did NOT touch youtube.js: it is a different feature in a different lane,
+my model of the ordering is not complete enough to be sure of a one-line fix, and guessing at it
+would risk a working feature and another full 30-minute gate cycle. youtube.js is byte-identical
+to origin.
+
+TO SHIP THE PAGES DEPLOY MEANWHILE: `gh run rerun <id> --failed` and hope, or fix the above.
