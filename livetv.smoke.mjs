@@ -85,6 +85,19 @@ await ctx.route('https://fleet.lyreosai.com/**', (route) => {
     const group = url.searchParams.get('group');
     if (q === 'cnn') return json(route, { total: 38, channels: REAL.filter((c) => /cnn/i.test(c.name)) });
     if (group === 'news') return json(route, { total: 1063, channels: REAL.filter((c) => c.group === 'news') });
+    // THE REAL INDEX, NOT A TIDY ONE. Measured on the live fleet 6 Sep 2026:
+    // 41,341 channels whose first 60 rows were placeholders to the last one.
+    // A client that reads one page and filters it finds nothing and paints an
+    // empty grid — which is exactly what Markus reported as a blank Live TV
+    // screen. So page one here is ALL junk and the real rows sit behind it.
+    const skip = Number(url.searchParams.get('skip') || 0);
+    const limit = Number(url.searchParams.get('limit') || 60);
+    if (skip === 0) {
+      const wall = Array.from({ length: limit }, (unused, i) => ({
+        ...JUNK[i % JUNK.length], id: `wall-${i}`,
+      }));
+      return json(route, { total: 38899, channels: wall });
+    }
     return json(route, { total: 38899, channels: [...JUNK, ...REAL] });
   }
   if (url.pathname.startsWith('/live/ticket/')) {
@@ -143,6 +156,12 @@ await page.waitForFunction(() => document.querySelectorAll('#livetv-results .liv
 // ── the placeholder filter ──────────────────────────────────────────────────
 const names = await page.locator('#livetv-results .livetv-card-name').allInnerTexts();
 ok(names.length === 3, 'only the real channels are drawn', `${names.length} of ${JUNK.length + REAL.length} rows`);
+ok(seen.filter((u) => u.startsWith('/live/channels')).length >= 2,
+  'AND IT READ PAST THE ALL-PLACEHOLDER FIRST PAGE instead of painting an empty grid — one page of the real index can be 60 out of 60 junk rows',
+  `${seen.filter((u) => u.startsWith('/live/channels')).length} channel requests`);
+ok(seen.some((u) => u.startsWith('/live/channels') && /skip=(?!0\b)\d+/.test(u)),
+  'the sweep advanced the cursor rather than asking for the same page again',
+  seen.filter((u) => u.startsWith('/live/channels')).join(' | ').slice(0, 120));
 ok(!names.some((n) => /NO EVENT STREAMING/i.test(n)), 'the PPV placeholders are gone');
 ok(!names.some((n) => /^#+/.test(n.trim())), 'the "##### CBS ALABAMA #####" heading rows are gone');
 ok(!names.some((n) => /^-{3}/.test(n.trim())), 'and the "--- National CBS Channels---" rules are gone');

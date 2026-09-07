@@ -56,6 +56,12 @@
   // quickly rather than hold a list the viewer is already reading.
   const FETCH_TIMEOUT_MS = 12000;
   const PAGE_SIZE = 60;
+  // 8 pages = 480 rows per press. Sized from the real index: one 500-row
+  // sample measured 470 decoration rows to 30 real ones, so a single 60-row
+  // page can very easily hold nothing worth drawing, and eight of them almost
+  // never do. It is a bound, not a target — the sweep stops the moment a page
+  // yields a real channel.
+  const MAX_SWEEP = 8;
 
   const state = {
     mounted: false,
@@ -221,7 +227,12 @@
     if (!shown) {
       status.textContent = state.query
         ? `Nothing matched “${state.query}”. Try a channel name — CNN, BBC, CBS.`
-        : 'No channels came back. Choose a profile, or try a search.';
+        : state.group
+          ? `Nothing but placeholder rows in ${state.group}. Try another group, or search by name.`
+          // NOT "choose a profile": Live TV reads the public index without one,
+          // so saying that sent a viewer who HAD chosen to go looking for a
+          // profile bug that was not there.
+          : 'No channels came back. Try a search — CNN, BBC, CBS.';
       return;
     }
     // The server's own total, filter included — never the filtered-down count.
@@ -270,6 +281,22 @@
     })).filter((g) => g.id));
   }
 
+  /**
+   * ONE PRESS KEEPS READING UNTIL IT HAS SOMETHING TO SHOW.
+   *
+   * A single page was not enough, and this is measured, not theoretical. The
+   * live index is 41,341 channels and the top of it is almost entirely
+   * decoration — "- NO EVENT STREAMING -", "##### CBS ALABAMA #####",
+   * "--- National CBS Channels---". On 6 Sep 2026 the FIRST 60 rows were
+   * placeholders to the last one, so isPlaceholder() correctly dropped all 60
+   * and Live TV painted an empty grid under the status line "No channels came
+   * back." That is what Markus saw as a blank screen: not a failed request —
+   * a request that succeeded and whose whole first page was junk.
+   *
+   * So the cursor sweeps forward until the page yields real rows, the index
+   * runs out, or MAX_SWEEP pages have been read. The bound matters: without it
+   * a group with nothing but decoration in it would walk all 41,341 rows.
+   */
   async function loadPage({ append = false } = {}) {
     if (state.loading) return;
     state.loading = true;
@@ -278,33 +305,38 @@
     if (!append && results) results.replaceChildren();
     describe();
 
-    const data = await liveFetch('/live/channels', {
-      healthy: 1,
-      limit: PAGE_SIZE,
-      skip: state.skip,
-      group: state.group,
-      q: state.query,
-    });
+    const keep = [];
+    let exhausted = false;
+    for (let sweep = 0; sweep < MAX_SWEEP; sweep += 1) {
+      const data = await liveFetch('/live/channels', {
+        healthy: 1,
+        limit: PAGE_SIZE,
+        skip: state.skip,
+        group: state.group,
+        q: state.query,
+      });
+      // A stale answer from a filter the viewer has already moved off must not
+      // paint over the one they are looking at.
+      if (generation !== state.generation) return;
 
-    // A stale answer from a filter the viewer has already moved off must not
-    // paint over the one they are looking at.
-    if (generation !== state.generation) return;
+      const rows = Array.isArray(data && data.channels) ? data.channels : [];
+      state.total = Number(data && data.total) || 0;
+      state.skip += rows.length;
+      keep.push(...rows.filter((c) => !isPlaceholder(c) && plainText(c.id)));
+      // `rows.length`, not the kept count: a page that was entirely
+      // placeholders still moved the cursor, and there is more behind it.
+      if (rows.length < PAGE_SIZE) { exhausted = true; break; }
+      if (keep.length) break;
+    }
     state.loading = false;
-
-    const rows = Array.isArray(data && data.channels) ? data.channels : [];
-    state.total = Number(data && data.total) || 0;
-    const keep = rows.filter((c) => !isPlaceholder(c) && plainText(c.id));
     state.channels = append ? state.channels.concat(keep) : keep;
-    state.skip += rows.length;
 
     if (results) {
       const frag = document.createDocumentFragment();
       for (const channel of keep) frag.appendChild(channelCard(channel));
       results.appendChild(frag);
     }
-    // `rows.length`, not `keep.length`: a page that was entirely placeholders
-    // still moved the cursor, and there is more behind it.
-    if (loadMore) loadMore.hidden = rows.length < PAGE_SIZE;
+    if (loadMore) loadMore.hidden = exhausted;
     describe();
   }
 

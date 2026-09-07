@@ -65,12 +65,15 @@
 // which has no #youtube-view in it, so the new chip would hide every view and
 // land on a blank screen — the exact failure the topnav comment warns about,
 // arriving through the cache instead of through the markup.
+// v31: Live TV now sweeps past an all-placeholder first page (livetv.js), and
+// profile.js restores the remembered viewer through selectProfile(). Both are
+// shell files, so a browser holding v30 would keep serving the broken pair.
 // v30: the Live TV destination (livetv.js, plus the nav chip and #livetv-view
 // in index.html) and the restored adult session. Same reason as v29: without a
 // bump an installed PWA keeps serving v29's index.html, which has no
 // #livetv-view, so the new chip would hide every view and land on a blank
 // screen — the failure arriving through the cache rather than the markup.
-const CACHE = 'blazing-shell-v30';
+const CACHE = 'blazing-shell-v31';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
