@@ -109,3 +109,133 @@ Baddies USA (tt39031930) returns ZERO streams from the addon while its sister ti
 A real, narrow coverage gap — not the scraper being down.
 
 STILL MISSING from DESIGN.md's eleven: Settings (a real build) and Adult (needs a gate first).
+
+---
+
+Working on: BLZ-0019's last open item — blazing-web refused to even TRY playing the two scraped
+  sites (MrWorldPremiere, BrokenSilenze), and could not find them either.
+Last action: replaced isMwp() with a SOURCE_SITES table, deleted the four dead-end branches,
+  wired the addon's search catalogs into runSearch(), plumbed stream request headers to the
+  native shells, and taught this client to read the addon's `refused` array. New suite
+  site-source.smoke.mjs (10 gates, 36 assertions); MIN_SUITES 29 -> 30; sw.js CACHE v31 -> v32.
+Next step: nothing is blocked here. The remaining site-source gaps are in OTHER repos —
+  Roku/Fire TV/tvOS/Tizen shells must now READ the `headers` field this file forwards, and
+  the Tizen avplay branch still cannot send one (see the note in openPlayer).
+  cd ~/Desktop/blazing-web && node site-source.smoke.mjs
+Key files: app.js (SOURCE_SITES + sourceSite/sourceBadge/sourceFallbackUrl/revealSourceLink/
+  showSourceFallback/describeRefused, isAdultCatalog, addonSearchCatalogs/searchSiteCatalogs,
+  streamHeaders + needsForbiddenHeader + playFailureReason, openPlayer),
+  site-source.smoke.mjs (new, 10 gates, 36 assertions), scripts/run-smokes.mjs, sw.js
+Commit: f4adcb1 (pushed to origin/main).
+Blockers: none.
+
+## THE DEAD END, and the second one behind it
+
+app.js held ONE predicate, `isMwp(meta)`, pinned to `^mwp:tv:[1-9]\d*$`, and five call sites read
+it. Four of them refused to ask the addon anything:
+
+    openDetail()    detailPlay.hidden = isMwp(meta)     — no Play button at all
+    openDetail()    the website link shown immediately, with the status line
+                    "Source page only. Open MrWorldPremiere in a web browser to watch."
+    loadStreams()   `if (isMwp(meta)) return;`          — the ONE function that asks
+                                                          /stream returned before asking
+    playSelected()  "This source page has no verified direct stream for this device yet."
+
+So the app could find Baddies USA S2E17, draw its poster, open it — and never once attempt it.
+
+THE SECOND DEAD END, found while fixing the first and measured live 7 Sep 2026:
+
+    GET fleet.lyreosai.com/search/movie?q=baddies&limit=20
+        200, 4 rows: tt42418204 tt13124274 tt43669567 tt38605926 — NO mwp row
+    GET addon.lyreosai.com/catalog/movie/mwp-search/search=baddies.json
+        200, 20 rows: mwp:tv:14995 "Baddies USA Season 2 Episode 17", …
+
+runSearch() asked the FLEET and only the fleet, and the fleet's index does not carry the scrapers'
+pages. So these titles were unreachable from this app entirely. Fixing playback alone would have
+left a door with nothing behind it.
+
+## WHAT THE BRIEF GOT WRONG, and it matters
+
+1. BrokenSilenze ships as `bs:`, TWO letters — `bs:223006`. The brief predicted `bsz:`. Writing
+   the prediction down would have shipped a site with no badge, no "BrokenSilenze source" pill and
+   no fallback link, while looking finished. Both spellings are in SOURCE_SITES now; `bsz` is a
+   documented alias.
+2. The mwp-search manifest row declares `extra: [{"name":"search","isRequired":true}]`, NOT the
+   bare `extra: ['search']` a first read suggested. The first cut of the discovery code filtered
+   the manifest through activeCatalogs(), which correctly DROPS required-extra rows (they are not
+   home shelves) — so it found zero catalogs and made no request. Green against the fixture, dead
+   against production. isAdultCatalog() is now split out and reused alone: Adult stays out of
+   search, a search-only catalog stays in. The fixture now pins the real shape.
+
+## HOW IT GENERALISES — one table row per site, not five branches
+
+    const SOURCE_SITES = { mwp: {...}, bs: {...}, bsz: {...} }
+
+plus `sourceSite(metaOrId)`, which matches the prefix loosely so `mwp:tv:14995`,
+`mwp:tv:14995:2:17` and a bare `bs:223006` all resolve. Search discovery reads the addon's own
+manifest for catalogs declaring a search extra — the live addon now declares TWO (mwp-search and
+bs-search) and the second one needed no change to this file.
+
+## HEADERS: FORWARDED, NOT DROPPED
+
+Nothing in this repo had ever read `behaviorHints.proxyHeaders.request` or a flat `referrer`.
+streamHeaders() reads both. Apple TV, Android and Roku get them (their players can set request
+headers). A BROWSER CANNOT — `Referer` and `User-Agent` are forbidden header names, so
+setRequestHeader is ignored per spec and hls.js hits the same ban. The browser therefore plays the
+url as given and REMEMBERS the requirement, so playFailureReason() names it instead of saying
+"this stream cannot play in this browser". Tizen's avplay branch cannot send one either and says
+so out loud rather than pretending.
+
+## THE `refused` ARRAY IS READ NOW
+
+The relay note on BLZ-0019 said no client read it. Live on bs:223006:
+
+    refused: [{host: 'voe.sx',      reason: 'resolver returns a jwplayer analytics pixel, not media'},
+              {host: 'vidmoly.org', reason: 'media manifest answers 403 without headers a television cannot send'}]
+
+An empty panel that says only "nothing came back" reads as our bug. It now says
+"2 hosts had it (voe.sx and vidmoly.org) — resolver returns a jwplayer analytics pixel, not media."
+
+## VERIFIED LIVE, local app.js against the REAL addon.lyreosai.com
+
+    search "baddies"      30 cards — 20 MWP-badged, 10 BS-badged   (was 0 before this change)
+    both catalogs hit     /catalog/movie/mwp-search/search=baddies.json  200
+                          /catalog/movie/bs-search/search=baddies.json   200
+    open mwp:tv:14995     /stream/movie/mwp:tv:14995.json 200 -> 2 stream rows rendered
+                          "MrWorldPremiere source" pill, Play VISIBLE, status empty,
+                          website link correctly DEMOTED (hidden) because streams exist
+    pageerrors            none
+
+Note the addon side landed in parallel today: /stream/movie/mwp:tv:14995.json answered
+`{"streams":[]}` at the start of this session and answers 2 streams now.
+
+## THE GATE
+
+    node site-source.smoke.mjs        exit 0, 10 gates, 36 assertions
+    npm test                          31/33 in one parallel run, 1710s
+    manga.smoke.mjs alone             exit 0   "all checks passed"
+    profile-restore.smoke.mjs alone   exit 0   19 passed, 0 failed
+
+The two that failed in the parallel run are the documented CDP/load flake on a
+4-core machine ("Comet did not answer CDP on 127.0.0.1:52154 within 30000ms",
+and a localStorage read that raced the profile event). Both pass alone. Do not
+chase them as regressions; re-run the suite alone first, every time.
+
+## MUTATION-CHECKED, 17 mutations, 0 survivors
+
+Every new behaviour was broken on purpose and site-source.smoke.mjs went RED for each one:
+the isMwp early-return restored; the bs row and the bsz alias deleted; search discovery put back
+through activeCatalogs; Adult no longer excluded from search; headers dropped from the shell
+payload; the fallback link never revealed; the flat `referrer` ignored; Play hidden again;
+`website` not merged from /meta; the fallback href set only in openDetail; `refused` not carried
+out of resolveStreams; describeRefused forced to ''; the refused sentence emitted with no data;
+revealSourceLink never revealing; and revealSourceLink never setting the href. All 17 red, then
+reverted.
+
+## ONE WORDING TRAP WORTH KNOWING
+
+The "every row rejected by the device probe" branch does NOT go through showSourceFallback().
+Its sentence is "no playable stream came back for this title yet", which would sit beside
+"All 12 sources are above this screen's 1080p" and contradict it — the addon DID answer there.
+That branch reveals the link with revealSourceLink() and writes its own line. If you ever unify
+them, unify the WORDING too.
