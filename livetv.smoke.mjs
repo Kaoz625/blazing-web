@@ -117,11 +117,22 @@ ok(await page.locator('.drawer-nav [data-view="livetv"]').count() === 1,
   'and in the drawer too — .topnav is display:none at 992px, so the drawer is the phone');
 
 // The gate's backdrop covers the nav until somebody says who they are, so a
-// click on a chip is intercepted rather than delivered. Pass it first — this
-// suite is about Live TV, not about the gate.
-await page.getByRole('button', { name: 'Choose Mark', exact: true }).click({ timeout: 15000 });
-await page.waitForFunction(() => document.querySelector('.bp-layer')?.hidden !== false, null, { timeout: 15000 })
-  .catch(() => {});
+// click on a chip is intercepted rather than delivered. Get past it first —
+// this suite is about Live TV, not about the gate.
+//
+// It is no longer a click. This fixture stores a remembered session (see
+// 'blazing-web-profile-session-v1' above) and a matching PIN-less profile, so
+// profile.js restores that viewer and closes the gate ITSELF; the "Choose Mark"
+// button is gone before a click could land, and waiting for it timed out. The
+// hand-pick is kept as the fallback so this suite still passes for a fixture
+// with nothing remembered. See profile-restore.smoke.mjs for the restore's own
+// checks.
+await page.waitForFunction(() => document.querySelector('.bp-layer')?.hidden !== false, null, { timeout: 20000 })
+  .catch(async () => {
+    await page.getByRole('button', { name: 'Choose Mark', exact: true }).click({ timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector('.bp-layer')?.hidden !== false, null, { timeout: 15000 })
+      .catch(() => {});
+  });
 
 await page.locator('.topnav [data-view="livetv"]').click();
 await page.waitForFunction(() => !document.getElementById('livetv-view').hidden);

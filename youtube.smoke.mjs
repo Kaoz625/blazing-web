@@ -147,9 +147,12 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)));
 
+// isVisible, NOT count. A restored browser closes the gate but leaves its
+// tiles in the DOM, so count() is still 1 and the click waits 30s for an
+// element that will never be visible again.
 const selectProfile = async (name) => {
   const tile = page.locator('.bp-profile', { hasText: name }).first();
-  if (await tile.count()) { await tile.click(); await page.waitForTimeout(1500); }
+  if (await tile.isVisible().catch(() => false)) { await tile.click(); await page.waitForTimeout(1500); }
 };
 
 await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });

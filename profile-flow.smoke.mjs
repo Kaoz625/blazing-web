@@ -329,7 +329,14 @@ try {
   await session.page.locator('.bp-profile:not(.bp-profile-add)').first().click();
   const other = await session.context.newPage();
   await other.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
-  await other.locator('.bp-profile:not(.bp-profile-add)').first().click();
+  // The first tab already chose somebody, and a second tab in the SAME context
+  // shares that storage — so this one restores that viewer and closes its gate
+  // on its own. The tile stays in the DOM but is not visible, so an
+  // unconditional click waits for an element that will never be clickable.
+  // What this scenario needs is only that both tabs are signed in before the
+  // sign-out below; how each got there does not matter.
+  const otherTile = other.locator('.bp-profile:not(.bp-profile-add)').first();
+  if (await otherTile.isVisible().catch(() => false)) await otherTile.click();
   await session.page.evaluate(() => { localStorage.setItem('profileId', 'alex'); localStorage.setItem('profileName', 'Alex'); });
   // The viewer changes back to the first tab before opening its profile menu.
   // Comet can leave the background tab's actionability checks waiting even

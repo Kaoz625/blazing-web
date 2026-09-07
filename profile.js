@@ -13,6 +13,11 @@
   // whichever answer is newer.
   const ADDON_BASE = window.BLAZING_API_BASE || 'https://addon.lyreosai.com';
   const DEVICE_STORAGE_KEY = 'blazing-web-profile-device-v1';
+  // Written by app.js's rememberProfileSession() on every selection. Read here
+  // so a returning viewer is re-selected instead of being asked who they are on
+  // every single load. Both files must agree on this key and this window.
+  const PROFILE_SESSION_KEY = 'blazing-web-profile-session-v1';
+  const PROFILE_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
   const REQUEST_TIMEOUT_MS = 15000;
   const DEVICE_VERSION = 73;
   // The OWNER pin is 7 digits; profile pins stay 4. This constant was USED in
@@ -1901,6 +1906,56 @@
     }
   }
 
+  /**
+   * Re-select the viewer this browser already chose.
+   *
+   * WHY IT HAS TO END IN selectProfile(). app.js grew its own restore that set
+   * its own state.profileId and told nobody. Measured on the live site as a
+   * returning adult viewer, 6 Sep 2026:
+   *
+   *     rows drawn                                      22
+   *     cards drawn                                   2263
+   *     BlazingStreamPreferences.current().profileId  null
+   *     BlazingStreamPreferences.query()                ""
+   *     localStorage.profileId                        null
+   *     the profile gate                              STILL OPEN
+   *
+   * A working home screen, and nothing behind it knew who was watching —
+   * because this file owns identity and every other module learns it from ONE
+   * event, which only selectProfile() sends. What that broke, all at once:
+   * streams (resolveStreams() throws 'Choose a profile first.', and the detail
+   * page reports "No compatible stream available." on a title the addon
+   * answered with 229 real sources), the audio and subtitle selects (this
+   * module mounts them, so they were never drawn and could not be clicked),
+   * books/music/podcast search (mediaRequest() needs state.activeProfile and
+   * state.credentials, so it threw 403 before sending anything), and the gate
+   * itself, which sat open on top of content.
+   *
+   * So a restore is not an assignment. It is a selection, made on the viewer's
+   * behalf, and it goes through the same door as a click.
+   */
+  function restoreRememberedProfile() {
+    if (state.activeProfile || state.busy || !state.approved) return false;
+    let stored = null;
+    try {
+      if (localStorage.getItem('blazing-signed-out-v1') === '1') return false;
+      stored = JSON.parse(localStorage.getItem(PROFILE_SESSION_KEY) || 'null');
+    } catch {
+      return false; // Storage blocked. Picking again is the correct fallback.
+    }
+    if (!stored || typeof stored !== 'object' || typeof stored.id !== 'string') return false;
+    const age = Date.now() - Number(stored.savedAt || 0);
+    if (!Number.isFinite(age) || age < 0 || age > PROFILE_SESSION_MAX_AGE_MS) return false;
+    // THE SERVER'S COPY DECIDES, never the remembered one. A profile that has
+    // since been deleted, disabled, or given a PIN must not be replayed out of
+    // localStorage — that is the one way a restore could hand somebody access
+    // the owner has already taken away.
+    const profile = state.profiles.find((entry) => entry.id === stored.id && !entry.disabled);
+    if (!profile || profile.hasPin) return false;
+    selectProfile(profile);
+    return Boolean(state.activeProfile);
+  }
+
   function selectProfile(profile) {
     if (state.busy || profile.disabled) return;
     clearUnlock();
@@ -2282,7 +2337,14 @@
   function clearActiveProfile() {
     state.activeProfile = null;
     clearUnlock();
-    for (const key of ['profileId', 'profileName']) {
+    // PROFILE_SESSION_KEY is in this list on purpose. Without it, "choose
+    // again" lasted exactly as long as the page did: the next load would
+    // restore the very viewer this call just cleared. The restore reads the
+    // SERVER's profile record, so a new PIN or a removed profile would still
+    // have been refused — but a caller that says forget this viewer has to be
+    // obeyed literally, not just until F5. A fresh selection re-remembers
+    // immediately via app.js's rememberProfileSession().
+    for (const key of ['profileId', 'profileName', PROFILE_SESSION_KEY]) {
       try { localStorage.removeItem(key); } catch { /* Storage may be blocked. */ }
     }
     document.dispatchEvent(new CustomEvent('blazing-profile-signed-out'));
@@ -2336,7 +2398,17 @@
       return;
     }
     setStatus(accessChanged ? 'Profile access changed. Choose your profile again.' : '', 'info');
-    window.setTimeout(() => ui.profiles.querySelector('.bp-profile:not(:disabled)')?.focus(), 0);
+    // DEFERRED, and that is not a style choice. connectProfiles() holds
+    // state.busy across its whole body, and applyProfileList() runs inside it,
+    // and selectProfile() opens with `if (state.busy || profile.disabled)
+    // return;`. Restoring from here directly would return silently — the fix
+    // would read as shipped and do nothing. A timeout runs after
+    // connectProfiles()'s finally has cleared busy.
+    window.setTimeout(() => {
+      // A changed cap or PIN already demands a fresh choice; do not undo that.
+      if (accessChanged || restoreRememberedProfile()) return;
+      ui.profiles.querySelector('.bp-profile:not(:disabled)')?.focus();
+    }, 0);
     // Deliberately not awaited: the rail is already usable, and this is art.
     loadProfileArt();
   }
