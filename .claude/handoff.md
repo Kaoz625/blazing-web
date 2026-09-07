@@ -289,3 +289,95 @@ would risk a working feature and another full 30-minute gate cycle. youtube.js i
 to origin.
 
 TO SHIP THE PAGES DEPLOY MEANWHILE: `gh run rerun <id> --failed` and hope, or fix the above.
+
+================================================================================
+## 7 Sep 2026 — the detail sheet no longer plays by itself, and the source list is one page
+
+Appended, not overwritten: other profiles keep notes in this file.
+
+Working on: Markus's two detail-page complaints. Both done, committed 2980439.
+Last action: 32/34 on npm test; the two failures re-run alone at exit 0.
+Next step: nothing pending on these two. If the Pages gate is still red, see the
+  youtube.js note further up this file — it is the ONLY thing between main and a
+  live GitHub Pages deploy. `cd ~/Desktop/blazing-web && node scripts/run-smokes.mjs youtube`
+Key files: app.js (#home-hero-play handler, openDetail's opts.focusPlay),
+  styles.css (.detail-body scroll, .detail-streams cap removed), sw.js (v33),
+  detail-autoplay.smoke.mjs (new), scripts/run-smokes.mjs (MIN_SUITES 31)
+Blockers: none for this work.
+
+### MEASURED FIRST, both of them
+
+    app.js, #home-hero-play handler   openDetail(meta); playSelected();
+    styles.css, .detail-streams       max-height: 250px; overflow-y: auto
+
+The autoplay was ONE call on ONE line, and it was the only path in the app where
+opening the sheet started the feature — verified by grepping every `.play()`,
+`openPlayer(`, `autoplay`, programmatic `.click()`/`dispatchEvent` and inline
+`<script>` in the repo, and by a fixture that opens a title from a card, waits 6s
+past the whole resolve+rank+trailer sequence, and finds #player still hidden.
+
+WHY IT LOOKED LIKE AN AUTOPLAY AND NOT LIKE A PLAY PRESS, which is the part worth
+keeping: openDetail() is synchronous, so the sheet and its trailer are up within a
+frame; playSelected() then awaits fetchFullMeta() + resolveStreams(), 0.5-16s on
+live data. The player therefore arrived seconds AFTER the sheet, on top of a
+trailer already running. Markus described exactly that sequence.
+
+The "about 5 sources" was NEVER a pager and never a "show more" — loadStreams()
+appends every row and always has. It was CSS. .detail-dialog and .detail-card are
+both `overflow: hidden`, so a 250px .detail-streams was the only scrollable box
+in the entire sheet. Measured, 1440x900, tt34564059 (336 streams):
+
+    rows in the DOM         336
+    scrollHeight         35,608px
+    clientHeight            250px
+    rows visible at once        2      <- the complaint
+    pager buttons               0      <- there was never one to remove
+
+### AFTER, with the REAL live 336-row answer replayed into the fixture
+
+    rows returned                     336
+    rows past the caps filter         172   (headless Comet has no Dolby/DTS)
+    visible at once, list scrolled      8   at 1440x900, 1024x768 AND 390x844
+    visible at once, sheet unscrolled   4
+    last of 336 reachable by scroll   yes
+    pager buttons                       0
+
+### DO NOT LOSE THESE THREE
+
+1. **sw.js MUST be bumped for a CSS-only fix.** styles.css is in SHELL. A browser
+   holding the old one keeps `max-height: 250px` beside a fresh app.js, so the
+   list still shows five sources and the fix reads as never shipped. v33.
+2. **`.detail-dialog` matches TWO dialogs.** #manga-chapters-dialog carries the
+   same class and comes EARLIER in index.html, so `.detail-dialog .detail-body`
+   silently selects the manga one. Scope to `#detail-dialog`. This cost a
+   confusing 0-of-336 reading in the first harness run.
+3. **A trailer element cannot be sampled, only watched.** startDetailTrailer()
+   builds its <video>, calls play(), and stopDetailTrailer() empties the host on
+   the first `error` — guaranteed in a fixture, where nothing serves decodable
+   h264. querySelector any time later counts 0 and proves nothing. The suite
+   installs a MutationObserver before the page's own scripts instead.
+
+### NOT FIXED, NOT ASKED, WORTH A DECISION
+
+`.stream-row` is a plain `<div>` with a click handler — no tabindex, no role. So
+none of the 336 sources can be reached by Tab or by a TV remote (dpad.js only
+collects `button, a[href], input, select, textarea, [tabindex]:not([-1])`). The
+one-page list therefore helps mouse and touch, and changes nothing for a remote,
+which can still only press Play. Pre-existing, and unchanged by this commit.
+It is ~6 lines to fix and it changes focus order in the app's busiest dialog, so
+it was left for Markus to call rather than folded into a public deploy.
+
+### THE GATE
+
+    node detail-autoplay.smoke.mjs      exit 0, 6 parts
+      with playSelected() restored      RED: "the home hero Play button must open
+                                        the title, NOT start the film"
+      with max-height:250px restored    RED: "the source list must not be a
+                                        fixed-height porthole"
+    npm test                            32/34 in 1941s
+    upscale.smoke.mjs alone             exit 0  "all checks passed"
+    watch-party.smoke.mjs alone         exit 0  "all checks passed"
+
+Those two are the documented CDP/load flake on this 4-core machine — see "THE
+GATE" further up this file, which says the same thing and says not to chase them.
+youtube.smoke.mjs PASSED locally in this run; its failure is CI-only.
