@@ -851,6 +851,25 @@
     state.feed = [];
     await loadSubs();
     renderSections();
+    // REDRAW WHETHER OR NOT THIS VIEW IS ON SCREEN. The old code did this
+    // inside `if (view && !view.hidden)`, which skipped exactly when the repair
+    // was needed.
+    //
+    // The sequence that broke, measured: clicking the YouTube nav calls mount()
+    // BEFORE the view is un-hidden. If the viewer picked a profile and clicked
+    // straight away, profile.js has not dispatched yet, so mount()'s
+    // renderHome() runs with state.profileId still null — historyKey() reads
+    // the `signed-out` bucket, which is empty, so there is no Keep watching
+    // row. This listener is then the ONLY thing that can fix it, and the
+    // ++state.generation above has already made the in-flight loadHome() tail
+    // early-return. Guarded by visibility, it did nothing, and both per-profile
+    // rows ("Keep watching" and "New from your channels") stayed missing.
+    //
+    // renderHome() is local and cheap (Keep watching is localStorage, and it
+    // returns immediately when its DOM is absent), so it is safe to call while
+    // hidden. loadHome() refetches the feed under the NEW generation.
+    loadHome();
+    renderHome();
     const { view } = refs();
     if (view && !view.hidden) showSection(state.section);
   });
@@ -861,6 +880,10 @@
     state.feed = [];
     ++state.generation;
     renderSections();
+    // Same rule, and here it matters more: leaving the previous person's rows
+    // on screen is the web version of the Roku's BRK-14. A hidden view that is
+    // re-shown must not still be showing who was signed in before.
+    renderHome();
     const { view } = refs();
     if (view && !view.hidden) showSection(state.section);
   });
