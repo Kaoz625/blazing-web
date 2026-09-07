@@ -100,11 +100,66 @@
   const CHANNEL_RE = /^(UC[A-Za-z0-9_-]{20,24}|@[A-Za-z0-9._-]{1,64})$/;
   const LIST_ID_RE = /^[A-Za-z0-9_-]{2,64}$/;
 
+  // The session app.js writes when somebody picks themselves. Read here, never
+  // written here — app.js's rememberProfileSession() owns the shape, and both
+  // constants are copied from it deliberately (app.js:4811-4814).
+  const PROFILE_SESSION_KEY = 'blazing-web-profile-session-v1';
+  const PROFILE_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+  /**
+   * WHO IS WATCHING, ANSWERED WITHOUT WAITING TO BE TOLD.
+   *
+   * state.profileId used to start null on every load and could ONLY be filled in
+   * by the 'blazing-profile-selected' broadcast. That made the viewer's own row
+   * depend on winning a race, and on a slow machine it lost: clicking the
+   * YouTube nav calls mount() immediately, and if it drew before profile.js had
+   * announced the restored viewer, historyKey() read the `signed-out` bucket —
+   * which is always empty — so there was no Keep watching row and no "New from
+   * your channels" row either (loadHome() skips the feed without a profile).
+   * The shelves slid up into their place and Home opened on "Trending".
+   *
+   * An event is a one-shot broadcast: a listener that is late, or a render that
+   * happens before the shout, gets nothing. It cannot be asked again. So this
+   * file now ASKS instead of only listening, which is precisely what app.js
+   * already does for Home in restoreProfileSession() — a returning viewer is
+   * IDENTIFIED by the session this browser wrote when they chose themselves.
+   *
+   * The guards below are app.js's guards and are deliberately identical, down to
+   * the order. Two files disagreeing about who is watching is a worse bug than
+   * the one this fixes.
+   */
+  function rememberedProfileId() {
+    try {
+      if (localStorage.getItem('blazing-signed-out-v1') === '1') return null;
+      if (!localStorage.getItem('blazing-household-approved')) return null;
+      const stored = JSON.parse(localStorage.getItem(PROFILE_SESSION_KEY) || 'null');
+      if (!stored || typeof stored !== 'object') return null;
+      const id = String(stored.id || '').trim();
+      if (!id) return null;
+      // A PIN IS THE ONLY THING THAT REFUSES A RESTORE. `neededPin` is true when
+      // a human actually answered a PIN for this profile, so a human answers
+      // again before that profile's history comes back on screen.
+      if (stored.neededPin === true) return null;
+      const age = Date.now() - Number(stored.savedAt || 0);
+      if (!Number.isFinite(age) || age < 0 || age > PROFILE_SESSION_MAX_AGE_MS) return null;
+      return id;
+    } catch {
+      // Storage blocked or unparseable. The signed-out bucket is the correct
+      // fallback: an empty shelf, never somebody else's.
+      return null;
+    }
+  }
+
   const state = {
     bound: false,
     loaded: false,
     loading: false,
-    profileId: null,
+    // Set when a load is asked for while one is already running. See loadHome().
+    reloadWanted: false,
+    // Seeded, not null: see rememberedProfileId() above. The broadcast still
+    // overwrites this on every switch — this is only the answer for the first
+    // render after a load, which used to be "nobody".
+    profileId: rememberedProfileId(),
     shelves: [],
     subs: [],
     feed: [],
@@ -768,9 +823,24 @@
 
   /* ── loading and mounting ───────────────────────────────────────────────── */
 
+  /** A reload that was asked for while one was already running. See loadHome(). */
+  function retryHomeIfWanted() {
+    if (!state.reloadWanted) return;
+    state.reloadWanted = false;
+    loadHome();
+  }
+
   async function loadHome() {
-    if (state.loading) return;
+    // A reload asked for while one is in flight is REMEMBERED, not dropped.
+    //
+    // Measured on a slowed fixture: a profile switch that lands mid-load bumps
+    // state.generation, which makes the in-flight run discard its answer at the
+    // two checks below — while the switch's own loadHome() had already returned
+    // here on `state.loading`. Nothing was left to fetch, so Home sat on
+    // "0 shelves" for good, and no later event ever cleared it.
+    if (state.loading) { state.reloadWanted = true; return; }
     state.loading = true;
+    state.reloadWanted = false;
     const generation = state.generation;
     setStatus('Loading YouTube…');
     // Home and the follow list in parallel. One request per shelf would be
@@ -781,7 +851,9 @@
       loadSubs(),
     ]);
     state.loading = false;
-    if (generation !== state.generation) return;
+    // Superseded. Whoever superseded it asked for a fresh load; run it now that
+    // this one has released state.loading.
+    if (generation !== state.generation) return retryHomeIfWanted();
 
     state.shelves = ((home && Array.isArray(home.shelves)) ? home.shelves : [])
       .map((shelf) => ({
@@ -796,7 +868,7 @@
     // with no follows must not pay for a request that can only answer [].
     if (state.profileId && state.subs.length) {
       const feed = await fetchJSON(`${FLEET_BASE}/youtube/feed?profile=${encodeURIComponent(state.profileId)}&per=${FEED_PER}`);
-      if (generation !== state.generation) return;
+      if (generation !== state.generation) return retryHomeIfWanted();
       state.feed = normalizeAll(feed && feed.videos);
     } else {
       state.feed = [];
@@ -804,6 +876,9 @@
 
     renderSections();
     if (state.section === 'home') renderHome();
+    // A switch that landed after the last generation check still deserves its
+    // own load rather than this one's answer.
+    retryHomeIfWanted();
   }
 
   function bindOnce() {
