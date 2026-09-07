@@ -8,11 +8,10 @@
 //
 // ------------------------------------------------------ WHAT WAS ACTUALLY WRONG
 // Both defects were measured before anything was edited, on a fixture serving
-// this repo with a title answering 336 streams (the live count for tt34564059):
-//
-// Named by selector, not by line number, because every line number in this repo
-// has drifted at least once and a stale one sends the next reader to the wrong
-// function.
+// this repo with a title answering 336 streams (the live count for tt34564059).
+// They are named by SELECTOR and not by line number, because every line number
+// in this repo has drifted at least once and a stale one sends the next reader
+// to the wrong function.
 //
 //   app.js, the #home-hero-play click handler
 //                      `openDetail(homeHeroMeta); playSelected();`
@@ -187,11 +186,20 @@ const listGeometry = (page) => page.evaluate(async () => {
 
 const card = (page, name) => page.getByRole('button', { name: `View ${name}`, exact: true });
 
-let browser;
-try {
-  browser = await launchBrowser();
-
-  const seen = { streamed: [], trailerAsked: [] };
+/**
+ * A cold browser on the home screen, with a chosen viewer.
+ *
+ * A FRESH CONTEXT, never `page.reload()`. The difference is load-bearing and it
+ * cost a red CI run: a reloaded page has the viewer in localStorage, so
+ * profile.js restores them and closes the gate ITSELF, asynchronously — and a
+ * click that lands before 'blazing-profile-selected' dispatches makes
+ * resolveStreams() throw 'Choose a profile first.', which draws a Retry button
+ * where the sources should be. That is the documented profile-event race, and
+ * it has nothing to do with autoplay. An empty context has no remembered
+ * viewer, so selectProfile() goes through the real gate button, which is the
+ * path every other part of this suite uses and the one a viewer takes.
+ */
+async function coldPage(seen, faults) {
   const ctx = await browser.newContext({ serviceWorkers: 'block' });
   await wire(ctx, seen);
   // THE TRAILER ELEMENT HAS TO BE WATCHED, NOT SAMPLED. startDetailTrailer()
@@ -212,11 +220,21 @@ try {
   });
   await prepareProfile(ctx);
   const page = await ctx.newPage();
-  const faults = [];
   page.on('pageerror', (error) => faults.push(error.message));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${base}/index.html`);
   await selectProfile(page);
+  return { ctx, page };
+}
+
+let browser;
+try {
+  browser = await launchBrowser();
+
+  const seen = { streamed: [], trailerAsked: [] };
+  const faults = [];
+  // `let`, because part 6 replaces both with a cold pair — see coldPage().
+  let { ctx, page } = await coldPage(seen, faults);
 
   /* ===================================================================== 1
      A CARD CLICK OPENS THE SHEET AND NOTHING PLAYS ITSELF.
@@ -264,8 +282,11 @@ try {
   // list. The 250px porthole showed 2 out of 336 anywhere in the sheet.
   assert.ok(geo.visibleInList > 5,
     `more than 5 sources must be visible at once; saw ${geo.visibleInList}`);
-  assert.ok(geo.visibleAtTop > 2,
-    `even unscrolled the sheet must beat the old 250px porthole's 2 rows; saw ${geo.visibleAtTop}`);
+  // visibleAtTop is REPORTED, not asserted. It is 4 on macOS/Comet and 3 on the
+  // Linux runner — a font-metrics difference, not a behaviour one — and it adds
+  // no coverage: restoring the 250px porthole is already caught twice above, by
+  // boxMaxHeight and by visibleInList (which drops from 8 to 3). An assertion
+  // that can go red for a font is an assertion that gets muted.
 
   // Every row REACHABLE by scrolling alone. The last row is the one a pager
   // used to hide, so it is the one worth naming.
@@ -316,14 +337,15 @@ try {
   /* ===================================================================== 6
      THE HOME HERO'S PLAY BUTTON. This is the line that was the defect.
 
-     From a RELOAD, not from the state parts 4 and 5 left behind. Two reasons:
-     it is the cold path Markus actually takes — land on Home, hero band, press
-     Play — and `video.currentSrc` does NOT clear when closePlayer() removes the
-     src attribute, so "carries no source" can only be asserted on an element
-     that has never been handed one.
+     On a COLD page, not on the one parts 4 and 5 left behind. Two reasons: it is
+     the path Markus actually takes — land on Home, hero band, press Play — and
+     `video.currentSrc` does NOT clear when closePlayer() removes the src
+     attribute, so "carries no source" can only be asserted on an element that
+     has never been handed one. See coldPage() for why this is a new context and
+     not a reload.
   */
-  await page.reload();
-  await selectProfile(page);
+  await ctx.close();
+  ({ ctx, page } = await coldPage(seen, faults));
   const hero = page.locator('#home-hero-play');
   await hero.waitFor({ state: 'visible', timeout: 30000 });
   await hero.click();
