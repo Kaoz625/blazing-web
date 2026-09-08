@@ -381,3 +381,56 @@ it was left for Markus to call rather than folded into a public deploy.
 Those two are the documented CDP/load flake on this 4-core machine — see "THE
 GATE" further up this file, which says the same thing and says not to chase them.
 youtube.smoke.mjs PASSED locally in this run; its failure is CI-only.
+
+---
+## 2026-09-07 23:27 — claude (Opus 5) — web book reader
+
+Working on: the web book reader. Markus: "start with the web, then appletv then
+android."
+
+Last action: committed ddb5442 locally. 35/35 smoke suites pass (924s).
+
+⚠️ COMMITTED BUT **NOT PUSHED** — 1 ahead of origin/main. main auto-deploys this
+repo publicly, so pushing needs Markus's word. Everything else in this repo is
+clean.
+
+The bug that made the feature dead: books.js matched only `/usenet/<48 hex>`
+while the server now mints `/book/ref/<48 hex>` for Anna's rows, so a live
+search for "dune" returned six openable books and the row refused all six. The
+smoke suite was green because its fixture still described the old contract.
+
+Next step: `git push` ONCE MARKUS SAYS SO. Then the Apple TV reader
+(blazing-tvos), then Fire TV.
+
+Key files: books.js, tv-book-reader.js, tv-reading-mode.js,
+book-reader.smoke.mjs, tv-comics-reader.js, manga.js
+
+Blockers: needs Markus's OK to push (public deploy).
+
+### CORRECTION, 8 Sep 2026 — that "not pushed" warning above is STALE. Do not act on it.
+
+`ddb5442` is on `origin/main`. Verified, not assumed:
+
+    git rev-list --left-right --count origin/main...HEAD   ->  0   0
+    git branch -r --contains ddb5442                       ->  origin/main
+
+The public site went live off it — the blazing-addon handoff of the same evening
+records "blazing-web ddb5442 is PUSHED. Public site is live:
+kaoz625.github.io/blazing-web". The note was written in the gap between the
+commit and the push and was never revised once the push happened.
+
+Leaving it as written costs a real session. It reads as a live blocker — an
+undeployed public change waiting on Markus — so the next profile either holds
+its own work behind an approval that was already given, or goes and asks him for
+a second time about a deploy that shipped hours ago. That is the same shape as
+the transparency-act loop in CLAUDE.md: a closed matter that a document keeps
+re-opening because nobody went back and closed it in the document.
+
+The rule this is worth writing down for: **a handoff line that names a git state
+has a shelf life of minutes.** When you write "committed but not pushed", you are
+describing a condition you intend to change. Either push before the handoff, or
+come back and amend the line. A `git rev-list --left-right --count` costs one
+second and settles it — never re-read a prose claim about git as if it were git.
+
+Web is clean and pushed. `ahead=0 behind=0`. There is no approval outstanding on
+this repo.
