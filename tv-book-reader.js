@@ -206,9 +206,28 @@
     };
   }
 
+  /** THE SLOW NOTICE SPEAKS ONLY WHILE A REQUEST IS IN FLIGHT, so the moment one
+   *  lands it has to be called off — and until 8 Sep 2026 nothing called it off.
+   *  loadPage armed a 400ms timer and every path below it returned without
+   *  clearing it, so about 400ms after a page turn that had ALREADY SUCCEEDED the
+   *  words "Turning the page…" came back and sat under a page the reader was
+   *  reading. On the fetch-failure path it was worse: the timer outlived
+   *  setStatus() and painted over a real error sentence, so "The reader could not
+   *  be reached" turned back into "Turning the page…" and the reader was told to
+   *  wait for something that had already stopped.
+   *
+   *  It also made book-reader.smoke.mjs section 4b flaky rather than failing
+   *  honestly — that assertion checks the status line is hidden after a 404
+   *  bounce, and whether it passed depended on whether the machine got there
+   *  inside 400ms. A test that fails on a slow machine and passes on a fast one
+   *  reads as noise, which is how this survived. */
+  function cancelSlowNotice() {
+    if (state.slowTimer) { clearTimeout(state.slowTimer); state.slowTimer = 0; }
+  }
+
   function cancelTimer() {
     if (state.timer) { clearTimeout(state.timer); state.timer = 0; }
-    if (state.slowTimer) { clearTimeout(state.slowTimer); state.slowTimer = 0; }
+    cancelSlowNotice();
   }
 
   function setStatus(message, retry) {
@@ -347,10 +366,14 @@
       response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
       data = await response.json().catch(() => null);
     } catch {
+      // Before the staleness guard on purpose: a superseded request must still
+      // disarm its own notice, or it fires under the newer request's page.
+      cancelSlowNotice();
       if (request !== state.request) return;
       setStatus('The reader could not be reached. Check the connection and try again.', () => loadPage(page));
       return;
     }
+    cancelSlowNotice();
     if (request !== state.request) return;
 
     // 202 — the file is real and Usenet is still pulling it. This is the ONE

@@ -57,6 +57,11 @@ import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
  *     surface. A stored choice beats the fallback in both directions, and
  *     opening on the strip writes nothing, so "has the reader chosen?" stays
  *     answerable.
+ * 11. A COLD SEARCH IS SLOWER THAN THE CLIENT USED TO WAIT. The client budget
+ *     outlives the addon's own 50s Anna's deadline; a search still running
+ *     after a few seconds SAYS so in a sentence; that sentence is replaced when
+ *     the answer lands and can never paint over a newer search; and a request
+ *     that dies still ends in words with a Try again that really searches.
  */
 import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
@@ -138,6 +143,22 @@ const ROWS = [
   },
 ];
 
+/**
+ * HOW SLOW A /search/book ANSWER IS, KEYED BY THE QUERY.
+ *
+ * A cold book search really takes 34-50s (Blazing Relay BLZ-0019), and the
+ * addon's own Anna's leg is allowed 50s of that. None of section 11 can be
+ * proved against a fixture that answers instantly, and none of it can be proved
+ * by sleeping for the real numbers either — so the DELAY is the fixture here,
+ * and it is keyed on the query so one context can hold one search back while
+ * another lands at once. That is what makes the supersede case real: a slow
+ * response and a fast one, in flight together, from the same page.
+ */
+const SEARCH_HOLD_MS = new Map();
+/** Queries whose request DIES instead of answering — a network fault, not a
+ *  slow answer. Section 11d needs the abort path to still end in words. */
+const SEARCH_DEAD = new Set();
+
 const browser = await launchBrowser();
 const errors = [];
 const seen = [];
@@ -209,8 +230,17 @@ async function openApp({ profile = { isKids: false, maxRating: 'adult' }, book, 
         pages: [{ n: requested, text: `[${chars}] ${PAGES[(requested - 1) % PAGES.length]}` }] });
     }
     if (url.includes('/search/book')) {
-      return j({ query: 'dune', count: ROWS.length, results: ROWS,
+      const q = new URL(url).searchParams.get('q') || '';
+      if (SEARCH_DEAD.has(q)) return route.abort('failed');
+      const answer = () => j({ query: q, count: ROWS.length, results: ROWS,
         sources: ["Anna's Archive", 'Usenet'], usenetEnabled: true, unavailable: null });
+      const hold = SEARCH_HOLD_MS.get(q) || 0;
+      if (!hold) return answer();
+      // A held answer can be aborted by the client before it lands — that IS
+      // the supersede case — and fulfilling an abandoned request throws. The
+      // throw is swallowed because the assertion there is that nothing appears
+      // on screen, and a fixture that fell over would hide that.
+      return new Promise((resolve) => setTimeout(resolve, hold)).then(answer).catch(() => {});
     }
     if (url.includes('/api/ui/home-config')) return j({}, 404);
     if (url.includes('/manifest.json')) return j({ catalogs: [] });
@@ -543,7 +573,29 @@ const MANGA = {
     el.focus();
     const before = el.scrollTop;
     for (let i = 0; i < 3; i++) el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
-    await new Promise((r) => setTimeout(r, 700));
+    // WAIT FOR THE GLIDE, DO NOT SLEEP A FIXED 700ms AND HOPE.
+    //
+    // This assertion failed on the FIRST run of this file and passed on every
+    // rerun — 1 of 4 on 8 Sep 2026, always run 1, reporting `0 -> 0`. That reads
+    // as "the D-pad does not scroll the strip", and it is really "the test
+    // measured before the strip moved". The strip glides rather than jumps, so
+    // the movement is driven by requestAnimationFrame; on a cold first run the
+    // chapter images are still decoding and layout is still settling, rAF is
+    // starved, and 700ms of wall clock can pass with scrollTop still at 0. The
+    // page does not repaint just because a test slept.
+    //
+    // So watch the value instead of guessing at a duration. Phase one waits for
+    // the glide to START, phase two waits for it to STOP. Both are capped, and
+    // a genuinely dead D-pad still fails: phase one runs out, phase two settles
+    // at 0, and the assertion below reports `0 -> 0` honestly.
+    for (let i = 0; i < 240 && el.scrollTop === before; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    let last = -1, stable = 0;
+    for (let i = 0; i < 240 && stable < 5; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      if (el.scrollTop === last) stable++; else { stable = 0; last = el.scrollTop; }
+    }
     return { before, after: el.scrollTop, screen: el.clientHeight, step: Math.round(el.clientHeight * 0.33) };
   });
   ok(moved.before === 0, 'the manga strip opens at the top of page one', String(moved.before));
@@ -643,6 +695,131 @@ const openMangaChapter = async (page) => {
   await page.waitForSelector('#book-reader .book-strip .comic-strip-page', { timeout: 15000 });
   is(await page.locator('#book-reader .book-strip .comic-strip-page').count(), 3,
     'a stored "strip" beats the book’s paged fallback, so a choice carries across surfaces');
+  await ctx.close();
+}
+
+/* ── 11. A COLD SEARCH IS SLOW, AND THE CLIENT HAS TO OUTLIVE IT ─────────────
+ * books.js aborted at 30s while a cold book search measures 34-50s, so EVERY
+ * first search of a title failed — and it failed as "The book search could not
+ * be reached", which reads like a broken server rather than a clock running
+ * out. The shelf looked empty for the same reason section 1 exists: the client
+ * refused an answer the server was about to give.
+ *
+ * WHAT IS NOT DRIVEN LIVE HERE, said out loud. The real ceiling is 75s, and a
+ * case that waited for it would add 75 seconds to a suite the runner executes
+ * one after another — manga.js's 90s chapter budget is not driven live for the
+ * same reason. So 11a asserts the NUMBER, against the addon's own 50s deadline
+ * that the number exists to clear, and 11d drives the abort path itself on a
+ * dead request. Between them, a ceiling that drifts back under the server's
+ * deadline goes red and a dead request that ends in a spinner goes red.
+ */
+{
+  const { ctx, page } = await openApp({ book: true });
+  await page.waitForSelector('#book-search-input', { timeout: 10000 });
+  const line = () => page.evaluate(() => document.querySelector('.book-search-status')?.textContent || '');
+  const submit = async (q) => {
+    await page.fill('#book-search-input', q);
+    await page.locator('#book-search-host form button[type="submit"]').click();
+  };
+
+  /* 11a. The budget must be longer than the server's own deadline ─────────── */
+  /**
+   * 50000 is not a guess. blazing-addon server.js:1215 gives the Anna's leg
+   * `AbortSignal.timeout(50000)`, because that leg drives Anna's own search
+   * form the way a human does; after it gives up the addon still runs a 4s
+   * Usenet health probe (blazing-addon lib/usenet-health.js:47) before it
+   * answers. A client that gives up first aborts a request that was working,
+   * and reports it as a fault of the network.
+   */
+  const timing = await page.evaluate(() => window.BlazingBooks.timing);
+  ok(timing.TIMEOUT_MS > 50000,
+    "the client outlives the addon's own 50s Anna's deadline (server.js:1215)", `${timing.TIMEOUT_MS}ms`);
+  ok(timing.TIMEOUT_MS >= 60000,
+    'and it clears the 34-50s measured cold search with room to spare', `${timing.TIMEOUT_MS}ms`);
+  ok(timing.SLOW_NOTICE_MS >= 3000 && timing.SLOW_NOTICE_MS < timing.TIMEOUT_MS / 2,
+    'the still-searching notice comes early enough to be worth saying, and long before the deadline',
+    `${timing.SLOW_NOTICE_MS}ms of ${timing.TIMEOUT_MS}ms`);
+
+  /* 11b. A slow search SAYS it is still running, then hands over ──────────── */
+  const HOLD = timing.SLOW_NOTICE_MS + 3000;
+  SEARCH_HOLD_MS.set('slowbook', HOLD);
+  await submit('slowbook');
+  await page.waitForFunction(() => /still searching/i.test(
+    document.querySelector('.book-search-status')?.textContent || ''), null, { timeout: 20000 });
+  const waiting = await line();
+  ok(/slowbook/.test(waiting), 'the still-searching line names the search it is waiting on', waiting.slice(0, 130));
+  ok(/about a minute/i.test(waiting),
+    'and it says in plain words how long a first search takes, so a slow screen is not a broken one',
+    waiting.slice(0, 130));
+  // The one thing a reader must NOT be invited to do while a cold search runs
+  // is start it again — which is exactly what a button here would ask for, and
+  // it would abort the request that was nearly finished.
+  is(await page.locator('.book-search-status button').count(), 0,
+    'it offers no button that would restart the search it is waiting on');
+  is(await page.locator('.book-row').count(), 0, 'and nothing is drawn yet, because nothing has arrived');
+
+  await page.waitForSelector('.book-row', { timeout: 20000 });
+  await page.waitForFunction(() => /can be opened/.test(
+    document.querySelector('.book-search-status')?.textContent || ''), null, { timeout: 10000 });
+  const landed = await line();
+  ok(!/still searching/i.test(landed),
+    'the still-searching line is REPLACED when the answer lands, not left sitting above the results',
+    landed.slice(0, 130));
+  is(await page.locator('.book-row').count(), 5, 'and a held answer draws every row, exactly as a fast one does');
+
+  /* 11c. A superseded slow search never paints over a newer one ───────────── */
+  /**
+   * state.request and state.controller exist for this. A reader who waits, then
+   * searches for something else, must not have the first answer land on top of
+   * the second — and the still-searching timer is a second way for that to
+   * happen, because it is armed independently of the fetch.
+   */
+  SEARCH_HOLD_MS.set('heldback', timing.SLOW_NOTICE_MS + 4000);
+  await submit('heldback');
+  await page.waitForFunction(() => {
+    const s = document.querySelector('.book-search-status')?.textContent || '';
+    return /still searching/i.test(s) && /heldback/.test(s);
+  }, null, { timeout: 20000 });
+  ok(true, 'the held search reaches its still-searching state');
+
+  await submit('dune');
+  await page.waitForFunction(() => /can be opened/.test(
+    document.querySelector('.book-search-status')?.textContent || ''), null, { timeout: 20000 });
+  const swapped = await line();
+  ok(!/heldback/.test(swapped) && !/still searching/i.test(swapped),
+    'the new search owns the status the moment it answers', swapped.slice(0, 130));
+
+  // Long enough to outlast BOTH the abandoned request's hold and a fresh notice
+  // delay measured from the fast search — so a stale timer from either search
+  // has had its chance to fire.
+  await page.waitForTimeout(timing.SLOW_NOTICE_MS + 3000);
+  const settled = await line();
+  ok(!/heldback/.test(settled),
+    'the abandoned search never comes back to paint over the newer one', settled.slice(0, 130));
+  ok(!/still searching/i.test(settled),
+    'and no notice armed by the finished search fires behind it', settled.slice(0, 130));
+  is(await page.locator('.book-row').count(), 5, 'the rows on screen are still the newer search’s own');
+
+  /* 11d. A request that dies still ends in words, and in a way forward ───── */
+  SEARCH_DEAD.add('deadend');
+  await submit('deadend');
+  await page.waitForFunction(() => /could not be reached|was stopped/i.test(
+    document.querySelector('.book-search-status')?.textContent || ''), null, { timeout: 20000 });
+  const dead = await line();
+  ok(/could not be reached|was stopped/i.test(dead),
+    'a request that dies ends in a sentence, never in a spinner that waits for ever', dead.slice(0, 130));
+  is(await page.locator('.book-search-status button').count(), 1,
+    'and in one Try again the reader can actually press');
+
+  // The message is not the point on its own — the retry has to work, or the
+  // longer timeout has simply moved a dead end further away.
+  SEARCH_DEAD.delete('deadend');
+  const tries = seen.filter((u) => u.includes('q=deadend')).length;
+  await page.locator('.book-search-status button').click();
+  await page.waitForSelector('.book-row', { timeout: 20000 });
+  ok(seen.filter((u) => u.includes('q=deadend')).length > tries,
+    'Try again really issues the search again, so the abort path is intact and not just polite',
+    `${tries} -> ${seen.filter((u) => u.includes('q=deadend')).length}`);
   await ctx.close();
 }
 
