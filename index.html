@@ -392,6 +392,13 @@
         <h1>Books &amp; Audio</h1>
         <p>Read or listen. Your place is saved for this profile on this device.</p>
       </div>
+      <!-- THE REAL BOOK SHELF, above the public-domain one. #media-library-host
+           below is Project Gutenberg (/media/books) and can only ever hold
+           public-domain titles; this host is books.js searching /search/book
+           across Anna's Archive and Usenet, and it is the one that can open a
+           book published this century. Two hosts, because media-library.js owns
+           its own with replaceChildren() and would wipe anything sharing it. -->
+      <div id="book-search-host" hidden></div>
       <div id="media-library-host"></div>
     </section>
 
@@ -542,16 +549,22 @@
       </div>
     </section>
 
-    <!-- ── Comic reader overlay ── -->
+    <!-- ── Comic reader overlay ──
+         TWO READING MODES, and the strip is a separate element rather than a
+         restyled <img>: a continuous top-to-bottom read is a SCROLLING COLUMN
+         of every page, which one image element cannot be. .comic-mode switches
+         between them and tv-reading-mode.js remembers the choice. -->
     <div id="comic-reader" class="comic-reader" role="dialog" aria-modal="true" aria-label="Comic reader" hidden>
       <div class="comic-bar">
         <span class="comic-label"></span>
         <span class="comic-counter"></span>
+        <button type="button" class="comic-mode" aria-label="Switch reading mode">Continuous scroll</button>
         <button type="button" class="comic-previous" aria-label="Previous page">Previous</button>
         <button type="button" class="comic-next" aria-label="Next page">Next</button>
         <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
       </div>
       <img class="comic-page" alt="" />
+      <div class="comic-strip" tabindex="0" role="document" aria-label="Continuous pages" hidden></div>
     </div>
 
     <!-- ── Manga View ──
@@ -594,11 +607,39 @@
       <div class="comic-bar">
         <span class="comic-label"></span>
         <span class="comic-counter"></span>
+        <!-- The webtoon read a real viewer asked for: "it makes it feel more
+             like a movie". Manga is drawn as a vertical strip far more often
+             than as facing pages, so this is where it matters most. -->
+        <button type="button" class="comic-mode" aria-label="Switch reading mode">Continuous scroll</button>
         <button type="button" class="manga-previous" aria-label="Previous page">Previous</button>
         <button type="button" class="manga-next" aria-label="Next page">Next</button>
         <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
       </div>
       <img class="comic-page" alt="" />
+      <div class="comic-strip" tabindex="0" role="document" aria-label="Continuous pages" hidden></div>
+    </div>
+
+    <!-- ── Book reader overlay ──
+         The same shape as the comic reader on purpose, because a reader is a
+         reader. The one difference is the surface: a book is TEXT, so
+         .book-page is a reflowing box whose type size the viewer picks, while
+         .book-image / .book-strip carry a fixed-layout book (a PDF) through the
+         very same page rail the comics use. See tv-book-reader.js. -->
+    <div id="book-reader" class="comic-reader book-reader" role="dialog" aria-modal="true" aria-label="Book reader" hidden>
+      <div class="comic-bar">
+        <span class="comic-label"></span>
+        <span class="comic-counter"></span>
+        <button type="button" class="book-smaller" aria-label="Smaller text">A−</button>
+        <button type="button" class="book-bigger" aria-label="Bigger text">A+</button>
+        <button type="button" class="book-mode" aria-label="Switch reading mode" hidden>Continuous scroll</button>
+        <button type="button" class="book-previous" aria-label="Previous page">Previous</button>
+        <button type="button" class="book-next" aria-label="Next page">Next</button>
+        <button type="button" class="comic-close" aria-label="Close the reader">Close</button>
+      </div>
+      <div class="book-page" tabindex="0" role="document" aria-label="Book page"></div>
+      <img class="book-image comic-page" alt="" hidden />
+      <div class="book-strip comic-strip" tabindex="0" role="document" aria-label="Continuous pages" hidden></div>
+      <p class="book-status" role="status" hidden></p>
     </div>
 
     <!-- ── Games View ──
@@ -801,7 +842,14 @@
   <script src="./telemetry.js" defer></script>
   <script src="./profile.js" defer></script>
   <script src="./emby.js" defer></script>
+  <!-- BEFORE the readers, and that order is load-bearing: tv-comics-reader.js,
+       manga.js and tv-book-reader.js all read window.BlazingReadingMode at
+       construction time to draw the right mode button. `defer` keeps these in
+       document order, so this stays true. -->
+  <script src="./tv-reading-mode.js" defer></script>
   <script src="./tv-comics-reader.js" defer></script>
+  <script src="./tv-book-reader.js" defer></script>
+  <script src="./books.js" defer></script>
   <!-- Two scripts are deliberately NOT loaded here: the ones 15b30da and f169d36
        added for the Stories, Studio and Family tabs (see delight and brightminds
        in this folder). They are the only code behind those three tabs, this app no

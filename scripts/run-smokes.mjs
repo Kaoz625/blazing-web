@@ -52,7 +52,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // this number is the real count, always.
 //
 // Raised 30 -> 31 the same day when detail-autoplay.smoke.mjs landed.
-const MIN_SUITES = 31;
+//
+// Raised 31 -> 32 when book-reader.smoke.mjs landed with the book reader and
+// the continuous top-to-bottom reading mode. Same rule: this number is the real
+// count, always.
+const MIN_SUITES = 32;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

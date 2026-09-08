@@ -1787,6 +1787,11 @@ function showRoute(route, mediaOptions = {}) {
     pauseVideo: () => { if (!player.hidden) closePlayer(); },
   });
   else window.BlazingMediaLibrary?.leave();
+  // The real book shelf sits above the public-domain one and only on the Books
+  // route. It is a SEPARATE host from #media-library-host because
+  // media-library.js owns that one with replaceChildren() and would wipe it.
+  if (route === 'books') window.BlazingBooks?.mount('books', { host: $('#book-search-host'), profile: state.mediaProfile });
+  else window.BlazingBooks?.leave();
   const roomRoute = ['anime', 'manga', 'comics', 'anime-search'].includes(route);
   $('#anime-room-header').hidden = !roomRoute;
   $('#anime-room-view').hidden = route !== 'anime' && route !== 'anime-search';

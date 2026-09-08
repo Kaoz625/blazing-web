@@ -128,6 +128,10 @@
       image: container.querySelector('.comic-page'),
       label: container.querySelector('.comic-label'),
       counter: container.querySelector('.comic-counter'),
+      strip: container.querySelector('.comic-strip'),
+      mode: container.querySelector('.comic-mode'),
+      previous: container.querySelector('.manga-previous'),
+      next: container.querySelector('.manga-next'),
     };
   }
 
@@ -454,9 +458,73 @@
     const records = history(); host.replaceChildren(...(records.length ? [historySection(records)] : []));
   }
 
+  /* ── Continuous top-to-bottom reading ───────────────────────────────────
+   * A real viewer asked for this and Markus passed it on: "he said it makes it
+   * feel more like a movie." Manga is the section where it matters most —
+   * webtoons are DRAWN as one vertical strip, and paging them cuts the artwork
+   * into arbitrary slices. Paged reading stays, because some series are drawn
+   * as pages; tv-reading-mode.js owns the choice and the eased scroller, and
+   * the choice is remembered per device. */
+  let stripRail = null;
+  // MANGA OPENS ON THE STRIP. That is the whole of what the viewer asked for,
+  // and a default is the only way to actually give it to him: with the shared
+  // paged default he opens a chapter, sees page-by-page, and has to discover a
+  // button to get the thing he requested. Comics and books call get() bare and
+  // stay paged — see tv-reading-mode.js's get() for why the difference lives
+  // here at the call and never in the store.
+  const readingMode = () => (window.BlazingReadingMode?.get('strip') === 'strip' ? 'strip' : 'paged');
+
+  function ensureStrip() {
+    const r = readerRefs();
+    if (!r || !r.strip) return null;
+    if (!stripRail) {
+      stripRail = window.BlazingReadingMode?.createStrip(r.strip, {
+        onPage: (index) => {
+          readerState.index = index;
+          if (r.counter && readerState.pages.length) r.counter.textContent = `${index + 1} / ${readerState.pages.length}`;
+          saveProgress();
+        },
+      }) || null;
+    }
+    return stripRail;
+  }
+
+  function paintReaderMode() {
+    const r = readerRefs(); if (!r) return;
+    const strip = readingMode() === 'strip';
+    if (r.mode) r.mode.textContent = strip ? 'Page by page' : 'Continuous scroll';
+    if (r.image) r.image.hidden = strip;
+    if (r.strip) r.strip.hidden = !strip;
+    // A page turn means nothing in a continuous strip.
+    if (r.previous) r.previous.hidden = strip;
+    if (r.next) r.next.hidden = strip;
+  }
+
+  function switchReaderMode() {
+    // Same fallback as readingMode(), or the first press on a reader that
+    // opened on the strip would "switch" to the strip it is already showing.
+    window.BlazingReadingMode?.toggle('strip');
+    paintReaderMode();
+    readerRender();
+    if (readingMode() === 'strip') readerRefs()?.strip?.focus();
+  }
+
   function readerRender() {
     const r = readerRefs();
-    if (!r || !r.image || !readerState.pages.length) return;
+    if (!r || !readerState.pages.length) return;
+    if (readingMode() === 'strip') {
+      const rail = ensureStrip();
+      if (!rail) return;
+      // setPages is idempotent — it compares the URLs, so a mode toggle keeps
+      // the scroll position and a new chapter with the same page count still
+      // rebuilds.
+      rail.setPages(readerState.pages, readerState.manga?.title || 'Page');
+      rail.goToPage(readerState.index);
+      if (r.counter) r.counter.textContent = `${readerState.index + 1} / ${readerState.pages.length}`;
+      saveProgress();
+      return;
+    }
+    if (!r.image) return;
     const request = state.readerRequest;
     const pageIndex = readerState.index;
     r.image.onload = () => { if (request === state.readerRequest && pageIndex === readerState.index) saveProgress(); };
@@ -480,6 +548,7 @@
   function readerFail(message) {
     const r = readerRefs();
     readerState.pages = [];
+    stripRail?.clear();
     if (r && r.image) r.image.removeAttribute('src');
     if (r && r.label) r.label.textContent = message;
     if (r && r.counter) r.counter.textContent = '';
@@ -491,6 +560,7 @@
     if (!r) return;
     r.container.hidden = true;
     document.body.classList.remove('no-scroll');
+    stripRail?.clear();
     if (r.image) { r.image.onload = null; r.image.onerror = null; r.image.removeAttribute('src'); }
     if (restoreFocus && allowed()) {
       const dialog = refs().dialog;
@@ -521,7 +591,9 @@
     readerState.pages = [];
     readerState.index = 0;
     readerState.manga = manga; readerState.chapter = chapter;
+    stripRail?.clear();
     r.image.removeAttribute('src');
+    paintReaderMode();
     r.container.querySelector('.comic-close')?.focus();
 
     const data = await fetchJSON(`${FLEET_BASE}/manga/chapter/${encodeURIComponent(chapter.id)}/pages`);
@@ -543,23 +615,41 @@
   }
 
   function bindReaderKeys() {
-    window.addEventListener('keydown', (event) => {
+    const handler = (event) => {
       const r = readerRefs();
       if (!r || r.container.hidden) return;
+      if (event.blazingMangaHandled) return;
       const key = event.key;
+      const strip = readingMode() === 'strip';
       if (key === 'Tab') {
-        const buttons = [...r.container.querySelectorAll('button:not(:disabled)')];
+        const buttons = [...r.container.querySelectorAll('button:not(:disabled):not([hidden])')];
         const index = buttons.indexOf(document.activeElement);
         const next = index + (event.shiftKey ? -1 : 1);
         buttons[(next + buttons.length) % buttons.length]?.focus();
-        event.preventDefault(); return;
+      } else if (key === 'Escape' || key === 'Backspace') {
+        closeReader({ restoreFocus: true });
+      } else if (strip && (key === 'PageDown' || key === 'PageUp')) {
+        stripRail?.leap(key === 'PageUp' ? -1 : 1);
+      } else if (strip && ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(key)) {
+        stripRail?.nudge(key === 'ArrowUp' || key === 'ArrowLeft' ? -1 : 1);
+      } else if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') {
+        readerGo(1);
+      } else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') {
+        readerGo(-1);
+      } else {
+        return;
       }
-      if (key === 'ArrowRight' || key === 'PageDown' || key === 'ArrowDown') readerGo(1);
-      else if (key === 'ArrowLeft' || key === 'PageUp' || key === 'ArrowUp') readerGo(-1);
-      else if (key === 'Escape' || key === 'Backspace') closeReader({ restoreFocus: true });
-      else return;
+      event.blazingMangaHandled = true;
       event.preventDefault();
-    });
+      event.stopPropagation();
+    };
+    // On the CONTAINER first, because dpad.js listens on `document` and drags
+    // focus to the nearest button on every arrow key. Bubbling reaches the
+    // container before the document, so the reader wins whenever focus is
+    // inside it — which is where the reader puts it. The window listener is
+    // the fallback for focus that escaped, guarded so no key counts twice.
+    document.getElementById('manga-reader')?.addEventListener('keydown', handler);
+    window.addEventListener('keydown', handler);
   }
 
   // ---- wiring -------------------------------------------------------------
@@ -582,6 +672,8 @@
       if (close) close.addEventListener('click', () => closeReader({ restoreFocus: true }));
       reader.querySelector('.manga-previous')?.addEventListener('click', () => readerGo(-1));
       reader.querySelector('.manga-next')?.addEventListener('click', () => readerGo(1));
+      reader.querySelector('.comic-mode')?.addEventListener('click', switchReaderMode);
+      paintReaderMode();
     }
     bindReaderKeys();
   }

@@ -1139,7 +1139,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .stream-check-coverage { display: flex; flex-wrap: wrap; gap: 8px; }
 .stream-check-coverage span { border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 6px 9px; font-size: 12px; color: var(--muted); }
 .stream-sample-proof { margin: 8px 0 0; color: #c9d8c6; font-size: 12px; line-height: 1.5; }
-#media-view > .page-heading, #media-library-host { width: 100%; max-width: 1320px; margin-left: auto; margin-right: auto; padding-left: clamp(20px, 4vw, 48px); padding-right: clamp(20px, 4vw, 48px); }
+/* #book-search-host BELONGS IN THIS RULE, not beside it. It is the third child
+   of #media-view and it was left out, so while the heading above it and the
+   public-domain shelf below it were both centred in a 1320px column with a
+   gutter, the real book search ran the FULL WIDTH OF THE SCREEN starting at
+   x=0 — outside the page's own margin, and on a television outside the
+   title-safe area, where a TV overscans the first rows clean off the edge.
+   Measured at 1920×1080: heading at x=340, every book row at x=0. */
+#media-view > .page-heading, #book-search-host, #media-library-host { width: 100%; max-width: 1320px; margin-left: auto; margin-right: auto; padding-left: clamp(20px, 4vw, 48px); padding-right: clamp(20px, 4vw, 48px); }
 .media-library-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
 .media-library button, .media-audio-player button, .media-book-reader button { min-height: 44px; padding: 10px 16px; border: 1px solid #424246; border-radius: 10px; background: #19191c; color: #f3f3f5; font: inherit; cursor: pointer; }
 .media-library-tabs button[aria-current="page"] { color: #111; background: #f4f4f5; border-color: #f4f4f5; }
@@ -1535,6 +1542,117 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .comic-close:focus-visible { outline: 3px solid var(--accent, #FF3D47); }
 .comic-page { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
+
+/* ── Continuous top-to-bottom reading (the long-strip / webtoon mode) ───────
+   Every page of the chapter in ONE scrolling column. The images are full
+   width up to a comfortable measure and centred, so a phone gets edge to edge
+   and a 4K television does not stretch a 900px scan across two metres.
+
+   `scroll-behavior` IS DELIBERATELY `auto` HERE. tv-reading-mode.js drives the
+   scroll itself, a frame at a time, so that a D-pad press eases instead of
+   jumping. The browser's own smooth scrolling would be a SECOND thing setting
+   scrollTop on the same element and the two chase each other into a stutter.
+   There is exactly one scroller and it is the rAF loop. */
+.comic-strip {
+  flex: 1; min-height: 0; width: 100%;
+  overflow-y: auto; overflow-x: hidden;
+  scroll-behavior: auto;
+  background: #000;
+  /* Momentum scrolling on a touch device still works; the D-pad path is the
+     rAF loop and the two never run at once. */
+  -webkit-overflow-scrolling: touch;
+}
+.comic-strip:focus-visible { outline: 3px solid var(--accent, #FF3D47); outline-offset: -3px; }
+.comic-strip-page {
+  display: block; width: 100%; max-width: 1100px; height: auto;
+  margin: 0 auto; background: #0a0a0b;
+  /* The reserved box for a page that has not arrived yet. Without it a column
+     of lazy images is zero pixels tall and there is nothing to scroll. */
+  aspect-ratio: 3 / 4;
+}
+.comic-strip-page.is-loaded { aspect-ratio: auto; }
+/* A page turn is meaningless in a strip and a mode button is meaningless in a
+   text book, so both are hidden outright rather than disabled. An overlay that
+   sets display on its children must not out-argue that. */
+.comic-reader [hidden] { display: none !important; }
+
+/* ── Book reader ───────────────────────────────────────────────────────────
+   A book is TEXT, so the surface is a reflowing box and not an image. Three
+   numbers do the work and all three are ten-foot numbers:
+
+   --book-text-size  is set by tv-book-reader.js from the viewer's own choice,
+                     22px to 52px, and the SAME choice decides how many
+                     characters the server puts on a page. Bigger type really
+                     does mean fewer words, not an overflowing box.
+   46ch              a comfortable measure — roughly 55 to 60 real characters,
+                     the width a book is set to. Prose run across a whole 4K
+                     screen is unreadable at ANY size, because the eye loses the
+                     line coming back. It is in `ch` on purpose: the measure is
+                     counted in characters, so it grows with the type and stays
+                     right at every one of the five sizes.
+   1.7               line height. Generous, because a television is read at
+                     three metres and by people who are not leaning in. */
+.book-reader { background: #14120f; }
+.book-page {
+  flex: 1; min-height: 0; overflow-y: auto;
+  width: 100%;
+  /* content-box, against the sheet's global `* { box-sizing: border-box }`.
+     The measure is the TEXT width; with border-box the padding would eat into
+     46ch and the line would come out short by a third at the large sizes. */
+  box-sizing: content-box;
+  max-width: 46ch;
+  margin: 0 auto;
+  padding: clamp(18px, 4vh, 56px) clamp(18px, 4vw, 64px);
+  color: #ece6da;
+  font-size: var(--book-text-size, 34px);
+  line-height: 1.7;
+  letter-spacing: 0.005em;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  text-align: left;
+}
+.book-page:focus-visible { outline: 3px solid var(--accent, #FF3D47); outline-offset: -3px; }
+.book-reader .comic-bar { background: rgba(0, 0, 0, 0.9); }
+.book-status {
+  margin: 0; padding: 14px 18px 20px; text-align: center;
+  color: #f4efe6; font-size: 17px; display: flex; gap: 12px;
+  align-items: center; justify-content: center; flex-wrap: wrap;
+}
+.book-status[hidden] { display: none !important; }
+
+/* ── The books row (Books & Audio) ─────────────────────────────────────────
+   One row per result. A row that cannot be opened carries a SENTENCE where the
+   Read button would be — never a disabled button, which reads as "try again"
+   and answers nothing. */
+.book-search { margin: 0 0 34px; }
+/* NOT .row-title: that carries `margin-left: var(--gutter)` for the poster
+   rails and would indent this heading past the search box under it. */
+.book-search-title { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+.book-search-blurb { margin: 6px 0 16px; color: var(--muted, rgba(255,255,255,.72)); max-width: 62ch; }
+.book-search-status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-height: 24px; }
+.book-results { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.book-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: var(--surface, #171719); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px; padding: 14px 16px;
+}
+.book-row-head { flex: 1; min-width: 240px; }
+.book-row-title { display: block; line-height: 1.4; overflow-wrap: anywhere; }
+.book-row-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.book-chip {
+  font-size: 12px; line-height: 1.6; padding: 2px 9px; border-radius: 999px;
+  background: rgba(255,255,255,.09); color: rgba(255,255,255,.82);
+}
+.book-row-why { margin: 0; flex: 1 1 260px; color: rgba(255,255,255,.68); font-size: 14px; line-height: 1.5; }
+.book-open { flex-shrink: 0; min-height: 44px; }
+.book-open:focus-visible, .book-reader button:focus-visible, .comic-reader .comic-mode:focus-visible {
+  outline: 3px solid var(--accent, #FF3D47); outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .book-row { align-items: flex-start; }
+  .book-open { width: 100%; }
+}
 
 /* ── Game screenshots (Games / FLT-2) ────────────────────── */
 .game-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }

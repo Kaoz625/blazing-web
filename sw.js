@@ -80,7 +80,16 @@
 // .detail-streams beside a fresh app.js, so the list would still show about
 // five sources and the fix would read as never shipped. That is the same shape
 // as the v24 note — a fix that cannot reach an installed app without a bump.
-const CACHE = 'blazing-shell-v33';
+// v34: the book reader (tv-book-reader.js), the real books row (books.js) and
+// continuous top-to-bottom reading (tv-reading-mode.js), plus the #book-reader
+// overlay, the .comic-strip elements and the mode buttons in index.html and
+// their styles. THREE OF THEM ARE NEW FILES, which is the same trap as v22's
+// caps.js: an installed PWA holding v33 has no entry for them at all, so a
+// fresh index.html would address #book-reader, .comic-strip and .comic-mode
+// against a page whose scripts never define window.BlazingBookReader or
+// window.BlazingReadingMode. Every Read button and every mode switch would be
+// inert, and the whole feature would read as never shipped.
+const CACHE = 'blazing-shell-v34';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -111,6 +120,14 @@ const SHELL = [
   './manga.js',
   './anime-room.js',
   './tv-comics-reader.js',
+  // The book reader and the continuous top-to-bottom mode. NEW FILES, so an
+  // installed PWA holding the previous shell has no entry for them at all: it
+  // would get the new index.html, address #book-reader and .comic-strip, and
+  // find window.BlazingBookReader and window.BlazingReadingMode undefined —
+  // the exact shape of the v22 caps.js bug noted above.
+  './tv-reading-mode.js',
+  './tv-book-reader.js',
+  './books.js',
   './watch-party.js',
   './locker.js',
   './manifest.webmanifest',

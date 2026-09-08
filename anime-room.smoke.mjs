@@ -25,6 +25,23 @@ const report = [];
 function check(name, pass, detail = '') { report.push({ name, pass, detail }); if (!pass) ++failures; console.log(`${pass ? 'PASS' : 'FAIL'} ${name} ${detail}`); }
 const browser = await launchBrowser({ timeoutMs: Number(process.env.ANIME_BROWSER_TIMEOUT_MS || 120000) });
 const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' });
+/**
+ * PAGED, SAID OUT LOUD, because manga no longer opens that way.
+ *
+ * The manga reader now opens on the CONTINUOUS STRIP when the viewer has
+ * chosen nothing — a deliberate product change, and the right one: a webtoon
+ * is drawn as one vertical strip. But a strip has no page turns, so
+ * paintReaderMode() HIDES the Previous and Next buttons, and the "Next page"
+ * click below waited 30s for a button that is correctly not there.
+ *
+ * This suite is about the paged reader and the reading position it saves after
+ * a page image loads, which is still a real mode a viewer can pick. So it asks
+ * for paged instead of relying on a default that has moved underneath it. The
+ * strip is covered where it belongs, in book-reader.smoke.mjs sections 8-10.
+ */
+await ctx.addInitScript(() => {
+  try { localStorage.setItem('blazing-reading-mode-v1', 'paged'); } catch { /* a private store is not this suite's subject */ }
+});
 const calls = [];
 let comicOutage = false;
 let catalogMode = 'normal';

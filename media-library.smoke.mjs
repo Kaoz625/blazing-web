@@ -100,7 +100,14 @@ try {
     await selected.click();
     return before;
   }
-  const room=()=>page.locator('#media-view');
+  // #media-library-host, NOT #media-view. This suite is about the public-domain
+  // shelf, and #media-view now also holds #book-search-host — the real book
+  // search from books.js, which has its own searchbox and its own Search
+  // button. Scoped at #media-view, every getByRole here matched two elements
+  // and Playwright refused them all. Scoping to the host this module actually
+  // draws into is what the queries always meant, and it loses nothing:
+  // #media-view holds only the page heading and those two hosts.
+  const room=()=>page.locator('#media-library-host');
   const tab=kind=>room().getByRole('navigation',{name:'Books and audio'}).getByRole('button',{name:kind,exact:true});
   const audio=()=>page.locator('#media-player-host audio');
   const shot=async(name)=>{const path=join(output,name+'.png');await page.screenshot({path,fullPage:false});evidence.screenshots.push(path);};
@@ -191,7 +198,11 @@ try {
   const readable=await reader.evaluate(node=>({height:node.clientHeight,width:node.clientWidth,scroll:node.scrollHeight}));
   check(readable.height>160&&readable.width>250&&readable.scroll>readable.height,'phone book has a usable scrolling text area');await page.keyboard.press('Escape');
   holdBook=true;await room().getByRole('button',{name:'Read Field notes',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.media-library-status')?.textContent.includes('Opening book'));
+  // Scoped to the host for the same reason room() is: books.js reuses the
+  // .media-library-status class for its own status line and sits ABOVE this
+  // shelf in the DOM, so a bare document.querySelector now returns the wrong
+  // one — a status that will never say "Opening book", and a 45s timeout.
+  await page.waitForFunction(()=>document.querySelector('#media-library-host .media-library-status')?.textContent.includes('Opening book'));
   const heldUntil=Date.now()+15000;
   while(!releaseBook&&Date.now()<heldUntil)await new Promise(resolve=>setTimeout(resolve,20));
   assert.ok(releaseBook,'reader fixture request arrived within its deadline');

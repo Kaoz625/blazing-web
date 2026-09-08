@@ -66,8 +66,20 @@ const PAGE_IMAGE = await readFile(join(ROOT, 'icon-192.png'));
 const browser = await launchBrowser();
 const readerOnly = process.env.MANGA_SMOKE_CASE === 'reader';
 
-async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, pagesBody = { pages: { list: PAGES.pages, error: '' } }, onCall } = {}) {
+async function openApp({ profile = { isKids: false, maxRating: 'adult' }, chaptersBody = CHAPTERS_OBJECT_SHAPE, pagesBody = { pages: { list: PAGES.pages, error: '' } }, onCall, readingMode = 'paged' } = {}) {
   const ctx = await browser.newContext();
+  // MANGA NOW OPENS ON THE CONTINUOUS STRIP when the reader has chosen nothing:
+  // manga.js's readingMode() passes 'strip' as get()'s fallback, because that is
+  // the read the viewer actually asked for. Every paged assertion below must
+  // therefore ASK for paged instead of inheriting it — and seeding the stored
+  // choice proves the half of the contract that matters most, that a stored
+  // value beats the surface's fallback. The unseeded default cases live in
+  // book-reader.smoke.mjs, which owns tv-reading-mode.js.
+  if (readingMode) {
+    await ctx.addInitScript((mode) => {
+      try { localStorage.setItem('blazing-reading-mode-v1', mode); } catch { /* a private store is not a choice */ }
+    }, readingMode);
+  }
   const calls = [];
   await ctx.route('https://fleet.lyreosai.com/**', (route) => {
     const url = route.request().url();
