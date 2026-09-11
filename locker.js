@@ -29,6 +29,24 @@
   const REFRESH_MIN_GAP_MS = 20000; // A tab flicked back and forth must not hammer the fleet.
   const MAX_FILES = 200;
 
+  /* THE SAME PREDICATE AS media-library.js:8-9 AND books.js:89-90, character for
+     character, and that is the point of it.
+
+     This shelf used to gate on `isKids` alone. The Roku gates the same shelf on
+     `mangaAllowedNow()` — NOT a kid AND the rating cap reaches mature
+     (components/MainScene.brs:1515-1523 in the roku channels repo). Those two
+     are not the same test, so a Teen profile that is not a kids profile was
+     REFUSED this shelf on the television and SHOWN it in the browser. These are
+     Markus's own uploads and they carry no content rating at all, so the
+     browser was the permissive one on the un-rated content.
+
+     Two sibling files on this client already had the correct test. Copying it
+     rather than writing a third variant is deliberate: three spellings of one
+     rule is how the drift happened. If this rule ever changes, it changes in
+     all three. */
+  const profileAllowed = (profile) => typeof profile?.id === 'string' && Boolean(profile.id)
+    && profile.isKids !== true && ['mature', 'adult'].includes(profile.effectiveMaxRating || profile.maxRating);
+
   const state = {
     credentials: null,
     section: null,
@@ -40,9 +58,10 @@
     resolving: false,
     hidden: false, // set once the server says no; nothing is retried after that.
     // Nobody is watching yet until profile.js says so, and "nobody" must not
-    // default to "safe to show" — see isKidsProfile() below for why unknown
-    // starts closed rather than open.
-    isKids: true,
+    // default to "safe to show". Unknown starts CLOSED, which is why this is
+    // `allowed: false` and not `isKids: true` — the old flag could only ever
+    // ask one of the two questions the rule actually has.
+    allowed: false,
   };
 
   function element(tag, className, text) {
@@ -238,7 +257,7 @@
   }
 
   async function refresh(force = false) {
-    if (state.hidden || state.isKids || state.fetching || !state.credentials) return;
+    if (state.hidden || !state.allowed || state.fetching || !state.credentials) return;
     const now = Date.now();
     if (!force && now - state.lastFetch < REFRESH_MIN_GAP_MS) return;
     state.fetching = true;
@@ -279,15 +298,17 @@
   // It had NO profile awareness at all: gated on "is this device approved",
   // never on "which profile is watching," so anything he'd uploaded (a movie
   // rip, whatever) was one profile-switch away from a Kids profile. profile.js
-  // already fires 'blazing-profile-selected' with isKids on every switch —
-  // app.js's Emby rows already react to it; this shelf never had a listener.
+  // already fires 'blazing-profile-selected' with isKids AND maxRating on every
+  // switch — app.js's Emby rows already react to it; this shelf never had a
+  // listener. It then had one, but it read only half the payload: `isKids`,
+  // never `maxRating`, which is the drift profileAllowed() above now closes.
   function onProfileSelected(event) {
     const detail = (event && event.detail) || {};
-    state.isKids = detail.isKids === true;
-    if (state.isKids) {
-      removeSection();
-    } else {
+    state.allowed = profileAllowed(detail);
+    if (state.allowed) {
       refresh(true);
+    } else {
+      removeSection();
     }
   }
 
@@ -295,7 +316,7 @@
     state.credentials = readCredentials();
     if (!state.credentials) return; // No approved browser here: no locker, no trace of one.
     addStyle();
-    // Nothing is fetched here. state.isKids starts true (see state above), so
+    // Nothing is fetched here. state.allowed starts false (see state above), so
     // the first real fetch waits for profile.js to say who is actually
     // watching — a profile picked before this listener attaches still fires
     // the event synchronously from selectProfile()/verifyPin(), so there is
