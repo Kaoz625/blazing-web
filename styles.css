@@ -1951,10 +1951,53 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: none;
   text-align: left;
   scroll-snap-align: start;
-  transition: transform var(--transition);
+  /* Same easing and the same two properties as .card. §2.6 is one law for the
+     whole product, not one law for posters — and this row is a top-level nav
+     destination, so it is one of the most-seen rows in the app. */
+  transition: transform var(--focus-ease), opacity var(--focus-ease);
 }
-.yt-card:hover, .yt-card:focus-visible { transform: translateY(-4px); z-index: 2; }
+
+/* THE FOCUS LAW, ON THE YOUTUBE ROWS TOO — §2.6, the same three tiers and the
+   same numbers as .card above.
+   These tiles are 16:9 rather than 2:3 and they are built by youtube.js rather
+   than buildCard(), which is the whole reason they were missed: they are a
+   second card type with a second set of rules, and the first pass only brought
+   .card onto the contract. A row that lights every tile equally sits next to
+   rows that do not, and that inconsistency reads as worse than either. */
+.yt-rows:has(.yt-card:hover, .yt-card:focus-visible) .yt-card {
+  opacity: .45;
+  transform: scale(.93);
+}
+.yt-row:has(.yt-card:hover, .yt-card:focus-visible) .yt-card {
+  opacity: .65;
+}
+.yt-rows:has(.yt-card:hover, .yt-card:focus-visible) .yt-card:hover,
+.yt-rows:has(.yt-card:hover, .yt-card:focus-visible) .yt-card:focus-visible,
+.yt-card:hover, .yt-card:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+  z-index: 2;
+}
 .yt-card:active { transform: scale(.98); }
+
+/* The one accent bar, exactly as .card::after draws it: height 6, the width of
+   the artwork, solid accent. It replaces the 2px ring that used to sit on
+   .yt-thumb — §2.6's chrome list is exhaustive and ends "Nothing else. No
+   rings, no white halos", and a ring on the YouTube row is still a ring. */
+.yt-thumb::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 6px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--focus-ease);
+  pointer-events: none;
+}
+.yt-card:hover .yt-thumb::after,
+.yt-card:focus-visible .yt-thumb::after { opacity: 1; }
 .yt-thumb {
   position: relative;
   display: block;
@@ -1968,7 +2011,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .yt-card:hover .yt-thumb, .yt-card:focus-visible .yt-thumb {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent), 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
+  /* The ring that used to lead this list is gone — see .yt-thumb::after above.
+     The two lifts stay: they are depth, not chrome, and .card keeps the same
+     pair. */
+  box-shadow: 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
 }
 .yt-thumb-img { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); }
 /* Same rule as .card.no-image: a dead thumbnail has to be MARKED, because an
