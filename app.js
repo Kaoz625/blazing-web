@@ -1133,7 +1133,13 @@ function closeDrawer() {
 }
 
 function updateNavigation(route) {
-  $$('[data-view]').forEach((button) => {
+  // `button[data-view]` for the reason spelled out above the click binding at
+  // the foot of this file: profile.js puts `data-view` on its own overlay
+  // section. Unscoped, this loop toggled `.active` on it — and `.bp-layer.active`
+  // is profile.js's own "the gate is showing" class, so ordinary navigation
+  // could switch the profile gate on or off as a side effect. A DOM probe caught
+  // the contradiction it leaves behind: class="bp-layer active" with hidden=true.
+  $$('button[data-view]').forEach((button) => {
     const active = button.dataset.view === route || (button.dataset.view === 'anime' && ['manga', 'comics', 'anime-search'].includes(route))
       || (button.closest('.topnav') && button.dataset.view === 'books' && ['music', 'podcasts'].includes(route));
     button.classList.toggle('active', active);
@@ -5132,7 +5138,31 @@ function loadRequestsView() {
  * PROVEN to run: 7be3c51 measured the home going from 0 rows to 4 by adding it
  * back here.
  */
-$$('[data-view]').forEach((button) => {
+/* `button[data-view]`, NOT `[data-view]`, and the tag name is load-bearing.
+ *
+ * `data-view` is not this file's attribute alone. profile.js sets it on ITS OWN
+ * overlay — `ui.layer.dataset.view = view` at profile.js:1156, on the
+ * `<section class="bp-layer">` built at profile.js:2736 — purely so its CSS can
+ * key off the panel it is showing (profile.js:506-529). It is a panel state, not
+ * a destination, and 'profiles' is not a route this function has ever known.
+ *
+ * Unscoped, this loop bound a navigation handler to that section, so a click
+ * anywhere on the profile overlay ran showRoute('profiles'). showRoute hides
+ * every view it does not recognise and shows none of them, so the entire app
+ * went blank — with nothing in the console, the same silent shape as the empty
+ * home in 7be3c51.
+ *
+ * It was INTERMITTENT, which is what hid it. `$$` runs once, here, at load: the
+ * section is only bound if profile.js has already built it, so it came down to
+ * script order. Measured at roughly two failures in five, which reads as a
+ * flaky test rather than a bug in the app — stream-controls.smoke.mjs has been
+ * failing this way on both sides of an unrelated change.
+ *
+ * Every real destination in index.html is a <button> (#brand-button, the topnav
+ * and the drawer). The only non-button holder of this attribute anywhere in the
+ * app is that overlay. So the tag name is exactly the line between the two, and
+ * updateNavigation() is scoped the same way for the same reason. */
+$$('button[data-view]').forEach((button) => {
   button.addEventListener('click', () => showRoute(button.dataset.view || 'home'));
 });
 $('#menu-button').addEventListener('click', openDrawer);
