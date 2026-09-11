@@ -343,10 +343,23 @@ const readToasts = (page) => page.evaluate(() => Array.from(document.querySelect
   const { ctx, page } = await openApp({ resolveReply: { status: 404, body: { error: 'Not found' } } });
   await page.waitForSelector('.stream-row', { timeout: 8000 });
   await page.click('.stream-row');
+  // Wait for the SETTLED state — spinner down AND a message up — not merely for
+  // a message. "Finding a direct link…" is a message too, and it is the one the
+  // spinner shows while it is still turning, so waiting on text alone returned
+  // mid-flight and the next line then asserted the spinner had stopped. That is
+  // the test racing itself, and it is why this failed in CI on 11 Sep 2026 while
+  // passing everywhere else: a slow runner is simply more likely to be caught
+  // mid-flight.
+  //
+  // `.catch(() => {})` on purpose. If it never settles the checks below still
+  // run and report the REAL state, so a genuinely stuck spinner is still caught
+  // and named — which is the whole point of this case. Swallowing the timeout
+  // loses nothing and keeps the failure legible instead of a bare TimeoutError.
   await page.waitForFunction(() => {
     const m = document.querySelector('#player-msg');
-    return !m.hidden && m.textContent.trim().length > 0;
-  }, null, { timeout: 20000 });
+    const s = document.querySelector('#player-spinner');
+    return s.hidden && !m.hidden && m.textContent.trim().length > 0;
+  }, null, { timeout: 20000 }).catch(() => {});
   const state = await page.evaluate(() => ({
     msg: document.querySelector('#player-msg').textContent.trim(),
     spinning: !document.querySelector('#player-spinner').hidden,
