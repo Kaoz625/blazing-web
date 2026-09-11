@@ -55,6 +55,41 @@
   --accent-glow: rgba(255,61,71, 0.35);
   --radius: 16px;
   --transition: 300ms ease;
+  /* THE FOCUS CURVE. Roku ramps focusPercent LINEARLY over its own ~0.25s
+     animation and shapes the VALUE with an outCubic (Theme.brs
+     ThemeFocusEase: 1 - (1-f)^3). cubic-bezier(.215,.61,.355,1) is that same
+     curve, and 250ms is that same duration, so a card grows at the same rate
+     on a television and in a browser. Do not "improve" it — DESIGN-V2.md §2.6
+     says three other client builds are written against exactly this curve. */
+  --focus-ease: 250ms cubic-bezier(.215, .61, .355, 1);
+
+  /* THE TYPE LADDER — five sizes, and it is closed.
+     The Roku ships exactly five (18/22/26/40/78) forced through one
+     ThemeType() function, and this file shipped TWENTY-ONE. That is why one
+     heading role was painted 19px, 20px, 22px and 17px on four screens and
+     nothing looked like it came from the same app.
+     Two rungs are fixed by DESIGN.md:57-62, which measured the site and gives
+     the TVs a 1.6x licence: body 14 -> Roku 22, and the section heading
+     16 -> Roku 26. The rest follow that ratio. */
+  --fs-caption: 12px;   /* badges, durations, meta      -> Roku 18 */
+  --fs-body: 14px;      /* body copy, buttons, chips    -> Roku 22 */
+  --fs-title: 16px;     /* every section heading        -> Roku 26 */
+  --fs-display: 26px;   /* dialog + page titles         -> Roku 40 */
+  --fs-hero: 42px;      /* the hero title, and only it  -> Roku 78 */
+
+  /* THE WEIGHT LADDER — four, and system-ui really has these four.
+     650/750/850/900 were being synthesised by the engine rather than selected,
+     which is the exact split-rendering hazard the font-stack comment below was
+     written to prevent. DESIGN.md:57 sets headings at 600. */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* THE PILL. DESIGN.md:50 — "Buttons and chips: fully rounded". Cards, tiles
+     and panels take --radius; buttons and chips take this; avatars take 50%.
+     Those three are the whole vocabulary. There were seventeen. */
+  --radius-pill: 999px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -146,8 +181,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   flex: 0 0 auto;
   min-height: 44px;
   padding: 7px 9px;
-  font-size: 17px;
-  font-weight: 800;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
   letter-spacing: -.03em;
 }
 
@@ -156,12 +191,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   place-items: center;
   width: 27px;
   height: 27px;
-  border-radius: 9px;
+  border-radius: var(--radius);
   color: #fff;
   background: linear-gradient(145deg, var(--accent), var(--accent-strong));
   box-shadow: 0 4px 16px var(--accent-glow);
-  font-size: 15px;
-  font-weight: 900;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
 }
 
 .icon-button {
@@ -170,7 +205,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   flex: 0 0 auto;
   width: 44px;
   height: 44px;
-  border-radius: 13px;
+  border-radius: var(--radius-pill);
   transition: background var(--transition);
 }
 .icon-button:hover { background: var(--surface-focus); }
@@ -190,11 +225,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   align-items: center;
   flex: 0 0 auto;
   min-height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 9px 10px;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   transition: color var(--transition), background var(--transition);
 }
 /* Hover is a surface; ACTIVE is the accent. These shared one grey plate, which
@@ -243,14 +278,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
-.drawer-heading { display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 850; letter-spacing: -.03em; }
-.drawer-copy { margin: 13px 0 24px; color: var(--muted); font-size: 14px; }
+.drawer-heading { display: flex; align-items: center; gap: 10px; font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: -.03em; }
+.drawer-copy { margin: 13px 0 24px; color: var(--muted); font-size: var(--fs-body); }
 .drawer-nav { display: grid; gap: 6px; }
 .drawer-nav [data-discover-filters] { display: contents; }
-.drawer-nav button { padding: 13px 14px; text-align: left; font-size: 15px; }
+.drawer-nav button { padding: 13px 14px; text-align: left; font-size: var(--fs-body); }
 .drawer-nav button:hover { background: rgba(255, 61, 71, .20); color: #fff; }
 .drawer-nav button.active { background: var(--focus-fill); color: #fff; }
-.drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: 11px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
+.drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .13em; text-transform: uppercase; }
 
 /* ── Main layout ─────────────────────────────────────────── */
 /* Was min(1440px, 100%). EVERY size in DESIGN.md was measured at 1920, so a
@@ -265,17 +300,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   margin: 0 12px 32px;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.07);
-  border-radius: 24px;
-  background: linear-gradient(145deg, #18181b, #0a0a0a);
+  border-radius: var(--radius);
+  background: linear-gradient(145deg, var(--surface-soft), #0a0a0a);
   isolation: isolate;
 }
 .hero-art, .detail-art { position: absolute; inset: 0; background-position: center right; background-size: cover; background-repeat: no-repeat; opacity: .9; z-index: -1; }
 .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, rgba(10,10,10,.90), transparent 58%); }
-.hero-loading .hero-art { animation: pulse 1.4s ease-in-out infinite alternate; background: linear-gradient(110deg, #100C0E, #171013, #100C0E); background-size: 180% 100%; }
+.hero-loading .hero-art { animation: pulse 1.4s ease-in-out infinite alternate; background: linear-gradient(110deg, #100C0E, var(--surface-focus), #100C0E); background-size: 180% 100%; }
 .hero-content { display: flex; flex-direction: column; justify-content: end; min-height: inherit; width: min(560px, 100%); padding: 48px 24px 28px; }
-.eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.eyebrow { margin: 0 0 8px; color: var(--muted); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .12em; text-transform: uppercase; }
 .hero h1, .page-heading h1 { margin: 0; font-size: clamp(28px, 5vw, 52px); line-height: 1.02; letter-spacing: -.05em; }
-.hero-content > p:not(.eyebrow), .page-heading > p:not(.eyebrow) { max-width: 520px; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.hero-content > p:not(.eyebrow), .page-heading > p:not(.eyebrow) { max-width: 520px; margin: 12px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .hero-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; align-items: center; }
 
 /* ── The full-bleed home hero ─────────────────────────────────────────────
@@ -318,7 +353,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   height: min(56.25vw, 74svh, 620px);
   min-height: 320px;
   overflow: hidden;
-  background: linear-gradient(145deg, #18181b, #0a0a0a);
+  background: linear-gradient(145deg, var(--surface-soft), #0a0a0a);
   isolation: isolate;
 }
 .home-hero-media { position: absolute; inset: 0; z-index: 0; }
@@ -369,17 +404,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .home-hero-title {
   margin: 0;
   font-size: clamp(26px, 4.6vw, 54px);
-  font-weight: 900;
+  font-weight: var(--fw-bold);
   line-height: 1.02;
   letter-spacing: -.045em;
   text-shadow: 0 2px 18px rgba(0,0,0,.75);
 }
-.home-hero-meta { margin: 10px 0 0; color: var(--muted); font-size: 13px; font-weight: 750; letter-spacing: .02em; }
+.home-hero-meta { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: .02em; }
 .home-hero-synopsis {
   margin: 10px 0 0;
   max-width: 560px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   text-shadow: 0 1px 8px rgba(0,0,0,.8);
   display: -webkit-box;
@@ -388,8 +423,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   -webkit-line-clamp: 3;
 }
 .home-hero-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; align-items: center; }
-.home-hero-progress { width: min(320px, 70%); height: 4px; margin-top: 16px; border-radius: 999px; background: rgba(255,255,255,.22); overflow: hidden; }
-.home-hero-progress-fill { height: 100%; border-radius: 999px; background: var(--accent); }
+.home-hero-progress { width: min(320px, 70%); height: 4px; margin-top: 16px; border-radius: var(--radius-pill); background: rgba(255,255,255,.22); overflow: hidden; }
+.home-hero-progress-fill { height: 100%; border-radius: var(--radius-pill); background: var(--accent); }
 .home-hero-mute {
   position: absolute;
   right: 20px;
@@ -401,11 +436,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   min-height: 44px;
   padding: 10px 14px;
   border: 1px solid rgba(255,255,255,.28);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(10,10,10,.6);
   color: #fff;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
   letter-spacing: .04em;
   backdrop-filter: blur(6px);
 }
@@ -414,7 +449,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 @media (max-width: 640px) {
   .home-hero { height: min(74svh, 460px); min-height: 300px; }
   .home-hero-content { padding: 0 18px 20px; }
-  .home-hero-synopsis { -webkit-line-clamp: 2; font-size: 13px; }
+  .home-hero-synopsis { -webkit-line-clamp: 2; font-size: var(--fs-body); }
   .home-hero-mute { right: 14px; bottom: 16px; }
 }
 
@@ -434,16 +469,32 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    phone as often as from a couch. Costs two pixels on desktop. */
 .primary-button, .secondary-button, .text-link {
   min-height: 44px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   line-height: 1.2;
   text-decoration: none;
   transition: filter var(--transition), background var(--transition), box-shadow var(--transition);
 }
-.primary-button { border: 1px solid var(--accent); color: #fff; background: linear-gradient(140deg, var(--accent), var(--accent-strong)); box-shadow: 0 8px 22px var(--accent-glow); }
-.primary-button:hover { filter: brightness(1.1); box-shadow: 0 12px 28px rgba(255,61,71,.45); }
+/* WATCH NOW IS A WHITE PILL. DESIGN.md:172 — "white fill, #0A0A0B text, pill,
+   14px/600, padding 10x20". The Roku ships it exactly, as a baked pill asset
+   with a 0x0A0A0BFF label (HomeScreen.xml:352-356). This shipped as an accent
+   gradient with white text at weight 800 instead, which is why the one button
+   the eye lands on first was the one that matched the TV least.
+   The accent still belongs to focus. It is not the resting colour of the
+   primary action — §2.6 calls accent "the only focus colour in the product",
+   and a button painted accent at rest cannot then show focus in accent. */
+.primary-button {
+  border: 1px solid #fff;
+  color: #0A0A0B;
+  background: #fff;
+  padding: 10px 20px;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-semibold);
+  box-shadow: 0 8px 22px rgba(0,0,0,.35);
+}
+.primary-button:hover { background: #fff; filter: brightness(.92); box-shadow: 0 12px 28px rgba(0,0,0,.45); }
 .primary-button:disabled { cursor: wait; opacity: .55; }
 .secondary-button { border: 1px solid rgba(255,255,255,.12); color: #fff; background: rgba(28,28,31,.9); }
 .secondary-button:hover { background: var(--surface-focus); }
@@ -456,7 +507,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ── Rows / Cards ────────────────────────────────────────── */
 .rows { display: flex; flex-direction: column; gap: 29px; }
 .row[hidden] { display: none; }
-.row-title { margin: 0 0 11px var(--gutter); font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+.row-title { margin: 0 0 11px var(--gutter); font-size: var(--fs-title); font-weight: var(--fw-bold); letter-spacing: -.03em; }
 .row-track, .result-grid {
   display: flex;
   gap: 12px;
@@ -482,23 +533,95 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   box-shadow: 0 8px 22px rgba(0,0,0,.3);
   scroll-snap-align: start;
   text-align: left;
-  transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition);
+  /* opacity joins these because the focus law below ramps it, and the curve is
+     the Roku's outCubic rather than the app's generic 300ms ease — the growth
+     and the brightening have to arrive together or the card reads as two
+     separate events. */
+  transition: transform var(--focus-ease), opacity var(--focus-ease),
+              border-color var(--focus-ease), box-shadow var(--focus-ease);
 }
+/* ── THE FOCUS LAW ───────────────────────────────────────────
+   DESIGN-V2.md §2.6, "Focus — one law, one colour, everywhere". The Roku
+   implements it in Theme.brs (ThemeFocusRamp / ThemeDimFloor / ThemeFocusEase)
+   and every item component asks that one function. This is the same law.
+
+   The contract's three tiers:
+
+     | Property        | Focused | Sibling in focused row | Cold row |
+     |-----------------|---------|------------------------|----------|
+     | Artwork opacity | 1.00    | 0.65                   | 0.45     |
+     | Card scale      | 1.00    | 0.93                   | 0.93     |
+     | Accent bar      | 1.00    | 0                      | 0        |
+
+   THE ONE DELIBERATE ADAPTATION, and it is not a shortcut. On a d-pad
+   something is ALWAYS focused, so Roku can dim from a resting state of 0.45
+   and never look wrong. A browser is frequently focused on NOTHING — a page
+   just loaded, a mouse sitting still — and a literal port would leave the
+   whole app dimmed to 45% forever with nothing to un-dim it.
+
+   So the dim is conditional on engagement rather than resting: with nothing
+   engaged the grid sits at 1.00, and the instant any card takes hover or
+   keyboard focus the full three-tier ramp applies. Every value below is the
+   contract's; only the trigger differs.
+
+   This also degrades safely. An engine without :has() simply never matches the
+   two dimming rules and gets the old flat behaviour plus the accent bar —
+   never a page stuck dim.
+
+   DELETED HERE, on purpose: `box-shadow: 0 0 0 2px var(--accent)`. §2.6's
+   chrome list is exhaustive and ends "Nothing else. No rings, no white halos,
+   no lavender, no per-screen colour." That ring was the ring. The accent bar
+   below is what replaces it, and it is what the Roku actually draws. */
+
+/* Cold row — every card dims once anything is engaged. Contract: 0.45 / 0.93. */
+.rows:has(.card:hover, .card:focus-visible) .card,
+.result-grid:has(.card:hover, .card:focus-visible) .card {
+  opacity: .45;
+  transform: scale(.93);
+}
+
+/* Sibling inside the engaged row. Contract: 0.65, and it keeps the 0.93 scale. */
+.row:has(.card:hover, .card:focus-visible) .card,
+.result-grid:has(.card:hover, .card:focus-visible) .card:not(:hover):not(:focus-visible) {
+  opacity: .65;
+}
+
+/* The focused card itself. Contract: 1.00 / 1.00. Listed last so it wins. */
+.rows:has(.card:hover, .card:focus-visible) .card:hover,
+.rows:has(.card:hover, .card:focus-visible) .card:focus-visible,
 .card:hover, .card:focus-visible {
-  transform: translateY(-5px) scale(1.03);
+  opacity: 1;
+  transform: scale(1);
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent), 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
+  box-shadow: 0 20px 40px rgba(255,61,71,.28), 0 8px 22px rgba(0,0,0,.4);
   z-index: 2;
 }
+
+/* The one accent bar. §2.6: height 6, width = artwork width, solid accent.
+   The card clips its own overflow, so it sits on the bottom edge rather than
+   6px below — the same mark in the only place this box can draw it. */
+.card::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 6px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--focus-ease);
+  pointer-events: none;
+}
+.card:hover::after, .card:focus-visible::after { opacity: 1; }
 .card:active { transform: scale(.97); }
 .card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); transition: opacity var(--transition); }
 /* .seerr-art joins these: the Requests poster is a real <img> now, like every
    other card in the app, so it needs the same dead-URL mark rather than a
    private one that would drift from this. */
-.card.no-image::before, .seerr-art.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 42px; font-weight: 900; }
+.card.no-image::before, .seerr-art.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: var(--fs-hero); font-weight: var(--fw-bold); }
 .card.no-image .card-image, .seerr-art.no-image .card-image { visibility: hidden; }
-.card-label { position: absolute; right: 0; bottom: 0; left: 0; padding: 32px 10px 9px; background: linear-gradient(0deg, rgba(0,0,0,.93), rgba(0,0,0,0)); font-size: 12px; font-weight: 750; line-height: 1.25; text-shadow: 0 1px 4px #000; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.card-source { position: absolute; top: 8px; left: 8px; border-radius: 999px; padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: 10px; font-weight: 900; letter-spacing: .04em; }
+.card-label { position: absolute; right: 0; bottom: 0; left: 0; padding: 32px 10px 9px; background: linear-gradient(0deg, rgba(0,0,0,.93), rgba(0,0,0,0)); font-size: var(--fs-caption); font-weight: var(--fw-bold); line-height: 1.25; text-shadow: 0 1px 4px #000; display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.card-source { position: absolute; top: 8px; left: 8px; border-radius: var(--radius-pill); padding: 4px 7px; color: #fff; background: rgba(255,61,71,.92); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .04em; }
 .skeleton { background: linear-gradient(100deg, #100C0E 30%, #1B1417 50%, #100C0E 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite linear; box-shadow: none; pointer-events: none; }
 
 /* ── Hero-inside-the-row (DebridStream reference) ───────────
@@ -555,19 +678,19 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: opacity var(--transition), transform var(--transition);
   pointer-events: none;
 }
-.card-hero-title { margin: 0; font-size: 17px; font-weight: 850; letter-spacing: -.02em; line-height: 1.15; }
-.card-meta-line { margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+.card-hero-title { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-bold); letter-spacing: -.02em; line-height: 1.15; }
+.card-meta-line { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .01em; }
 .card-synopsis {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: var(--fs-caption);
   line-height: 1.4;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
-.card-cta { display: inline-block; margin-top: 10px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+.card-cta { display: inline-block; margin-top: 10px; color: var(--accent); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .02em; }
 
 .row-hero .row-track { align-items: flex-start; }
 .row-hero .card {
@@ -656,7 +779,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-radius: 50%;
   background: rgba(0,0,0,.7);
   color: #fff;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1;
   display: grid;
   place-items: center;
@@ -670,10 +793,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .page-heading { max-width: 760px; margin: 44px auto 24px; padding: 0 20px; }
 .page-heading h1 { font-size: clamp(30px, 6vw, 48px); }
 .search-form { display: flex; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0 20px; }
-.search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
+.search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
 .search-form input::placeholder { color: var(--quiet); }
 .search-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); }
-.search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: 14px; }
+.search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: var(--fs-body); }
 .search-results, .library-results { margin-top: 24px; }
 .result-row { margin-bottom: 29px; }
 
@@ -683,23 +806,23 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .emby-tab {
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.16);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 8px 18px;
   color: var(--muted);
   background: rgba(255,255,255,.06);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
 }
 .emby-tab:hover { background: rgba(255,255,255,.11); }
 .emby-tab[aria-selected="true"] { color: var(--text); background: var(--accent); border-color: var(--accent); }
 #emby-sort {
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.16);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 8px 12px;
   color: var(--text);
   background: var(--surface);
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 #emby-load-more { display: block; margin: 28px auto 40px; }
 
@@ -740,12 +863,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   gap: 6px;
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.16);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 7px 14px;
   color: var(--text);
   background: rgba(255,255,255,.06);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
 }
 .search-chip:hover { background: rgba(255,255,255,.11); }
 .search-view .search-status { max-width: 640px; }
@@ -765,11 +888,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   align-items: center;
   min-height: 44px;
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   color: var(--muted);
   background: transparent;
-  font-size: 13.5px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   text-align: left;
   transition: background var(--transition), color var(--transition);
 }
@@ -807,9 +930,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .roadmap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 582px)); gap: 16px; max-width: 1778px; margin: 0 auto; padding: 0 var(--gutter); justify-content: center; }
 .roadmap-grid article { min-height: 392px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
 .roadmap-grid article:hover { border-color: rgba(255,61,71,.3); box-shadow: 0 8px 24px rgba(255,61,71,.1); }
-.roadmap-grid span { color: var(--accent); font-size: 13px; font-weight: 900; letter-spacing: .12em; }
-.roadmap-grid h2 { margin: 25px 0 8px; font-size: 20px; letter-spacing: -.03em; }
-.roadmap-grid p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.roadmap-grid span { color: var(--accent); font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: .12em; }
+.roadmap-grid h2 { margin: 25px 0 8px; font-size: var(--fs-display); letter-spacing: -.03em; }
+.roadmap-grid p { margin: 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 
 /* ── Education tabs ──────────────────────────────────────── */
 .edu-tabs {
@@ -823,10 +946,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .edu-tab {
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 9px 16px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
   transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
@@ -858,12 +981,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: absolute;
   top: 8px;
   right: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   padding: 3px 7px;
   color: #fff;
   background: rgba(30, 160, 80, .92);
-  font-size: 10px;
-  font-weight: 900;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
   letter-spacing: .04em;
 }
 
@@ -875,7 +998,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   overflow: hidden;
   padding: 0;
   border: 1px solid rgba(255,255,255,.1);
-  border-radius: 24px;
+  border-radius: var(--radius);
   color: var(--text);
   background: rgba(10,10,10,0.45);
   backdrop-filter: blur(28px) saturate(170%);
@@ -927,14 +1050,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .detail-body::-webkit-scrollbar { width: 6px; }
 .detail-body::-webkit-scrollbar-track { background: transparent; }
-.detail-body::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255,255,255,.22); }
+.detail-body::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: rgba(255,255,255,.22); }
 .detail-body h2 { margin: 0; font-size: clamp(27px, 5vw, 43px); line-height: 1.04; letter-spacing: -.05em; }
-.detail-copy { margin: 14px 0 0; color: #dddde0; font-size: 15px; line-height: 1.55; }
+.detail-copy { margin: 14px 0 0; color: #dddde0; font-size: var(--fs-body); line-height: 1.55; }
 #detail-copy.is-collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.detail-copy-toggle { min-width: 88px; min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: #f1f1f3; font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.detail-copy-toggle { min-width: 88px; min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: #f1f1f3; font: inherit; font-size: var(--fs-body); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
 .detail-copy-toggle:focus-visible { outline: 2px solid var(--accent, #ff3d47); outline-offset: 3px; }
-.source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(255,61,71,.5); border-radius: 999px; padding: 5px 9px; color: #fff; background: rgba(255,61,71,.16); font-size: 11px; font-weight: 800; }
-.detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(255,61,71,.5); border-radius: var(--radius-pill); padding: 5px 9px; color: #fff; background: rgba(255,61,71,.16); font-size: var(--fs-caption); font-weight: var(--fw-bold); }
+.detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.4; }
 
 /* ── Trailer embed in detail art ─────────────────────────── */
 .detail-trailer {
@@ -966,7 +1089,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-radius: 50%;
   background: rgba(0,0,0,.7);
   color: #fff;
-  font-size: 16px;
+  font-size: var(--fs-title);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -979,12 +1102,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   height: 42px;
   min-width: 130px;
   border: 1px solid rgba(255,255,255,.18);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0 14px;
   color: #fff;
   background: rgba(28,28,31,.9);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -995,7 +1118,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: border-color var(--transition), box-shadow var(--transition);
 }
 .quality-select:hover, .quality-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); outline: none; }
-.quality-select option { background: #1c1c1f; color: #fff; }
+.quality-select option { background: var(--surface-focus); color: #fff; }
 
 /* ── Season strip and episode rail ────────────────────────
    Replaces a single <select> that held EVERY episode of EVERY season: measured
@@ -1032,12 +1155,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   flex: 0 0 auto;
   min-height: 40px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 8px 16px;
   color: var(--muted);
   background: rgba(28,28,31,.8);
-  font-size: 13px;
-  font-weight: 800;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   white-space: nowrap;
   scroll-snap-align: start;
   transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
@@ -1075,7 +1198,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   width: 190px;
   min-height: 56px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 8px 12px;
   text-align: left;
   background: rgba(28,28,31,.8);
@@ -1085,7 +1208,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .episode-chip:hover { background: var(--surface-focus); }
 .episode-chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 .episode-chip.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.episode-chip-number { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.episode-chip-number { color: var(--accent); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .04em; }
 .episode-chip-title {
   /* Two lines, then an ellipsis. A one-line clamp cuts most episode titles mid
      word; letting them run makes every card in the rail a different height. */
@@ -1094,8 +1217,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   -webkit-line-clamp: 2;
   overflow: hidden;
   color: #fff;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   line-height: 1.25;
 }
 .episode-jump { justify-self: start; max-width: 100%; }
@@ -1107,7 +1230,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .season-strip, .episode-rail { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .season-strip::-webkit-scrollbar, .episode-rail::-webkit-scrollbar { height: 6px; }
 .season-strip::-webkit-scrollbar-track, .episode-rail::-webkit-scrollbar-track { background: transparent; }
-.season-strip::-webkit-scrollbar-thumb, .episode-rail::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255,255,255,.22); }
+.season-strip::-webkit-scrollbar-thumb, .episode-rail::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: rgba(255,255,255,.22); }
 
 @media (max-width: 640px) {
   .episode-chip { width: 158px; }
@@ -1123,22 +1246,22 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ── Player ──────────────────────────────────────────────── */
 .player { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #000; }
 .player-bar { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-top)) 16px 26px; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.8), transparent); }
-.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: 14px; font-weight: 800; transition: background var(--transition); }
+.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: var(--radius-pill); padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: var(--fs-body); font-weight: var(--fw-bold); transition: background var(--transition); }
 .player-close:hover { background: rgba(255,61,71,.3); }
-.player-title { overflow: hidden; color: #fff; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
+.player-title { overflow: hidden; color: #fff; font-size: var(--fs-body); font-weight: var(--fw-bold); text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
 .player-bar { flex-wrap: wrap; }
 .stream-preferences, .stream-track-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .stream-preferences { margin: 18px 0; }
-.stream-preference-field { display: grid; gap: 6px; min-width: 145px; max-width: 100%; color: var(--muted); font-size: 13px; }
-.stream-preference-select, .stream-audio-track, .stream-subtitle-track { min-height: 44px; width: 100%; max-width: 260px; border: 1px solid rgba(255,255,255,.25); border-radius: 10px; padding: 9px 30px 9px 12px; background: #171719; color: #fff; font: inherit; }
+.stream-preference-field { display: grid; gap: 6px; min-width: 145px; max-width: 100%; color: var(--muted); font-size: var(--fs-body); }
+.stream-preference-select, .stream-audio-track, .stream-subtitle-track { min-height: 44px; width: 100%; max-width: 260px; border: 1px solid rgba(255,255,255,.25); border-radius: var(--radius); padding: 9px 30px 9px 12px; background: var(--surface-focus); color: #fff; font: inherit; }
 .stream-preference-select:focus-visible, .stream-audio-track:focus-visible, .stream-subtitle-track:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .stream-track-controls { margin-left: auto; pointer-events: auto; }
 .stream-track-controls .stream-preference-field { color: #eee; }
-.stream-track-notice, .stream-check-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
-.stream-check-status { margin: 12px 0 8px; color: var(--text); font-size: 13px; }
+.stream-track-notice, .stream-check-note { color: var(--muted); font-size: var(--fs-caption); line-height: 1.5; }
+.stream-check-status { margin: 12px 0 8px; color: var(--text); font-size: var(--fs-body); }
 .stream-check-coverage { display: flex; flex-wrap: wrap; gap: 8px; }
-.stream-check-coverage span { border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 6px 9px; font-size: 12px; color: var(--muted); }
-.stream-sample-proof { margin: 8px 0 0; color: #c9d8c6; font-size: 12px; line-height: 1.5; }
+.stream-check-coverage span { border: 1px solid rgba(255,255,255,.18); border-radius: var(--radius); padding: 6px 9px; font-size: var(--fs-caption); color: var(--muted); }
+.stream-sample-proof { margin: 8px 0 0; color: #c9d8c6; font-size: var(--fs-caption); line-height: 1.5; }
 /* #book-search-host BELONGS IN THIS RULE, not beside it. It is the third child
    of #media-view and it was left out, so while the heading above it and the
    public-domain shelf below it were both centred in a 1320px column with a
@@ -1148,26 +1271,26 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    Measured at 1920×1080: heading at x=340, every book row at x=0. */
 #media-view > .page-heading, #book-search-host, #media-library-host { width: 100%; max-width: 1320px; margin-left: auto; margin-right: auto; padding-left: clamp(20px, 4vw, 48px); padding-right: clamp(20px, 4vw, 48px); }
 .media-library-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
-.media-library button, .media-audio-player button, .media-book-reader button { min-height: 44px; padding: 10px 16px; border: 1px solid #424246; border-radius: 10px; background: #19191c; color: #f3f3f5; font: inherit; cursor: pointer; }
+.media-library button, .media-audio-player button, .media-book-reader button { min-height: 44px; padding: 10px 16px; border: 1px solid rgba(255,255,255,.14); border-radius: var(--radius); background: var(--surface-soft); color: #f3f3f5; font: inherit; cursor: pointer; }
 .media-library-tabs button[aria-current="page"] { color: #111; background: #f4f4f5; border-color: #f4f4f5; }
 .media-library-search { display: flex; align-items: end; gap: 12px; max-width: 760px; margin-bottom: 20px; }
-.media-library-search label { display: grid; flex: 1; gap: 8px; min-width: 0; color: var(--muted); font-size: 14px; }
-.media-library-search input { width: 100%; min-width: 0; min-height: 48px; padding: 12px 14px; border: 1px solid #424246; border-radius: 10px; background: #141416; color: #fff; font: inherit; }
+.media-library-search label { display: grid; flex: 1; gap: 8px; min-width: 0; color: var(--muted); font-size: var(--fs-body); }
+.media-library-search input { width: 100%; min-width: 0; min-height: 48px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: var(--radius); background: var(--surface); color: #fff; font: inherit; }
 .media-library-status { margin: 16px 0; color: var(--muted); line-height: 1.6; }
 .media-library-status button { margin-left: 12px; }
 .media-search-section { margin-top: 36px; }
-.media-search-section h2 { font-size: 22px; }
+.media-search-section h2 { font-size: var(--fs-display); }
 .media-search-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 18px; }
 .media-search-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; color: #eee; text-align: left; font: inherit; cursor: pointer; }
-.media-search-card img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px; }
-.media-search-card span { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.media-search-card img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: var(--radius); }
+.media-search-card span { font-size: var(--fs-body); line-height: 1.45; overflow-wrap: anywhere; }
 .media-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 28px 20px; align-items: start; }
 .media-library .media-library-card { display: flex; flex-direction: column; width: 100%; height: auto; min-width: 0; aspect-ratio: auto; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; box-shadow: none; overflow: visible; }
-.media-library-card .card-image { display: block; position: static; width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px; background: #202024; }
+.media-library-card .card-image { display: block; position: static; width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; border-radius: var(--radius); background: #202024; }
 .media-library-card.no-image .card-image { visibility: hidden; }
 #media-view[data-kind="music"] .card-image, #media-view[data-kind="podcasts"] .card-image { aspect-ratio: 1; }
-.media-library-card .card-label { position: static; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: auto; margin: 12px 0 0; padding: 0; background: none; font-size: 15px; font-weight: 650; line-height: 1.4; text-shadow: none; white-space: normal; overflow: hidden; }
-.media-card-creator, .media-reading-position { display: block; margin-top: 5px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.media-library-card .card-label { position: static; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: auto; margin: 12px 0 0; padding: 0; background: none; font-size: var(--fs-body); font-weight: var(--fw-semibold); line-height: 1.4; text-shadow: none; white-space: normal; overflow: hidden; }
+.media-card-creator, .media-reading-position { display: block; margin-top: 5px; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .media-reading-position { color: #dfc6ad; }
 .media-library-detail:empty { display: none; }
 .media-library-detail { margin: 24px 0 32px; padding-bottom: 24px; border-bottom: 1px solid #303034; }
@@ -1175,46 +1298,46 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .media-track-list { padding: 0; list-style: none; }
 .media-track-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #29292d; }
 .media-track-row button { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
-.media-book-reader { width: min(860px, calc(100vw - 32px)); height: 88vh; height: min(88dvh, 1100px); max-height: 1100px; margin: auto; padding: 0; border: 0; border-radius: 12px; background: #f6f0e6; color: #2e2922; }
+.media-book-reader { width: min(860px, calc(100vw - 32px)); height: 88vh; height: min(88dvh, 1100px); max-height: 1100px; margin: auto; padding: 0; border: 0; border-radius: var(--radius); background: #f6f0e6; color: #2e2922; }
 .media-book-reader[open] { display: flex; flex-direction: column; }
 .media-book-reader::backdrop { background: rgba(0,0,0,.85); }
 .media-book-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid #d5cabc; }
-.media-book-toolbar h2 { flex: 1; margin: 0; min-width: 160px; font-size: 19px; line-height: 1.3; }
+.media-book-toolbar h2 { flex: 1; margin: 0; min-width: 160px; font-size: var(--fs-title); line-height: 1.3; }
 .media-book-reader button { color: #302a22; border-color: #b9aa96; background: #f6f0e6; }
-.media-book-progress { font-size: 13px; color: #625645; }
-.media-book-text { flex: 1; min-height: 0; padding: 28px clamp(22px, 5vw, 70px) 50px; margin: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; font: 19px/1.8 Georgia, 'Times New Roman', serif; }
-.media-audio-player { position: fixed; z-index: 900; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(300px, 1.4fr) auto; gap: 8px 20px; align-items: center; padding: 16px max(20px, calc((100vw - 1360px) / 2)); border-top: 1px solid #45454b; background: #151518; box-shadow: 0 -12px 36px rgba(0,0,0,.3); }
+.media-book-progress { font-size: var(--fs-body); color: #625645; }
+.media-book-text { flex: 1; min-height: 0; padding: 28px clamp(22px, 5vw, 70px) 50px; margin: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-title)/1.8 Georgia, 'Times New Roman', serif; }
+.media-audio-player { position: fixed; z-index: 900; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(300px, 1.4fr) auto; gap: 8px 20px; align-items: center; padding: 16px max(20px, calc((100vw - 1360px) / 2)); border-top: 1px solid rgba(255,255,255,.14); background: #151518; box-shadow: 0 -12px 36px rgba(0,0,0,.3); }
 .media-audio-info { display: grid; gap: 4px; min-width: 0; }
 .media-audio-title, .media-audio-creator { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-audio-creator, .media-audio-time { color: var(--muted); font-size: 12px; }
+.media-audio-creator, .media-audio-time { color: var(--muted); font-size: var(--fs-caption); }
 .media-audio-controls { display: flex; justify-content: center; gap: 8px; }
-.media-audio-controls button { font-size: 13px; white-space: nowrap; }
+.media-audio-controls button { font-size: var(--fs-body); white-space: nowrap; }
 .media-audio-player button:disabled { opacity: .42; cursor: default; }
 .media-audio-player .primary-button, .media-library .primary-button { background: var(--accent); border-color: var(--accent); color: #fff; }
 .media-audio-seek { grid-column: 2; grid-row: 2; width: 100%; min-width: 0; height: 44px; margin: -6px 0; accent-color: var(--accent); }
 .media-audio-time { grid-column: 1; grid-row: 2; }
-.media-audio-status { grid-column: 1 / -1; margin: 0; color: #d4c5b5; font-size: 13px; }
+.media-audio-status { grid-column: 1 / -1; margin: 0; color: #d4c5b5; font-size: var(--fs-body); }
 .media-audio-status:empty { display: none; }
 .media-audio-queue { grid-column: 3; grid-row: 1 / 3; }
-.media-audio-queue summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-size: 14px; }
-.media-audio-queue ol { position: absolute; right: 20px; bottom: 100%; width: min(440px, calc(100vw - 40px)); max-height: 40vh; overflow-y: auto; margin: 0; padding: 12px; border: 1px solid #45454b; border-radius: 12px 12px 0 0; background: #19191c; list-style: none; }
+.media-audio-queue summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-size: var(--fs-body); }
+.media-audio-queue ol { position: absolute; right: 20px; bottom: 100%; width: min(440px, calc(100vw - 40px)); max-height: 40vh; overflow-y: auto; margin: 0; padding: 12px; border: 1px solid rgba(255,255,255,.14); border-radius: var(--radius) var(--radius) 0 0; background: var(--surface-soft); list-style: none; }
 .media-audio-queue li button { width: 100%; text-align: left; border: 0; background: transparent; }
 .media-audio-queue [aria-current="true"] { color: #ff9096; }
 .has-audio-player #app-main { padding-bottom: calc(var(--media-player-height, 260px) + 40px); }
 @media (max-width: 1180px) { .topnav { display: none; } }
 @media (max-width: 680px) {
   .media-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
-  .media-library-card .card-label { font-size: 14px; }
+  .media-library-card .card-label { font-size: var(--fs-body); }
   .media-audio-player { grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
   .media-audio-info { grid-column: 1; }
   .media-audio-controls { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-  .media-audio-controls button { padding: 8px 5px; font-size: 11px; }
+  .media-audio-controls button { padding: 8px 5px; font-size: var(--fs-caption); }
   .media-audio-seek { grid-column: 1 / -1; grid-row: 3; }
   .media-audio-time { grid-column: 1; grid-row: 4; }
   .media-audio-queue { grid-column: 2; grid-row: 1; }
   .media-audio-status { grid-row: 5; }
   .media-book-toolbar { padding: 12px 16px; }
-  .media-book-text { font-size: 18px; padding: 20px 24px 40px; }
+  .media-book-text { font-size: var(--fs-title); padding: 20px 24px 40px; }
 }
 @media (max-width: 600px) {
   .stream-preference-field { flex: 1 1 130px; min-width: 0; }
@@ -1257,8 +1380,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
      almost nothing left to blur: the cost was real and the effect was not. */
   background: rgba(14,14,16,.96);
   box-shadow: 0 14px 40px rgba(0,0,0,.4);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   line-height: 1.4;
   text-align: center;
   animation: toast-in .18s ease-out;
@@ -1288,7 +1411,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .stream-row {
   background: rgba(20,20,22,.6);
   padding: 0.5rem 0.75rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -1310,22 +1433,22 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .stream-note {
   padding: 6px 2px 2px;
   color: var(--quiet);
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
   line-height: 1.4;
 }
 .stream-info { display: flex; flex-direction: column; gap: 0.25rem; }
-.stream-title { font-size: 0.85rem; color: var(--text); }
-.stream-tags { font-size: 0.75rem; color: var(--muted); }
-.stream-q { font-weight: 600; color: var(--accent); font-size: 0.85rem; }
-.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 800; font-size: 11px; margin-right: 6px; }
+.stream-title { font-size: var(--fs-body); color: var(--text); }
+.stream-tags { font-size: var(--fs-caption); color: var(--muted); }
+.stream-q { font-weight: var(--fw-semibold); color: var(--accent); font-size: var(--fs-body); }
+.badge { display: inline-block; padding: 2px 6px; border-radius: var(--radius-pill); font-weight: var(--fw-bold); font-size: var(--fs-caption); margin-right: 6px; }
 /* Was #8a2be2, a purple. The contract allows ONE accent and every other
    client badges 4K in it. */
 .badge-4k { background: var(--accent); color: #fff; }
 .badge-1080 { background: #0066ee; color: #fff; }
 .badge-720 { background: #1a9e4a; color: #fff; }
 .badge-sd { background: #555; color: #fff; }
-.stream-meta { font-size: 11px; color: var(--muted); margin-top: 4px; display: flex; gap: 8px; }
+.stream-meta { font-size: var(--fs-caption); color: var(--muted); margin-top: 4px; display: flex; gap: 8px; }
 
 /* ── Progress bar ────────────────────────────────────────── */
 .progress-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: rgba(255,255,255,0.2); }
@@ -1444,7 +1567,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .detail-dialog { width: calc(100% - 16px); }
   .detail-body { padding: 55px 20px 26px; }
   .edu-tabs { gap: 6px; }
-  .edu-tab { padding: 7px 12px; font-size: 13px; }
+  .edu-tab { padding: 7px 12px; font-size: var(--fs-body); }
 }
 
 /* ── Card hover trailer preview ───────────────────────────────
@@ -1481,10 +1604,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    small outlined pills). They were filled 6px rectangles in a cold grey, which
    is why the sheet read like a form and not like the TVs. */
 .detail-chip {
-  border-radius: 999px; padding: 3px 10px;
+  border-radius: var(--radius-pill); padding: 3px 10px;
   background: transparent; border: 1px solid rgba(255,255,255,.25);
   color: var(--text-body);
-  font-size: 12px; font-weight: 700; letter-spacing: .02em;
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .02em;
 }
 .detail-chip-cert { border: 1px solid rgba(255,255,255,.45); background: transparent; color: #fff; }
 .detail-chip-star { background: rgba(255,61,71,.22); color: #fff; }
@@ -1497,10 +1620,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .search-results { display: flex; flex-wrap: wrap; gap: 16px; }
 .seerr-card {
   width: 200px; display: flex; flex-direction: column; gap: 10px;
-  background: rgba(255, 255, 255, 0.04); border-radius: 12px; padding: 10px;
+  background: rgba(255, 255, 255, 0.04); border-radius: var(--radius); padding: 10px;
 }
 .seerr-art {
-  aspect-ratio: 2 / 3; border-radius: 8px; background-size: cover;
+  aspect-ratio: 2 / 3; border-radius: var(--radius); background-size: cover;
   background-position: center; background-color: rgba(255, 255, 255, 0.06);
   /* Both needed by the <img> this now holds: `relative` anchors the .no-image
      mark's `inset: 0`, and `hidden` keeps the poster inside the rounded corner
@@ -1508,9 +1631,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: relative; overflow: hidden;
 }
 .seerr-body { display: flex; flex-direction: column; gap: 8px; }
-.seerr-title { font-size: 14px; line-height: 1.3; margin: 0; }
+.seerr-title { font-size: var(--fs-body); line-height: 1.3; margin: 0; }
 .seerr-status {
-  align-self: flex-start; font-size: 12px; padding: 3px 8px; border-radius: 999px;
+  align-self: flex-start; font-size: var(--fs-caption); padding: 3px 8px; border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.1);
 }
 /* The status colours carry meaning, so they are keyed off Seerr's own enum
@@ -1520,7 +1643,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .seerr-status[data-status="3"] { background: #1d4ed8; color: #fff; }
 .seerr-status[data-status="4"] { background: #0369a1; color: #fff; }
 .seerr-status[data-status="5"] { background: #15803d; color: #fff; }
-.seerr-card .primary-button { font-size: 13px; padding: 6px 10px; }
+.seerr-card .primary-button { font-size: var(--fs-body); padding: 6px 10px; }
 
 /* ── Comic reader ──────────────────────────────────────────────────────────
    Full-bleed, because a comic page is the content. `object-fit: contain` keeps
@@ -1532,13 +1655,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .comic-reader[hidden] { display: none; }
 .comic-bar {
   display: flex; align-items: center; gap: 16px; padding: 10px 18px;
-  background: rgba(0, 0, 0, 0.85); color: #fff; font-size: 14px;
+  background: rgba(0, 0, 0, 0.85); color: #fff; font-size: var(--fs-body);
 }
 .comic-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .comic-counter { opacity: 0.7; font-variant-numeric: tabular-nums; }
 .comic-close {
   background: rgba(255, 255, 255, 0.14); color: #fff; border: 0;
-  border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  border-radius: var(--radius-pill); padding: 6px 14px; cursor: pointer;
 }
 .comic-close:focus-visible { outline: 3px solid var(--accent, #FF3D47); }
 .comic-page { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
@@ -1616,7 +1739,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .book-reader .comic-bar { background: rgba(0, 0, 0, 0.9); }
 .book-status {
   margin: 0; padding: 14px 18px 20px; text-align: center;
-  color: #f4efe6; font-size: 17px; display: flex; gap: 12px;
+  color: #f4efe6; font-size: var(--fs-title); display: flex; gap: 12px;
   align-items: center; justify-content: center; flex-wrap: wrap;
 }
 .book-status[hidden] { display: none !important; }
@@ -1628,23 +1751,23 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .book-search { margin: 0 0 34px; }
 /* NOT .row-title: that carries `margin-left: var(--gutter)` for the poster
    rails and would indent this heading past the search box under it. */
-.book-search-title { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+.book-search-title { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-bold); letter-spacing: -.03em; }
 .book-search-blurb { margin: 6px 0 16px; color: var(--muted, rgba(255,255,255,.72)); max-width: 62ch; }
 .book-search-status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-height: 24px; }
 .book-results { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .book-row {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  background: var(--surface, #171719); border: 1px solid rgba(255,255,255,.12);
-  border-radius: 14px; padding: 14px 16px;
+  background: var(--surface, var(--surface-focus)); border: 1px solid rgba(255,255,255,.12);
+  border-radius: var(--radius); padding: 14px 16px;
 }
 .book-row-head { flex: 1; min-width: 240px; }
 .book-row-title { display: block; line-height: 1.4; overflow-wrap: anywhere; }
 .book-row-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .book-chip {
-  font-size: 12px; line-height: 1.6; padding: 2px 9px; border-radius: 999px;
+  font-size: var(--fs-caption); line-height: 1.6; padding: 2px 9px; border-radius: var(--radius-pill);
   background: rgba(255,255,255,.09); color: rgba(255,255,255,.82);
 }
-.book-row-why { margin: 0; flex: 1 1 260px; color: rgba(255,255,255,.68); font-size: 14px; line-height: 1.5; }
+.book-row-why { margin: 0; flex: 1 1 260px; color: rgba(255,255,255,.68); font-size: var(--fs-body); line-height: 1.5; }
 .book-open { flex-shrink: 0; min-height: 44px; }
 .book-open:focus-visible, .book-reader button:focus-visible, .comic-reader .comic-mode:focus-visible {
   outline: 3px solid var(--accent, #FF3D47); outline-offset: 3px;
@@ -1656,7 +1779,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 /* ── Game screenshots (Games / FLT-2) ────────────────────── */
 .game-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.game-shots img { width: 150px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); }
+.game-shots img { width: 150px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius); border: 1px solid rgba(255,255,255,.1); }
 
 /* 10-foot UI D-pad magnetic focus engine */
 @media (pointer: coarse), (hover: none) {
@@ -1707,27 +1830,27 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .anime-room-intro p { color: rgba(255,255,255,.72); margin: 0; line-height: 1.6; }
 .anime-room-intro .eyebrow { color: rgba(255,255,255,.65); }
 #anime-room-search { width: min(420px, 40%); flex-shrink: 0; }
-#anime-room-search label { display: block; font-size: 13px; color: rgba(255,255,255,.72); margin-bottom: 9px; }
+#anime-room-search label { display: block; font-size: var(--fs-body); color: rgba(255,255,255,.72); margin-bottom: 9px; }
 #anime-room-search > div { display: flex; gap: 8px; min-width: 0; }
 #anime-room-search button { flex: 0 0 auto; }
-#anime-room-query { width: 100%; min-width: 0; min-height: 46px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 14px; font: inherit; }
+#anime-room-query { width: 100%; min-width: 0; min-height: 46px; border: 1px solid rgba(255,255,255,.2); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 10px 14px; font: inherit; }
 .anime-room-tabs { display: flex; gap: 28px; margin-top: 28px; border-bottom: 1px solid rgba(255,255,255,.12); }
-.anime-room-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; min-height: 50px; padding: 10px 0; color: rgba(255,255,255,.72); font: inherit; font-weight: 600; cursor: pointer; }
+.anime-room-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; min-height: 50px; padding: 10px 0; color: rgba(255,255,255,.72); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 .anime-room-tabs button[aria-current="page"] { border-bottom-color: var(--accent); color: var(--text); }
 .anime-room-filters { display: flex; gap: 8px; overflow-x: auto; padding: 3px 2px 12px; scrollbar-width: none; }
 .anime-room-filters::-webkit-scrollbar { display: none; }
-.anime-room-filters button { white-space: nowrap; min-height: 44px; padding: 9px 16px; border-radius: 24px; border: 1px solid rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.78); font: inherit; font-size: 13px; cursor: pointer; }
+.anime-room-filters button { white-space: nowrap; min-height: 44px; padding: 9px 16px; border-radius: var(--radius-pill); border: 1px solid rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.78); font: inherit; font-size: var(--fs-body); cursor: pointer; }
 .anime-room-filters button[aria-pressed="true"] { background: #f7f7f8; color: #0a0a0b; border-color: #f7f7f8; }
-#anime-room-feature { position: relative; isolation: isolate; min-height: 380px; display: flex; align-items: center; overflow: hidden; border-radius: 16px; background: var(--surface); margin: 0 0 36px; }
+#anime-room-feature { position: relative; isolation: isolate; min-height: 380px; display: flex; align-items: center; overflow: hidden; border-radius: var(--radius); background: var(--surface); margin: 0 0 36px; }
 #anime-room-feature[hidden] { display: none; }
 .anime-feature-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 25%; z-index: -2; }
-.anime-feature-cover { position: absolute; right: 6%; top: 8%; height: 84%; max-width: 32%; object-fit: contain; border-radius: 12px; z-index: -2; }
+.anime-feature-cover { position: absolute; right: 6%; top: 8%; height: 84%; max-width: 32%; object-fit: contain; border-radius: var(--radius); z-index: -2; }
 .anime-feature-poster::after { opacity: .35; }
 #anime-room-feature::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg,rgba(10,10,11,.97),rgba(10,10,11,.9) 35%,rgba(10,10,11,.15) 100%); z-index: -1; }
 .anime-feature-body { padding: clamp(24px, 4vw, 54px); width: min(64%, 680px); }
 .anime-feature-body h2 { font-size: clamp(27px, 3vw, 42px); letter-spacing: -.025em; line-height: 1.1; margin: 12px 0; }
-.anime-feature-meta { font-size: 14px; color: rgba(255,255,255,.8); }
-.anime-feature-description { font-size: 15px; line-height: 1.7; color: rgba(255,255,255,.82); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.anime-feature-meta { font-size: var(--fs-body); color: rgba(255,255,255,.8); }
+.anime-feature-description { font-size: var(--fs-body); line-height: 1.7; color: rgba(255,255,255,.82); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .anime-feature-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
 .anime-feature-actions .primary-button { background: #f7f7f8; color: #0a0a0b; }
 .anime-room-shelf, .manga-history { margin: 0 0 36px; }
@@ -1735,13 +1858,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .anime-room-grid .card { width: 100%; min-width: 0; }
 .anime-room-grid .card-label { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .manga-history-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 12px; }
-.manga-history-item { display: flex; align-items: center; text-align: left; gap: 16px; background: var(--surface); color: var(--text); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 12px; min-width: 0; cursor: pointer; font: inherit; }
-.manga-history-item img { width: 54px; height: 76px; object-fit: cover; border-radius: 6px; background: var(--surface-soft); flex-shrink: 0; }
+.manga-history-item { display: flex; align-items: center; text-align: left; gap: 16px; background: var(--surface); color: var(--text); border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 12px; min-width: 0; cursor: pointer; font: inherit; }
+.manga-history-item img { width: 54px; height: 76px; object-fit: cover; border-radius: var(--radius); background: var(--surface-soft); flex-shrink: 0; }
 .manga-history-item > span { min-width: 0; }
 .manga-history-item strong { display: block; line-height: 1.4; }
-.manga-history-item span span { display: block; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.72); margin-top: 6px; }
+.manga-history-item span span { display: block; font-size: var(--fs-caption); line-height: 1.6; color: rgba(255,255,255,.72); margin-top: 6px; }
 .comic-reader .comic-bar { flex-wrap: wrap; gap: 10px; }
-.comic-reader .comic-bar button { min-height: 44px; border: 1px solid rgba(255,255,255,.3); background: #171719; color: #fff; border-radius: 22px; padding: 8px 15px; font: inherit; cursor: pointer; }
+.comic-reader .comic-bar button { min-height: 44px; border: 1px solid rgba(255,255,255,.3); background: var(--surface-focus); color: #fff; border-radius: var(--radius-pill); padding: 8px 15px; font: inherit; cursor: pointer; }
 .comic-reader .comic-bar button:disabled { opacity: .45; cursor: default; }
 .anime-room-header button:focus-visible, .anime-room button:focus-visible, .manga-history-item:focus-visible, #manga-reader button:focus-visible, #anime-room-query:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 #manga-view > .page-heading, #comics-view > .page-heading { margin-top: 0; }
@@ -1757,13 +1880,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 @media (max-width: 480px) {
   .anime-room-header { padding-top: 14px; }
-  .anime-room-intro p { font-size: 14px; }
+  .anime-room-intro p { font-size: var(--fs-body); }
   .anime-room-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
   #anime-room-feature { align-items: end; min-height: 390px; }
   .anime-feature-body { width: 100%; padding: 24px; }
   #anime-room-feature::after { background: linear-gradient(0deg,rgba(10,10,11,.98),rgba(10,10,11,.85) 55%,rgba(10,10,11,.12)); }
   .anime-feature-actions { gap: 8px; }
-  .anime-feature-actions button { font-size: 13px; padding: 10px 15px; }
+  .anime-feature-actions button { font-size: var(--fs-body); padding: 10px 15px; }
   .comic-reader .comic-label { flex-basis: 100%; }
   .comic-reader .comic-counter { margin-right: auto; }
 }
@@ -1793,10 +1916,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .yt-section {
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 9px 16px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
   transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
@@ -1814,7 +1937,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 
 .yt-rows { margin-top: 18px; }
-.yt-row .row-title { font-size: 17px; }
+.yt-row .row-title { font-size: var(--fs-title); }
 
 /* The tile. 232px wide keeps four across a 1024 tablet and eight across a
    1920 television, which is the density YouTubeScreen's WIDE slot lands at. */
@@ -1838,7 +1961,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.07);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: 0 8px 22px rgba(0,0,0,.3);
   transition: border-color var(--transition), box-shadow var(--transition);
@@ -1850,18 +1973,18 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .yt-thumb-img { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); }
 /* Same rule as .card.no-image: a dead thumbnail has to be MARKED, because an
    empty rectangle reads exactly like a tile that is still loading. */
-.yt-thumb.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: 34px; font-weight: 900; }
+.yt-thumb.no-image::before { content: "B"; position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.34); font-size: var(--fs-hero); font-weight: var(--fw-bold); }
 .yt-thumb.no-image .yt-thumb-img { visibility: hidden; }
 .yt-duration {
   position: absolute;
   right: 6px;
   bottom: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   padding: 2px 6px;
   color: #fff;
   background: rgba(0,0,0,.82);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
   font-variant-numeric: tabular-nums;
 }
 .yt-card-title {
@@ -1870,8 +1993,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   margin-top: 8px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  font-size: 13px;
-  font-weight: 750;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   line-height: 1.3;
 }
 .yt-card-meta {
@@ -1879,7 +2002,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   overflow: hidden;
   margin-top: 3px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1888,16 +2011,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    deliberate: a channel link on every card would double the DOWN presses
    between rows on a remote, because dpad.js moves by geometry. */
 .yt-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 10px var(--gutter); }
-.yt-chips-label { color: var(--quiet); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.yt-chips-label { color: var(--quiet); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .06em; text-transform: uppercase; }
 .yt-chip {
   min-height: 34px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 6px 13px;
   color: var(--muted);
   background: rgba(28,28,31,.8);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   transition: color var(--transition), background var(--transition), border-color var(--transition);
 }
 .yt-chip:hover { color: #fff; border-color: var(--accent); background: var(--surface-focus); }
@@ -1913,12 +2036,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-radius: var(--radius);
   background: var(--surface);
 }
-.yt-channel-art { flex: 0 0 auto; width: 72px; height: 72px; overflow: hidden; border-radius: 999px; background: var(--surface-focus); }
-.yt-channel-art.no-image::before { content: "B"; display: grid; place-items: center; width: 100%; height: 100%; color: rgba(255,255,255,.34); font-size: 26px; font-weight: 900; }
+.yt-channel-art { flex: 0 0 auto; width: 72px; height: 72px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-focus); }
+.yt-channel-art.no-image::before { content: "B"; display: grid; place-items: center; width: 100%; height: 100%; color: rgba(255,255,255,.34); font-size: var(--fs-display); font-weight: var(--fw-bold); }
 .yt-channel-avatar { display: block; width: 100%; height: 100%; object-fit: cover; }
 .yt-channel-text { flex: 1 1 auto; min-width: 0; }
-.yt-channel-name { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
-.yt-channel-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.yt-channel-name { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: -.02em; }
+.yt-channel-meta { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-body); }
 .yt-playlist-form { margin-bottom: 18px; }
 
 @media (max-width: 640px) {
@@ -1958,10 +2081,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .livetv-chip {
   min-height: 44px;
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 9px 16px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
   transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
@@ -2000,7 +2123,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   padding: 10px 12px;
   text-align: left;
   border: 1px solid rgba(255,255,255,.10);
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: rgba(28,28,31,.72);
   transition: background var(--transition), border-color var(--transition), transform var(--transition);
 }
@@ -2012,10 +2135,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   justify-content: center;
   width: 64px;
   height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: rgba(0,0,0,.45);
-  font-size: 15px;
-  font-weight: 800;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   color: var(--muted);
   overflow: hidden;
 }
@@ -2024,8 +2147,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .livetv-card-art img { width: 100%; height: 100%; object-fit: contain; }
 .livetv-card-name {
   align-self: end;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
   color: #fff;
   /* Provider names are long and full of separators. Two lines, then ellipsis —
      one line hid the part that distinguishes "CA - CNN HD" from "CHL: CNN HD". */
@@ -2036,8 +2159,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .livetv-card-meta {
   align-self: start;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
   color: var(--muted);
 }
 
