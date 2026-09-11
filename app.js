@@ -1081,6 +1081,8 @@ const detailSourceLink = $('#detail-source-link');
 const detailPlay = $('#detail-play');
 const detailUpscale = $('#detail-upscale');
 const detailStatus = $('#detail-status');
+const detailCrew = $('#detail-crew');
+const personDialog = $('#person-dialog');
 const player = $('#player');
 const video = $('#video');
 const playerSpinner = $('#player-spinner');
@@ -3110,8 +3112,165 @@ function openDetail(meta, opts) {
       renderEpisodeControls(meta);
       loadStreams(meta);
     }
+    renderCrew(meta);
   });
   detailStatus.textContent = meta.type === 'series' ? 'Loading episodes…' : 'Loading title…';
+}
+
+/**
+ * "Directed by <name>", where the name is a BUTTON.
+ *
+ * The web client had no crew at all — Fire TV and the Roku both show the
+ * director and both open their filmography, and this page showed nothing, which
+ * is the gap this closes. /meta/rich is ADDITIVE: a failure here loses the line
+ * and never the title, so every path below just leaves the block hidden.
+ */
+async function renderCrew(meta) {
+  detailCrew.hidden = true;
+  detailCrew.replaceChildren();
+  if (!meta || !meta.id || meta.embyId) return;
+  const kind = meta.type === 'series' ? 'series' : 'movie';
+  let rich = null;
+  try {
+    rich = await fetchJSON(`${FLEET_BASE}/meta/rich/${kind}/${encodeURIComponent(meta.id)}`);
+  } catch {
+    return;
+  }
+  // The dialog moved on while the fleet was answering.
+  if (state.selected !== meta) return;
+  const names = [...new Set(
+    ((rich && rich.crew && rich.crew.directors) || [])
+      .map((n) => String(n || '').trim()).filter(Boolean),
+  )].slice(0, 3);
+  if (!names.length) return;
+
+  const label = el('span', 'detail-crew-label');
+  label.textContent = 'Directed by';
+  detailCrew.appendChild(label);
+  names.forEach((name) => {
+    const button = el('button', 'detail-crew-name');
+    button.type = 'button';
+    button.textContent = name;
+    button.setAttribute('aria-label', `Everything ${name} directed`);
+    button.addEventListener('click', () => openPerson(name, 'director'));
+    detailCrew.appendChild(button);
+  });
+  detailCrew.hidden = false;
+}
+
+let personRequest = 0;
+
+const PERSON_ROLE_COPY = {
+  director: 'Films and series they directed',
+  writer: 'Films and series they wrote',
+  producer: 'Films and series they produced',
+  cast: 'Films and series they appear in',
+};
+
+/**
+ * One person's filmography, in its own dialog over the detail one.
+ *
+ * `role` is not decoration. TMDB splits a person's credits into acting and crew,
+ * and a director's own films are only in the crew half — asking without the role
+ * returns their walk-on parts. See blazing-fleet/richmeta.js shapePersonCredits.
+ */
+async function openPerson(name, role) {
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return;
+  $('#person-title').textContent = cleanName;
+  $('#person-role').textContent = PERSON_ROLE_COPY[role] || 'Everything they are credited on';
+  $('#person-status').textContent = 'Loading titles…';
+  $('#person-results').replaceChildren();
+  if (typeof personDialog.showModal === 'function') personDialog.showModal();
+  else personDialog.setAttribute('open', '');
+
+  const token = ++personRequest;
+  let data = null;
+  try {
+    const roleParam = role ? `&role=${encodeURIComponent(role)}` : '';
+    data = await fetchJSON(`${FLEET_BASE}/meta/person?name=${encodeURIComponent(cleanName)}${roleParam}`);
+  } catch {
+    if (token === personRequest) $('#person-status').textContent = 'Could not load this filmography.';
+    return;
+  }
+  if (token !== personRequest || !personDialog.open) return;
+
+  // The person payload keys a title's kind as `mediaType`, not `type` — the same
+  // trap every client hits here. Reading `type` files everything as a movie.
+  const items = ((data && data.items) || [])
+    .map((it) => safeDiscoverMeta({
+      id: it && it.id,
+      type: (it && it.mediaType) === 'series' ? 'series' : 'movie',
+      name: it && it.name,
+      poster: it && it.poster,
+      releaseInfo: it && it.year,
+    }))
+    .filter(Boolean)
+    .filter((m) => ratingAllowed(m.contentRating));
+
+  if (!items.length) {
+    $('#person-status').textContent = `Nothing found for ${cleanName}.`;
+    return;
+  }
+  $('#person-status').textContent = `${items.length} title${items.length === 1 ? '' : 's'}`;
+  $('#person-results').replaceChildren(...items.map(personCard));
+}
+
+/**
+ * A filmography card, wrapped so its tmdb: id can be resolved on the way out.
+ *
+ * The wrapper is not decoration. buildCard puts its own click handler on the
+ * card, and a capture listener added to that SAME element does not reliably run
+ * first — at the target phase both fire in registration order. A listener on an
+ * ancestor always wins the capture phase, so the wrapper is what makes this
+ * interception correct rather than usually correct.
+ */
+function personCard(meta) {
+  const card = buildCard(meta);
+  if (!/^tmdb:/i.test(meta.id)) return card;
+  const slot = el('div', 'person-card-slot');
+  slot.appendChild(card);
+  slot.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    openResolvedTitle(meta);
+  }, true);
+  return slot;
+}
+
+/**
+ * ONE resolve, for the card the viewer picked.
+ *
+ * The person payload carries tmdb: ids and nothing downstream — not Cinemeta,
+ * not the stream search — can open one. Resolving the whole page up front would
+ * cost a call per poster; blazing-fleet/richmeta.js measured that trade and sends
+ * the tmdb: ids on purpose, so the resolve belongs here, on the click.
+ */
+async function openResolvedTitle(meta) {
+  const numeric = String(meta.id || '').replace(/^tmdb:/i, '').trim();
+  if (!/^[1-9]\d*$/.test(numeric)) return;
+  const kind = meta.type === 'series' ? 'series' : 'movie';
+  let resolved = '';
+  try {
+    const data = await fetchJSON(`${FLEET_BASE}/meta/resolve/${kind}/${encodeURIComponent(numeric)}`);
+    const id = String((data && data.id) || '');
+    if (/^tt\d+$/.test(id)) resolved = id;
+  } catch {
+    resolved = '';
+  }
+  if (!resolved) {
+    showToast('Could not open that title.', 'error');
+    return;
+  }
+  closePerson();
+  openDetail({ ...meta, id: resolved });
+}
+
+function closePerson() {
+  ++personRequest;
+  if (personDialog.open && typeof personDialog.close === 'function') personDialog.close();
+  else personDialog.removeAttribute('open');
+  $('#person-results').replaceChildren();
 }
 
 function closeDetail() {
@@ -3123,6 +3282,8 @@ function closeDetail() {
   clearEpisodeControls();
   $('#detail-streams').innerHTML = '';
   $('#detail-verification')?.replaceChildren();
+  detailCrew.hidden = true;
+  detailCrew.replaceChildren();
 }
 
 const EDU_ID_PREFIX = 'yt:edu:';
@@ -5168,6 +5329,7 @@ $$('button[data-view]').forEach((button) => {
 $('#menu-button').addEventListener('click', openDrawer);
 $('#drawer-backdrop').addEventListener('click', closeDrawer);
 $('#detail-close').addEventListener('click', closeDetail);
+$('#person-close').addEventListener('click', closePerson);
 $('#detail-copy-toggle').addEventListener('click', (event) => {
   const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
   event.currentTarget.setAttribute('aria-expanded', String(expanded));

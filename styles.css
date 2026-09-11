@@ -1057,6 +1057,28 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .detail-copy-toggle { min-width: 88px; min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: #f1f1f3; font: inherit; font-size: var(--fs-body); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
 .detail-copy-toggle:focus-visible { outline: 2px solid var(--accent, #ff3d47); outline-offset: 3px; }
 .source-pill { display: inline-flex; margin: 0 0 12px; border: 1px solid rgba(255,61,71,.5); border-radius: var(--radius-pill); padding: 5px 9px; color: #fff; background: rgba(255,61,71,.16); font-size: var(--fs-caption); font-weight: var(--fw-bold); }
+/* ── Directed by, and the filmography behind it ──────────── */
+/* A name here is a BUTTON, not a label, so it carries the same 44px touch
+   target and the same focus ring as every other control in the dialog —
+   dpad.js walks real focusable elements, and a styled <span> is invisible to
+   it. */
+.detail-crew { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.detail-crew-label { color: var(--muted); font-size: var(--fs-body); }
+.detail-crew-name {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+.detail-crew-name:hover, .detail-crew-name:focus-visible { border-color: var(--accent); color: var(--accent); }
+/* The wrapper personCard() adds so a tmdb: id can be resolved on the click.
+   It must not change the grid, so it lays out as the card it holds. */
+.person-card-slot { display: contents; }
+
 .detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.4; }
 
 /* ── Trailer embed in detail art ─────────────────────────── */
