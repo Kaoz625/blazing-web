@@ -432,6 +432,184 @@ ok(!kidsSeen.some((u) => u.startsWith('/live/guide')),
 ok(kidsFaults.length === 0, 'no page errors on the kids profile', kidsFaults.join(' | '));
 
 
+/* ── B24 / B23. THE SWITCH THAT LANDS MID-REQUEST ────────────────────────────
+ *
+ * The two checks above both switch profiles on a screen that is sitting still,
+ * and that is the easy half. Live TV is the slowest screen in this client — a
+ * channel sweep is up to eight sequential requests and the guide walk is up to
+ * twelve, so "the viewer switched profile while something was in flight" is the
+ * ordinary case here, not a race that needs contriving.
+ *
+ * Two things were wrong, and both are invisible on a fast fixture:
+ *
+ *   1. adoptProfile() left the previous profile's cards on screen for the whole
+ *      length of the /live/groups request it awaits before reloading. play()
+ *      refuses them, so nothing could be tuned — but a kids profile showing a
+ *      wall of adult channels has not switched as far as anyone watching it is
+ *      concerned.
+ *   2. loadGuide() refused to start while a build was in flight, and the build
+ *      it refused for was the one adoptProfile() had just superseded. The
+ *      superseded build then returned at its checkpoint WITHOUT releasing
+ *      state.guideLoading — so nothing ever released it, and the Guide panel
+ *      read "Building the guide…" for the rest of the session and could not be
+ *      rebuilt. A hard lock, one profile switch away, every time.
+ *
+ * Both are reproduced by holding the fleet's answer open, which is the one
+ * thing a local fixture never does by itself. */
+const slowCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+await slowCtx.addInitScript(() => {
+  localStorage.setItem('blazing-web-profile-device-v1', JSON.stringify({ id: 'dev-live', token: 'tok-live' }));
+  localStorage.setItem('blazing-household-approved', '1');
+  localStorage.setItem('blazing-web-profile-session-v1', JSON.stringify({
+    id: 'p-live', maxRating: 'adult', isKids: false, neededPin: false, allowAdult: true, savedAt: Date.now(),
+  }));
+  window.__played = [];
+});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Turned up only for the window each check needs, so the rest of this context
+// runs at fixture speed.
+let holdGroupsMs = 0;
+let holdGuideCatalogueMs = 0;
+const slowSeen = [];
+await slowCtx.route('https://fleet.lyreosai.com/**', async (route) => {
+  const url = new URL(route.request().url());
+  slowSeen.push(url.pathname + url.search);
+  if (url.pathname === '/live/groups') {
+    if (holdGroupsMs) await sleep(holdGroupsMs);
+    return json(route, { groups: [
+      { id: 'news', name: 'News', count: 1063 },
+      { id: 'sports', name: 'Sports', count: 4416 },
+      { id: 'kids', name: 'Kids', count: 427 },
+    ] });
+  }
+  if (url.pathname === '/live/now') return json(route, { now: {} });
+  if (url.pathname === '/live/guide') return json(route, { guide: {} });
+  if (url.pathname === '/live/channels') {
+    const group = url.searchParams.get('group');
+    if (url.searchParams.get('withGuide') === '1') {
+      if (holdGuideCatalogueMs) await sleep(holdGuideCatalogueMs);
+      return json(route, { total: GUIDED.length, channels: GUIDED });
+    }
+    if (url.searchParams.get('q') === 'ESPN') return json(route, { total: 1, channels: [ESPN] });
+    if (group === 'kids') return json(route, { total: 427, channels: KIDS_CHANNELS });
+    return json(route, { total: 38899, channels: REAL });
+  }
+  if (url.pathname.startsWith('/live/ticket/')) {
+    return json(route, { ticket: 'abc123def456abc123def456abc12345', url: '/live/play/abc123def456abc123def456abc12345', format: 'hls' });
+  }
+  if (url.pathname === '/accounts/me') return json(route, { account: { id: 'a' }, device: { id: 'dev-live', enrollmentStatus: 'approved' } });
+  if (url.pathname === '/profiles') return json(route, { profiles: [{ id: 'p-live', name: 'Mark', maxRating: 'adult', hasPin: false }] });
+  return json(route, {});
+});
+await slowCtx.route('https://addon.lyreosai.com/**', (route) => json(route, {}));
+await slowCtx.route('https://img.invalid/**', (route) =>
+  route.fulfill({ status: 200, contentType: 'image/gif', body: GIF }));
+
+const slowPage = await slowCtx.newPage();
+const slowFaults = [];
+slowPage.on('pageerror', (e) => slowFaults.push(e.message));
+await slowPage.goto(`${base}/index.html`);
+await slowPage.evaluate(() => {
+  window.BlazingPlayer = { open: (title, url, opts) => window.__played.push({ title, url, opts }) };
+});
+await slowPage.waitForFunction(() => document.querySelector('.bp-layer')?.hidden !== false, null, { timeout: 20000 })
+  .catch(async () => {
+    await slowPage.getByRole('button', { name: 'Choose Mark', exact: true }).click({ timeout: 15000 });
+    await slowPage.waitForFunction(() => document.querySelector('.bp-layer')?.hidden !== false, null, { timeout: 15000 })
+      .catch(() => {});
+  });
+await slowPage.locator('.topnav [data-view="livetv"]').click();
+await slowPage.waitForFunction(() => document.querySelectorAll('#livetv-results .livetv-card').length > 0, null, { timeout: 15000 });
+
+const adultOnScreen = await slowPage.locator('#livetv-results .livetv-card-name').allInnerTexts();
+ok(adultOnScreen.length === 3, 'the adult profile starts with the full index on screen', `${adultOnScreen.length} cards`);
+
+// ── 1. the cards come off the screen ON the switch, not a request later ──────
+// The broadcast livetv.js listens to is the one profile.js fires; dispatching it
+// directly is what a switch looks like from this file's side of the wire.
+holdGroupsMs = 1500;
+await slowPage.evaluate(() => {
+  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+    detail: { id: 'p-kid', name: 'Ellie', maxRating: 'general', isKids: true, allowAdult: false },
+  }));
+});
+await slowPage.waitForTimeout(350);
+const strandedCards = await slowPage.locator('#livetv-results .livetv-card').count();
+ok(strandedCards === 0,
+  'B24 — the previous profile’s channels are off the screen immediately, not after the /live/groups request that follows',
+  `${strandedCards} cards still drawn 350ms into a 1500ms request`);
+const midSwitchStatus = await slowPage.locator('#livetv-status').innerText();
+ok(!/38,899/.test(midSwitchStatus),
+  'and the old count goes with them — "Showing 3 of 38,899 channels" over an empty grid reads as a bug',
+  midSwitchStatus);
+
+// ── 2. and the reload that follows is NOT dropped by the load it interrupted ──
+holdGroupsMs = 0;
+await slowPage.waitForFunction(
+  () => /kids channel/.test(document.getElementById('livetv-status').textContent),
+  null, { timeout: 15000 });
+const afterSwitch = await slowPage.locator('#livetv-results .livetv-card-name').allInnerTexts();
+ok(afterSwitch.length === 2 && afterSwitch.every((n) => /Cartoon Network|Nick Jr/.test(n)),
+  'B24 — and the kids grid actually arrives: a switch must supersede the sweep it lands in, not be refused by it',
+  afterSwitch.join(' | '));
+ok(await slowPage.locator('.livetv-chip').count() === 1,
+  'the chips are re-drawn under the new cap too');
+
+// ── 3. the guide is not wedged by a switch that lands mid-build ──────────────
+// Back to an adult profile so the guide has rows to draw at all.
+await slowPage.evaluate(() => {
+  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+    detail: { id: 'p-live', name: 'Mark', maxRating: 'adult', isKids: false, allowAdult: true },
+  }));
+});
+await slowPage.waitForFunction(
+  () => document.querySelectorAll('#livetv-results .livetv-card').length === 3,
+  null, { timeout: 15000 });
+
+holdGuideCatalogueMs = 1500;
+await slowPage.locator('#livetv-guide-open').click();
+await slowPage.waitForFunction(
+  () => /Building the guide/.test(document.getElementById('livetv-guide-status').textContent),
+  null, { timeout: 8000 });
+ok(true, 'the guide build is genuinely in flight before the switch is fired');
+// THE SWITCH THAT USED TO KILL IT. Same cap, so the grid it rebuilds has the
+// same rows — this check is about the panel still being able to rebuild at all.
+await slowPage.evaluate(() => {
+  document.dispatchEvent(new CustomEvent('blazing-profile-selected', {
+    detail: { id: 'p-live', name: 'Mark', maxRating: 'adult', isKids: false, allowAdult: true },
+  }));
+});
+holdGuideCatalogueMs = 0;
+const rebuilt = await slowPage.waitForFunction(
+  () => document.querySelectorAll('#livetv-guide-grid .livetv-guide-row').length > 0,
+  null, { timeout: 15000 }).then(() => true).catch(() => false);
+ok(rebuilt,
+  'B23/B24 — a profile switch landing mid-build rebuilds the guide; it used to leave it on "Building the guide…" for the rest of the session, unrecoverably');
+const guideStatusAfter = await slowPage.locator('#livetv-guide-status').innerText();
+ok(!/Building the guide/.test(guideStatusAfter),
+  'and state.guideLoading was released — a superseded build must not keep a flag its replacement owns',
+  guideStatusAfter);
+
+// ── 4. pressing Guide twice does not start the twelve-page walk twice ────────
+const walkBefore = slowSeen.filter((u) => u.includes('withGuide=1')).length;
+holdGuideCatalogueMs = 1200;
+await slowPage.locator('#livetv-guide-close').click();
+await slowPage.locator('#livetv-guide-open').click();
+await slowPage.locator('#livetv-guide-close').click();
+await slowPage.locator('#livetv-guide-open').click();
+await slowPage.waitForTimeout(400);
+const walkAfter = slowSeen.filter((u) => u.includes('withGuide=1')).length;
+ok(walkAfter - walkBefore <= 1,
+  'a viewer pressing Guide/Channels/Guide is a double-press, not a new profile — the build in flight for this window is left to finish',
+  `${walkAfter - walkBefore} catalogue walks for 2 presses`);
+holdGuideCatalogueMs = 0;
+await slowPage.waitForFunction(
+  () => document.querySelectorAll('#livetv-guide-grid .livetv-guide-row').length > 0,
+  null, { timeout: 15000 }).catch(() => {});
+
+ok(slowFaults.length === 0, 'no page errors across the switches', slowFaults.join(' | '));
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();
 server.close();

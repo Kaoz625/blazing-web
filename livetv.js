@@ -791,11 +791,37 @@
    * a group with nothing but decoration in it would walk all 41,341 rows.
    */
   async function loadPage({ append = false } = {}) {
-    if (state.loading) return;
     const { results, loadMore } = refs();
+    /* A SECOND "Load more" IS A DOUBLE-PRESS AND IS IGNORED. A FRESH LOAD IS
+     * NOT — IT SUPERSEDES.
+     *
+     * This was a bare `if (state.loading) return;`, and that one line made the
+     * profile switch below a no-op. adoptProfile() awaits /live/groups and then
+     * calls reload(); that reload landed while the sweep started under the OLD
+     * profile was still running, and was refused. The grid then kept the
+     * previous profile's channels until the viewer happened to touch something
+     * — the exact "filtered once at fetch time and never again" failure the
+     * Roku logged as BRK-14, and the one adoptProfile's own header says must
+     * not happen. A sweep is up to eight sequential requests, so being mid-load
+     * is the common case on a switch, not a rare one.
+     *
+     * The generation bump is what makes superseding safe. The older sweep
+     * returns at its next checkpoint, before it writes any state, and the newer
+     * run owns state.loading from here on — which is also why the checkpoint
+     * must NOT clear state.loading on its way out.
+     *
+     * It also makes the stale-answer guard inside the loop real for the first
+     * time: while nothing but loadPage could move the generation, and loadPage
+     * refused to re-enter, that check could never fire. */
+    if (state.loading && append) return;
+    const generation = ++state.generation;
     // B24, the first of three locks. Nobody connected means nothing is drawn
     // and nothing is even asked for.
     if (noProfile()) {
+      // Released here too: this branch can now be reached by a load that
+      // superseded a sweep still holding the flag, and a flag left set would
+      // wedge "Load more" for the rest of the session.
+      state.loading = false;
       state.channels = [];
       if (results) results.replaceChildren();
       cards.clear();
@@ -804,7 +830,6 @@
       return;
     }
     state.loading = true;
-    const generation = ++state.generation;
     if (!append && results) {
       results.replaceChildren();
       cards.clear();
@@ -821,8 +846,10 @@
         group: state.group,
         q: state.query,
       });
-      // A stale answer from a filter the viewer has already moved off must not
-      // paint over the one they are looking at.
+      // A stale answer from a filter — or a PROFILE — the viewer has already
+      // moved off must not paint over the one they are looking at. Checked
+      // before any state is written, and it leaves state.loading alone on
+      // purpose: whoever bumped the generation owns that flag now.
       if (generation !== state.generation) return;
 
       const rows = Array.isArray(data && data.channels) ? data.channels : [];
@@ -1094,9 +1121,24 @@
   }
 
   async function loadGuide() {
-    if (state.guideLoading) return;
     const { guideGrid } = refs();
     if (!guideGrid) return;
+    /* THERE IS DELIBERATELY NO `if (state.guideLoading) return` HERE.
+     *
+     * There was, and it was a hard lock rather than a nicety. adoptProfile()
+     * bumps guideGeneration and then calls loadGuide(). With the guard, that
+     * call was refused because a build was still in flight; the in-flight build
+     * then reached its own checkpoint, saw it had been superseded and returned
+     * — WITHOUT releasing state.guideLoading, because the run that superseded
+     * it is supposed to own the flag. Nothing ever cleared it again, so the
+     * Guide panel read "Building the guide…" for the rest of the session and
+     * could never be rebuilt. The walk is up to twelve catalogue pages plus a
+     * listings chunk per hundred channels, so it is in flight for seconds.
+     *
+     * Superseding is also the behaviour we want: the grid is always built for
+     * the profile that is connected NOW. The cheap repeat — a viewer pressing
+     * Guide and Channels back to back — is held off in showPanel() instead,
+     * which is the press, the same split loadPage() draws at `append`. */
     const generation = ++state.guideGeneration;
     state.guideLoading = true;
     state.guideRows = 0;
@@ -1111,6 +1153,9 @@
 
     const span = guideWindow();
     state.guideSpan = span;
+    // Both checkpoints leave state.guideLoading set on purpose — a superseded
+    // build does not own it any more. See the note at the top of this function
+    // for what happened when nothing owned it at all.
     const channels = await fetchGuideChannels();
     if (generation !== state.guideGeneration) return;
     const listings = channels.length
@@ -1195,7 +1240,12 @@
       // for has rolled on. A guide whose ruler says 5:00 at half past seven is
       // not a stale nicety, it is wrong.
       const span = guideWindow();
-      if (!state.guideLoaded || !state.guideSpan || state.guideSpan.start !== span.start) loadGuide();
+      // A build already running for THIS window is left to finish: pressing
+      // Guide, Channels, Guide must not start the twelve-page walk three times.
+      // A build running for a window that has since rolled on is not — that
+      // grid would be drawn against a ruler it no longer matches.
+      if (state.guideLoading && state.guideSpan && state.guideSpan.start === span.start) guideDescribe();
+      else if (!state.guideLoaded || !state.guideSpan || state.guideSpan.start !== span.start) loadGuide();
       else guideDescribe();
     } else {
       if (guideOpen) guideOpen.focus();
@@ -1267,11 +1317,34 @@
     state.query = '';
     state.guideLoaded = false;
     state.guideSpan = null;
+    /* BOTH IN-FLIGHT READS ARE INVALIDATED HERE, NOT WHEN THE RELOAD LANDS.
+     *
+     * loadGroups() below is awaited before reload(), so without these two bumps
+     * a sweep started under the profile that just went away would keep
+     * appending its channels for as long as that await takes — under the new
+     * cap, but from the old cursor and the old group. Bumping now makes it
+     * return at its next checkpoint instead. */
+    ++state.generation;
     ++state.guideGeneration;
     guideReset();
-    const { input, guideGrid } = refs();
+    const { input, guideGrid, results, loadMore, status } = refs();
     if (input) input.value = '';
     if (guideGrid) guideGrid.replaceChildren();
+    /* AND THE OLD PROFILE'S CARDS COME OFF THE SCREEN NOW. The press-time lock
+     * in play() already refuses them, so this is not the gate — but a child's
+     * profile that shows a wall of adult channels for the length of a
+     * /live/groups request has not switched as far as anyone watching is
+     * concerned, and that is what B24 is about. */
+    state.channels = [];
+    state.total = 0;
+    state.skip = 0;
+    cards.clear();
+    if (results) results.replaceChildren();
+    if (loadMore) loadMore.hidden = true;
+    // Said here rather than left to reload()'s describe(): between the two sits
+    // a whole /live/groups request, and "Showing 3 of 38,899 channels" over an
+    // empty grid is a sentence that sends people bug-hunting.
+    if (status) status.textContent = noProfile() ? NO_PROFILE_COPY : 'Finding channels…';
     if (!state.mounted) return;
     loadGroups().then(() => reload());
     if (state.panel === 'guide') loadGuide();
