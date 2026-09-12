@@ -2349,21 +2349,35 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 .livetv-results {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  /* 230px was sized for a tile whose second line said "News · Guide". B33 put
+     "10:31 AM Premier League Darts" there instead, and a programme nobody can
+     read is the same as no programme. */
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
   max-width: 1100px;
   margin: 20px auto 0;
   padding: 0 var(--gutter);
 }
 .livetv-card {
+  /* `.card` is a 132px-wide 2:3 POSTER box, and `.livetv-card` never said
+     otherwise — so despite everything the comment above promises, every Live TV
+     tile has been drawn as a poster with its text column squeezed to about
+     60px. That was survivable while the second line said "News · Guide"; it is
+     not survivable now that the line says what is ON, because "10:28 AM
+     Premier League Darts" arrived as "10:28 A…". The grid track decides the
+     width of a channel tile. */
+  width: auto;
+  aspect-ratio: auto;
   display: grid;
-  grid-template-columns: 64px 1fr;
-  grid-template-rows: auto auto;
+  grid-template-columns: 64px minmax(0, 1fr);
+  /* Three rows in the right column now: name, the on-now line, the bar. */
+  grid-template-rows: auto auto auto;
   column-gap: 12px;
   align-items: center;
-  /* 44px is the floor every control in this app meets; two text rows beside a
-     64px logo clears it comfortably. */
-  min-height: 76px;
+  /* 44px is the floor every control in this app meets; three rows beside a
+     64px logo clears it comfortably. Grown from 76px when the on-now line and
+     its progress bar became the third row (B33). */
+  min-height: 88px;
   padding: 10px 12px;
   text-align: left;
   border: 1px solid rgba(255,255,255,.10);
@@ -2373,7 +2387,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .livetv-card:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.2); transform: translateY(-2px); }
 .livetv-card-art {
-  grid-row: 1 / 3;
+  grid-row: 1 / 4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2401,15 +2415,151 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* B33. The "on now" line. It is ONE line whatever it holds — the programme when
+   the fleet has a listing, the country and group when it does not — and the
+   progress bar below it always takes its 4px whether or not a fill is drawn.
+   Reserving both is what stops the whole grid jumping under the pointer when a
+   guide answer lands for one card in fifty; tvOS reserves the same two boxes
+   (LiveView.swift:597-614) for the same reason. */
 .livetv-card-meta {
-  align-self: start;
+  align-self: center;
   font-size: var(--fs-caption);
   font-weight: var(--fw-semibold);
   color: var(--muted);
+  min-height: 1.3em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
+/* A real listing is brighter than a fallback, so the eye finds what is ON. */
+.livetv-card-meta[data-live="true"] { color: #fff; }
+.livetv-card-progress {
+  grid-column: 2;
+  align-self: start;
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: rgba(255,255,255,.12);
+  overflow: hidden;
+}
+.livetv-card-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+/* ── B23. The grid guide ────────────────────────────────────────────────────
+   Three hours at 8px a minute, which is Fire TV's GuideActivity number. The
+   channel column and the time ruler are pinned with position:sticky inside the
+   ONE scroller, so horizontal and vertical alignment cannot drift — there is
+   nothing to keep in step. */
+.livetv-guide-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+.livetv-guide-bar .search-status { margin: 0; padding: 0; }
+.livetv-guide-grid {
+  max-width: 1100px;
+  margin: 16px auto 0;
+  padding: 0 var(--gutter);
+  overflow: auto;
+  max-height: 68vh;
+  border-radius: var(--radius);
+}
+.livetv-guide-inner {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+.livetv-guide-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  height: 36px;
+  background: var(--bg);
+  border-bottom: 1px solid rgba(255,255,255,.12);
+}
+.livetv-guide-corner {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  flex: 0 0 190px;
+  width: 190px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--bg);
+}
+.livetv-guide-times { display: flex; width: var(--livetv-timeline-width); }
+.livetv-guide-time {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
+  border-left: 1px solid rgba(255,255,255,.08);
+}
+.livetv-guide-row { display: flex; height: 56px; }
+.livetv-guide-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 190px;
+  width: 190px;
+  padding: 0 12px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  color: #fff;
+  background: var(--bg);
+  border-top: 1px solid rgba(255,255,255,.06);
+  /* Provider names are long. Two lines then ellipsis, as the cards do. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  align-content: center;
+}
+.livetv-guide-track { display: flex; width: var(--livetv-timeline-width); }
+.livetv-guide-block {
+  flex: 0 0 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  color: #fff;
+  background: rgba(28,28,31,.82);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 4px;
+  transition: background var(--transition), border-color var(--transition);
+}
+.livetv-guide-block:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.22); }
+.livetv-guide-block:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+/* A filled gap is still pressable — it tunes the channel, which is the whole
+   point of a guide row with no listings in it — but it must not read as a
+   programme. */
+.livetv-guide-block[data-empty="true"] { color: var(--quiet); background: rgba(255,255,255,.03); }
 
 @media (max-width: 640px) {
   .livetv-results { grid-template-columns: 1fr; }
+  .livetv-guide-corner, .livetv-guide-name { flex-basis: 132px; width: 132px; }
+  .livetv-guide-grid { max-height: 60vh; }
   .livetv-groups {
     flex-wrap: nowrap;
     overflow-x: auto;

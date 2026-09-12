@@ -87,7 +87,12 @@ const MIN_SUITES = 35;
 // the raise test, the last-profile Delete guard, the grown-up gate). Those are
 // the decisions a source list and a parental control are made of, and firetv
 // keeps its copies in ProfileGateRules/SourceFilters for exactly this reason.
-const MIN_UNITS = 5;
+//
+// Raised 5 -> 6 when livetv-guide.test.mjs landed with B33/B24/B23: the Live TV
+// rating cap, the now/next line and bar, and the EPG grid's slot maths. Same
+// reason again — firetv keeps ProfileGateRules and GuideTimeline outside its
+// Views precisely so those three are reachable by a test.
+const MIN_UNITS = 6;
 
 const filters = process.argv.slice(2);
 const entries = (await readdir(ROOT)).sort();

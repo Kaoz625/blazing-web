@@ -793,14 +793,36 @@
         <h1>Live TV</h1>
         <p>Every channel the household subscribes to. Search by name — CNN, BBC, CBS.</p>
       </div>
-      <form id="livetv-search-form" class="search-form" role="search">
-        <input id="livetv-search-input" name="ltq" type="search" autocomplete="off" placeholder="Search channels" />
-        <button class="primary-button" type="submit">Search</button>
-      </form>
-      <nav id="livetv-groups" class="livetv-groups" aria-label="Channel groups"></nav>
-      <p id="livetv-status" class="search-status" role="status"></p>
-      <div id="livetv-results" class="search-results livetv-results"></div>
-      <button type="button" id="livetv-load-more" class="primary-button" hidden>Load more</button>
+      <!-- B23. TWO PANELS, ONE ROUTE. Fire TV reaches its grid guide through a
+           "Guide" card on the Live TV screen and comes back with Back; this is
+           the same door, and it keeps the guide inside #livetv-view so the cap,
+           the device credential and the ticket/play pair are all shared with
+           the channel grid rather than copied into a second screen. -->
+      <div id="livetv-channels-panel">
+        <form id="livetv-search-form" class="search-form" role="search">
+          <input id="livetv-search-input" name="ltq" type="search" autocomplete="off" placeholder="Search channels" />
+          <button class="primary-button" type="submit">Search</button>
+          <button type="button" id="livetv-guide-open" class="secondary-button" aria-expanded="false">Guide</button>
+        </form>
+        <nav id="livetv-groups" class="livetv-groups" aria-label="Channel groups"></nav>
+        <p id="livetv-status" class="search-status" role="status"></p>
+        <div id="livetv-results" class="search-results livetv-results"></div>
+        <button type="button" id="livetv-load-more" class="primary-button" hidden>Load more</button>
+      </div>
+
+      <div id="livetv-guide-panel" hidden>
+        <div class="livetv-guide-bar">
+          <button type="button" id="livetv-guide-close" class="secondary-button">Channels</button>
+          <p id="livetv-guide-status" class="search-status" role="status"></p>
+        </div>
+        <!-- ONE scroller, with the channel column and the time ruler pinned
+             inside it by position:sticky. Fire TV synchronises four scroll
+             views by hand because Android gives it no other way; its own
+             header records that per-row scrollers made rows jump, overlap and
+             disappear on the stick, so that machinery is the bug, not the
+             behaviour. -->
+        <div id="livetv-guide-grid" class="livetv-guide-grid"></div>
+      </div>
     </section>
 
     <!-- SETTINGS (B32). This client had no settings screen at all — no view, no
