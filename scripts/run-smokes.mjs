@@ -63,7 +63,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 33 -> 34 when settings.smoke.mjs landed with the Settings screen and
 // the parental controls (audit B32/B35/B1/B3/B13/B15/B28). Same rule: this
 // number is the real count, always.
-const MIN_SUITES = 34;
+//
+// Raised 34 -> 35 when detail-rich-sections.smoke.mjs landed with Cast,
+// Production companies, Reviews and More like this on the detail sheet (audit
+// B26). Same rule: this number is the real count, always.
+const MIN_SUITES = 35;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

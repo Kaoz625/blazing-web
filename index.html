@@ -841,6 +841,23 @@
              come before the source list, but this dialog is a page you scroll and
              the streams are what you opened it to do. -->
         <div id="detail-crew" class="detail-crew" hidden></div>
+        <!-- B26. Cast, Production companies, Reviews and More like this.
+             Roku has had all four since DetailsScreen.xml:332-390 and Fire TV
+             since DetailActivity.kt:846-902; a browser — and every webOS and
+             Tizen television running this same client — showed none of them.
+
+             ORDER AND CAPS ARE THE ROKU'S, deliberately, not Fire TV's:
+             cast 12, companies 12, reviews 2, then More like this from
+             `recommended` ONLY. Fire TV merges `similar` into that last row
+             (DetailActivity.kt:880) and `similar` is a genre sweep in
+             catalogue order — Star Wars offers Momo and Bicentennial Man.
+
+             All four are filled from the ONE /meta/rich call renderCrew above
+             already makes (renderRichSections in app.js). No second fetch. -->
+        <div id="detail-cast" class="detail-section" hidden></div>
+        <div id="detail-companies" class="detail-section" hidden></div>
+        <div id="detail-reviews" class="detail-section" hidden></div>
+        <div id="detail-related" class="detail-section" hidden></div>
       </div>
     </article>
   </dialog>
@@ -857,6 +874,25 @@
         <h2 id="person-title"></h2>
         <p id="person-status" class="detail-status" role="status"></p>
         <div id="person-results" class="search-results"></div>
+      </div>
+    </article>
+  </dialog>
+
+  <!-- One production company's catalogue. Reached from the Production companies
+       row on the detail dialog, the same as Fire TV's CompanyActivity
+       (DetailActivity.kt:1056) and the Roku's CompanyScreen. Its copy is the
+       Roku's, line for line — "Based in US", the "N movies · N series" summary
+       and both empty messages come from CompanyScreen.brs:67-131. -->
+  <dialog id="company-dialog" class="detail-dialog" aria-labelledby="company-title">
+    <article class="detail-card">
+      <button id="company-close" class="detail-close icon-button" type="button" aria-label="Close production company">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+      <div class="detail-body">
+        <p id="company-sub" class="eyebrow"></p>
+        <h2 id="company-title"></h2>
+        <p id="company-status" class="detail-status" role="status"></p>
+        <div id="company-results"></div>
       </div>
     </article>
   </dialog>

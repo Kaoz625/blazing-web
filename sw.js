@@ -96,7 +96,14 @@
 // the new chip would hide every view and land on a blank screen — and its
 // profile.js pencil would still open a picture grid with no PIN, no rating cap
 // and no Delete behind it.
-const CACHE = 'blazing-shell-v35';
+// v36: B26 — Cast, Production companies, Reviews and More like this on the
+// detail sheet, and the #company-dialog behind the company cards. No new file
+// this time, which makes the bump MORE necessary rather than less: all three
+// changed files are shell files, and app.js now wires $('#company-close') at
+// boot. An installed PWA holding v35's index.html has no such element, so
+// addEventListener would be called on null — a TypeError before the first
+// screen is drawn, which does not break one feature, it breaks the app.
+const CACHE = 'blazing-shell-v36';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

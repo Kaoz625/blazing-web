@@ -1082,7 +1082,12 @@ const detailPlay = $('#detail-play');
 const detailUpscale = $('#detail-upscale');
 const detailStatus = $('#detail-status');
 const detailCrew = $('#detail-crew');
+const detailCast = $('#detail-cast');
+const detailCompanies = $('#detail-companies');
+const detailReviews = $('#detail-reviews');
+const detailRelated = $('#detail-related');
 const personDialog = $('#person-dialog');
+const companyDialog = $('#company-dialog');
 const player = $('#player');
 const video = $('#video');
 const playerSpinner = $('#player-spinner');
@@ -3066,6 +3071,10 @@ function openDetail(meta, opts) {
   detailPlay.hidden = false;
   detailPlay.disabled = true;
   $('#detail-streams').replaceChildren();
+  // SYNCHRONOUSLY, not in renderRichSections. That runs after the meta settles,
+  // so without this the previous title's cast, studios and reviews sit under the
+  // new title's name for as long as the fleet takes to answer.
+  clearRichSections();
 
   refreshUpscaleButton(meta);
 
@@ -3124,22 +3133,52 @@ function openDetail(meta, opts) {
       renderEpisodeControls(meta);
       loadStreams(meta);
     }
-    renderCrew(meta);
+    renderRichSections(meta);
   });
   detailStatus.textContent = meta.type === 'series' ? 'Loading episodes…' : 'Loading title…';
 }
 
-/**
- * "Directed by <name>", where the name is a BUTTON.
+/* ── The rest of the detail sheet: crew, cast, companies, reviews, related ──
  *
- * The web client had no crew at all — Fire TV and the Roku both show the
- * director and both open their filmography, and this page showed nothing, which
- * is the gap this closes. /meta/rich is ADDITIVE: a failure here loses the line
- * and never the title, so every path below just leaves the block hidden.
+ * B26. Everything below is drawn from ONE /meta/rich payload. That is not a
+ * tidiness preference — richmeta.js exists BECAUSE one detail page must not cost
+ * five round trips (blazing-fleet/richmeta.js:1-8), and the crew line was
+ * already paying for the whole payload and throwing four fifths of it away.
+ *
+ * THE CAPS AND THE ORDER ARE THE ROKU'S. Cast 12 and companies 12 are its
+ * CapTo12 (DetailsScreen.brs:1049); reviews 2 is buildReviews' `if shown > 2`;
+ * More like this is `recommended` ONLY, which buildRelated at :1099-1114 states
+ * at length and measured — TMDB's `similar` is a genre sweep walked in
+ * catalogue order, and for Star Wars it returns Momo and Bicentennial Man. Fire
+ * TV merges the two lists (DetailActivity.kt:880); do not copy that here.
+ *
+ * /meta/rich IS ADDITIVE. A failure loses a section and never the title, so
+ * every path below just leaves its block hidden.
  */
-async function renderCrew(meta) {
-  detailCrew.hidden = true;
-  detailCrew.replaceChildren();
+const RICH_CAST_MAX = 12;
+const RICH_COMPANY_MAX = 12;
+const RICH_REVIEW_MAX = 2;
+const RICH_RELATED_MAX = 12;
+
+function clearRichSections() {
+  [detailCrew, detailCast, detailCompanies, detailReviews, detailRelated].forEach((host) => {
+    host.hidden = true;
+    host.replaceChildren();
+  });
+}
+
+/** Open one section with its heading and hand it back ready for content. */
+function openRichSection(host, labelText) {
+  host.replaceChildren();
+  const label = el('h3', 'detail-section-label');
+  label.textContent = labelText;
+  host.appendChild(label);
+  host.hidden = false;
+  return host;
+}
+
+async function renderRichSections(meta) {
+  clearRichSections();
   if (!meta || !meta.id || meta.embyId) return;
   const kind = meta.type === 'series' ? 'series' : 'movie';
   let rich = null;
@@ -3150,6 +3189,21 @@ async function renderCrew(meta) {
   }
   // The dialog moved on while the fleet was answering.
   if (state.selected !== meta) return;
+  renderCrew(rich);
+  renderCast(rich);
+  renderCompanies(rich);
+  renderReviews(rich);
+  renderRelated(rich);
+}
+
+/**
+ * "Directed by <name>", where the name is a BUTTON.
+ *
+ * The web client had no crew at all — Fire TV and the Roku both show the
+ * director and both open their filmography, and this page showed nothing, which
+ * is the gap this closes.
+ */
+function renderCrew(rich) {
   const names = [...new Set(
     ((rich && rich.crew && rich.crew.directors) || [])
       .map((n) => String(n || '').trim()).filter(Boolean),
@@ -3168,6 +3222,188 @@ async function renderCrew(meta) {
     detailCrew.appendChild(button);
   });
   detailCrew.hidden = false;
+}
+
+/**
+ * The cast row, twelve deep, every face a button onto that actor's filmography.
+ *
+ * PRESSABLE, like the Roku's (DetailsScreen.brs:2408 onCastChosen -> a person
+ * page). Fire TV's cast card is deliberately inert and is the odd one out; a
+ * drawn-but-dead control is the exact defect this audit was written about.
+ *
+ * role='cast' is load-bearing, the same way role='director' is above. TMDB
+ * splits a person's credits in two and richmeta.js treats 'cast' as a NARROWING
+ * filter (shapePersonCredits, blazing-fleet/richmeta.js:1043) — without it an
+ * actor's page also lists everything they ever produced or wrote.
+ */
+function renderCast(rich) {
+  const cast = ((rich && rich.cast) || [])
+    .map((c) => ({
+      name: String((c && c.name) || '').trim(),
+      character: String((c && c.character) || '').trim(),
+      photo: safeHttpsUrl(c && c.photo),
+    }))
+    .filter((c) => c.name)
+    .slice(0, RICH_CAST_MAX);
+  if (!cast.length) return;
+
+  openRichSection(detailCast, 'Cast');
+  const strip = el('div', 'detail-people');
+  cast.forEach((member) => {
+    const button = el('button', 'detail-person');
+    button.type = 'button';
+    button.setAttribute('aria-label', `Films and series ${member.name} appears in`);
+    // THE FALLBACK IS A <span>, NOT AN EMPTY <img>. TMDB has no headshot for
+    // plenty of real credits, and an <img> that failed keeps drawing the
+    // browser's own torn-page glyph no matter what is done to its src — measured
+    // in a screenshot of this very row. Swapping the element out leaves a plain
+    // filled circle, which is what the Roku's CastTile shows.
+    let photo;
+    if (member.photo) {
+      photo = el('img', 'detail-person-photo');
+      photo.alt = '';
+      photo.loading = 'lazy';
+      photo.decoding = 'async';
+      photo.src = member.photo;
+      photo.addEventListener('error', () => {
+        photo.replaceWith(el('span', 'detail-person-photo'));
+        button.classList.add('no-image');
+      }, { once: true });
+    } else {
+      photo = el('span', 'detail-person-photo');
+      button.classList.add('no-image');
+    }
+    const name = el('span', 'detail-person-name');
+    name.textContent = member.name;
+    button.append(photo, name);
+    // The character is the Roku's `subtitle` field on a CastTile. Omitted rather
+    // than drawn empty: TMDB leaves it blank for plenty of real credits.
+    if (member.character) {
+      const character = el('span', 'detail-person-role');
+      character.textContent = member.character;
+      button.appendChild(character);
+    }
+    button.addEventListener('click', () => openPerson(member.name, 'cast'));
+    strip.appendChild(button);
+  });
+  detailCast.appendChild(strip);
+}
+
+/**
+ * Production companies, each one a button onto that studio's catalogue.
+ *
+ * The payload carries `companies` (with TMDB ids) beside `crew.studios` (names
+ * only) for exactly this reason — richmeta.js:471 — so this reads `companies`.
+ * A company with no id is dropped: it could only ever be a dead button.
+ */
+function renderCompanies(rich) {
+  const companies = ((rich && rich.companies) || [])
+    .map((c) => ({
+      id: String((c && c.id) || '').trim(),
+      name: String((c && c.name) || '').trim(),
+      logo: safeHttpsUrl(c && c.logo),
+      originCountry: String((c && c.originCountry) || '').trim(),
+    }))
+    .filter((c) => c.id && c.name)
+    .slice(0, RICH_COMPANY_MAX);
+  if (!companies.length) return;
+
+  openRichSection(detailCompanies, 'Production companies');
+  const strip = el('div', 'detail-companies-strip');
+  companies.forEach((company) => {
+    const button = el('button', 'detail-company');
+    button.type = 'button';
+    button.setAttribute('aria-label', `Everything from ${company.name}`);
+    // Most TMDB company logos are white-on-transparent PNGs, so the name always
+    // rides beneath one rather than being replaced by it.
+    if (company.logo) {
+      const logo = el('img', 'detail-company-logo');
+      logo.alt = '';
+      logo.loading = 'lazy';
+      logo.decoding = 'async';
+      logo.src = company.logo;
+      logo.addEventListener('error', () => logo.remove(), { once: true });
+      button.appendChild(logo);
+    }
+    const name = el('span', 'detail-company-name');
+    name.textContent = company.name;
+    button.appendChild(name);
+    button.addEventListener('click', () => openCompany(company));
+    strip.appendChild(button);
+  });
+  detailCompanies.appendChild(strip);
+}
+
+/**
+ * Two reviews, text only, nothing focusable — the Roku's buildReviews exactly.
+ *
+ * The SOURCE is always printed next to the score, and that is not decoration:
+ * these are TMDB users' opinions, not ours, and an unattributed verdict on a
+ * detail page reads as the app's own (Roku ReviewItem.xml states this).
+ */
+function renderReviews(rich) {
+  const reviews = ((rich && rich.reviews) || [])
+    .map((r) => ({
+      author: String((r && r.author) || '').trim() || 'Anonymous',
+      score: String((r && r.score) || '').trim(),
+      source: String((r && r.source) || '').trim(),
+      text: String((r && r.text) || '').trim(),
+    }))
+    .filter((r) => r.text)
+    .slice(0, RICH_REVIEW_MAX);
+  if (!reviews.length) return;
+
+  openRichSection(detailReviews, 'Reviews');
+  const list = el('div', 'detail-reviews-list');
+  reviews.forEach((review) => {
+    const card = el('article', 'detail-review');
+    const head = el('p', 'detail-review-head');
+    const author = el('span', 'detail-review-author');
+    author.textContent = review.author;
+    head.appendChild(author);
+    // "7/10  ·  TMDB" — the score alone is meaningless without the scale it came
+    // from, and the source alone is not worth a line of its own.
+    const attribution = [review.score, review.source].filter(Boolean).join('  ·  ');
+    if (attribution) {
+      const score = el('span', 'detail-review-score');
+      score.textContent = attribution;
+      head.appendChild(score);
+    }
+    const body = el('p', 'detail-review-text');
+    body.textContent = review.text;
+    card.append(head, body);
+    list.appendChild(card);
+  });
+  detailReviews.appendChild(list);
+}
+
+/**
+ * More like this — `recommended`, and ONLY recommended. See the block comment
+ * above for why `similar` is not a fallback here either.
+ *
+ * When TMDB has nothing the row says so out loud, which is the Roku's honest
+ * answer rather than an empty heading (buildRelated, DetailsScreen.brs:1116).
+ *
+ * personCard() is the wrapper, not buildCard(): every id on this row is a
+ * `tmdb:` one and nothing downstream — not Cinemeta, not the stream search —
+ * can open one. That wrapper resolves it on the click, once.
+ */
+function renderRelated(rich) {
+  const items = ((rich && rich.recommended) || [])
+    .map((it) => safeDiscoverMeta(it))
+    .filter(Boolean)
+    .filter((m) => m.poster)
+    .filter((m) => ratingAllowed(m.contentRating))
+    .slice(0, RICH_RELATED_MAX);
+
+  if (!items.length) {
+    openRichSection(detailRelated, 'More like this   ·   nothing related found');
+    return;
+  }
+  openRichSection(detailRelated, 'More like this');
+  const grid = el('div', 'search-results');
+  grid.append(...items.map(personCard));
+  detailRelated.appendChild(grid);
 }
 
 let personRequest = 0;
@@ -3274,7 +3510,12 @@ async function openResolvedTitle(meta) {
     showToast('Could not open that title.', 'error');
     return;
   }
+  // Both, because the same wrapper now carries the filmography, the company
+  // catalogue and the More-like-this row. Each close is a no-op on a dialog that
+  // was never open, and a sheet opening BEHIND a dialog it came from is the
+  // failure this closes.
   closePerson();
+  closeCompany();
   openDetail({ ...meta, id: resolved });
 }
 
@@ -3283,6 +3524,95 @@ function closePerson() {
   if (personDialog.open && typeof personDialog.close === 'function') personDialog.close();
   else personDialog.removeAttribute('open');
   $('#person-results').replaceChildren();
+}
+
+let companyRequest = 0;
+
+/**
+ * One production company's catalogue, in its own dialog over the detail one —
+ * the browser's half of the Roku's CompanyScreen and Fire TV's CompanyActivity.
+ *
+ * Every string here is the Roku's, because this is the same screen on a
+ * different box: "Based in US" until the counts arrive and then "42 movies ·
+ * 9 series", and two different empty messages — one for a company with nothing,
+ * one for a company whose titles the ACTIVE PROFILE may not see. Those are not
+ * the same sentence and conflating them tells a parent their studio is empty.
+ *
+ * The ids on this payload are `tmdb:` ids, exactly as the filmography's are, so
+ * the cards go through personCard's resolve-on-click wrapper.
+ */
+async function openCompany(company) {
+  const id = String((company && company.id) || '').trim();
+  if (!id) return;
+  const name = String((company && company.name) || '').trim() || 'Production Company';
+  const origin = String((company && company.originCountry) || '').trim();
+
+  $('#company-title').textContent = name;
+  $('#company-sub').textContent = origin ? `Based in ${origin.toUpperCase()}` : 'Movies and series';
+  $('#company-status').textContent = 'Loading titles…';
+  $('#company-results').replaceChildren();
+  if (typeof companyDialog.showModal === 'function') companyDialog.showModal();
+  else companyDialog.setAttribute('open', '');
+
+  const token = ++companyRequest;
+  let data = null;
+  try {
+    data = await fetchJSON(`${FLEET_BASE}/meta/company/${encodeURIComponent(id)}/catalog`);
+  } catch {
+    if (token === companyRequest) {
+      $('#company-status').textContent = 'Could not load this production company.';
+    }
+    return;
+  }
+  if (token !== companyRequest || !companyDialog.open) return;
+
+  // The catalog route states each list's kind, so the type comes from the list
+  // it was in rather than being guessed from title-vs-name.
+  const shape = (list, type) => (Array.isArray(list) ? list : [])
+    .map((it) => safeDiscoverMeta({ ...it, type }))
+    .filter(Boolean)
+    .filter((m) => m.poster);
+  const movies = shape(data && data.movies, 'movie');
+  const series = shape(data && data.series, 'series');
+  const allowedMovies = movies.filter((m) => ratingAllowed(m.contentRating));
+  const allowedSeries = series.filter((m) => ratingAllowed(m.contentRating));
+  const restricted = (movies.length - allowedMovies.length) + (series.length - allowedSeries.length);
+
+  if (!allowedMovies.length && !allowedSeries.length) {
+    $('#company-status').textContent = restricted > 0
+      ? 'No titles from this company are available for the active profile.'
+      : 'No movies or series are available for this production company.';
+    return;
+  }
+
+  const summary = [
+    allowedMovies.length ? `${allowedMovies.length} movie${allowedMovies.length === 1 ? '' : 's'}` : '',
+    allowedSeries.length ? `${allowedSeries.length} series` : '',
+  ].filter(Boolean).join('   ·   ');
+  $('#company-sub').textContent = summary;
+  $('#company-status').textContent = '';
+
+  const blocks = [];
+  const addBlock = (label, items) => {
+    if (!items.length) return;
+    const section = el('section', 'company-section');
+    const heading = el('h3', 'detail-section-label');
+    heading.textContent = label;
+    const grid = el('div', 'search-results');
+    grid.append(...items.map(personCard));
+    section.append(heading, grid);
+    blocks.push(section);
+  };
+  addBlock('Movies', allowedMovies);
+  addBlock('Series', allowedSeries);
+  $('#company-results').replaceChildren(...blocks);
+}
+
+function closeCompany() {
+  ++companyRequest;
+  if (companyDialog.open && typeof companyDialog.close === 'function') companyDialog.close();
+  else companyDialog.removeAttribute('open');
+  $('#company-results').replaceChildren();
 }
 
 function closeDetail() {
@@ -3294,8 +3624,7 @@ function closeDetail() {
   clearEpisodeControls();
   $('#detail-streams').innerHTML = '';
   $('#detail-verification')?.replaceChildren();
-  detailCrew.hidden = true;
-  detailCrew.replaceChildren();
+  clearRichSections();
 }
 
 const EDU_ID_PREFIX = 'yt:edu:';
@@ -5499,6 +5828,7 @@ $('#menu-button').addEventListener('click', openDrawer);
 $('#drawer-backdrop').addEventListener('click', closeDrawer);
 $('#detail-close').addEventListener('click', closeDetail);
 $('#person-close').addEventListener('click', closePerson);
+$('#company-close').addEventListener('click', closeCompany);
 $('#detail-copy-toggle').addEventListener('click', (event) => {
   const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
   event.currentTarget.setAttribute('aria-expanded', String(expanded));
@@ -5534,7 +5864,14 @@ document.addEventListener('keydown', (event) => {
   // either. Without this, a remote user who opens a title has no way back.
   const isBack = event.key === 'Escape' || event.key === 'Back' || event.key === 'GoBack' || event.keyCode === 461;
   if (!isBack) return;
-  if (detailDialog.open) closeDetail();
+  // TOPMOST FIRST. The filmography and the company catalogue both sit OVER the
+  // detail sheet, so "close the detail sheet" is the wrong answer while one of
+  // them is on screen — it leaves the dialog floating over a dead page. A real
+  // desktop Escape also closes the topmost <dialog> natively, and these calls
+  // are idempotent, so the two agree.
+  if (companyDialog.open) closeCompany();
+  else if (personDialog.open) closePerson();
+  else if (detailDialog.open) closeDetail();
   else if (!player.hidden) closePlayer();
   else if (!drawerLayer.hidden) closeDrawer();
 });

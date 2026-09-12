@@ -1105,6 +1105,114 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    It must not change the grid, so it lays out as the card it holds. */
 .person-card-slot { display: contents; }
 
+/* ── B26: cast, companies, reviews, more like this ───────── */
+/* One heading style for all four, and for the Movies/Series headings inside the
+   company dialog. On the Roku every one of these labels is the same HEAD 40 at
+   0xFFFFFF99 (DetailsScreen.xml:332 and its neighbours); the web equivalent is
+   one rule rather than four. */
+.detail-section { margin-top: 28px; }
+.detail-section-label {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  letter-spacing: .02em;
+}
+/* Horizontal strips, the same shape as the rows they mirror on a television.
+   They scroll on their own rather than wrapping, so a 12-name cast never pushes
+   the reviews below it off the bottom of the sheet. */
+.detail-people, .detail-companies-strip {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.22) transparent;
+}
+.detail-people::-webkit-scrollbar, .detail-companies-strip::-webkit-scrollbar { height: 6px; }
+.detail-people::-webkit-scrollbar-track, .detail-companies-strip::-webkit-scrollbar-track { background: transparent; }
+.detail-people::-webkit-scrollbar-thumb, .detail-companies-strip::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: rgba(255,255,255,.22); }
+
+/* A cast member is a BUTTON, like the director chip above it and for the same
+   reason: dpad.js walks real focusable elements, so a styled <div> is
+   unreachable from a remote. */
+.detail-person {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  padding: 8px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.detail-person:hover, .detail-person:focus-visible { border-color: var(--accent); background: rgba(255,255,255,.06); }
+/* Both the <img> and the <span> renderCast falls back to. `display: block` is
+   for the span half — a bare inline element ignores width and height. */
+.detail-person-photo { display: block; width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,.08); }
+/* A headshot TMDB does not have leaves a filled circle, NOT a hole. `visibility:
+   hidden` was the first shape of this rule and it reads as a missing tile with a
+   name floating under it. */
+.detail-person.no-image .detail-person-photo { background: rgba(255,255,255,.12); }
+.detail-person-name { font-size: var(--fs-caption); line-height: 1.25; }
+.detail-person-role { color: var(--muted); font-size: var(--fs-caption); line-height: 1.2; }
+
+/* A company is focusable because it leads to a full catalogue, exactly as Fire
+   TV's companyCard says of itself (DetailActivity.kt:1011). */
+.detail-company {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 148px;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.detail-company:hover, .detail-company:focus-visible { border-color: var(--accent); }
+.detail-company-logo { max-width: 112px; max-height: 40px; object-fit: contain; }
+.detail-company-name { font-size: var(--fs-caption); line-height: 1.25; }
+
+/* Reviews stack instead of sitting side by side: the sheet's text column is
+   550px wide, and the Roku's two 852px cards do not fit in it. Two is still the
+   count — buildReviews' `if shown > 2`. */
+.detail-reviews-list { display: flex; flex-direction: column; gap: 12px; }
+.detail-review { padding: 14px 16px; border-left: 3px solid var(--accent, #ff3d47); border-radius: var(--radius); background: rgba(255,255,255,.06); }
+.detail-review-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0; font-size: var(--fs-caption); }
+.detail-review-author { color: #fff; font-weight: var(--fw-bold); }
+.detail-review-score { color: var(--accent, #ff3d47); }
+/* Three lines, like the Roku card. The full text is 1200 characters — the fleet
+   already truncates it — and a whole blog post inside a detail sheet buries the
+   source list under it. */
+.detail-review-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 8px 0 0;
+  color: #dddde0;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+/* The company dialog's two blocks. */
+.company-section + .company-section { margin-top: 28px; }
+
 .detail-status { min-height: 22px; margin: 16px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.4; }
 
 /* ── Trailer embed in detail art ─────────────────────────── */
