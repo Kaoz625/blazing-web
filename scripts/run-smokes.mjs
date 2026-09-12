@@ -67,7 +67,16 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 34 -> 35 when detail-rich-sections.smoke.mjs landed with Cast,
 // Production companies, Reviews and More like this on the detail sheet (audit
 // B26). Same rule: this number is the real count, always.
-const MIN_SUITES = 35;
+//
+// Raised 35 -> 37 when source-failover.smoke.mjs landed with automatic source
+// failover on the web (audit B10) - the browser walking the ranked list the way
+// the Roku and the Fire TV already do.
+//
+// 37, not 36. The floor was already one behind the real count when that suite
+// was written: 36 files on disk against a floor of 35, so one of them could
+// have gone missing for free. Same rule as every note above - this number is
+// the real count, always, and catching it up is part of adding to it.
+const MIN_SUITES = 37;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

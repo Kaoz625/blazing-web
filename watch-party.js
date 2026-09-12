@@ -1,7 +1,32 @@
-/* Blazing web watch party: chat, quick reactions, and a small mesh voice/video
- * call layered next to (never inside of) the existing player. This module
- * never touches #video or any /party/:code/state WRITE — it only reads party
- * liveness and talks to the separate realtime signaling channel.
+/* Blazing web watch party: chat, quick reactions, a small mesh voice/video call
+ * layered next to (never inside of) the existing player, and — B30 — the sync
+ * that makes it a watch party rather than a chat room beside a film.
+ *
+ * WHAT CHANGED AND WHAT DID NOT. This module still never reaches into #video
+ * and still never WRITES /party/:code/state: hosting a room needs a registered
+ * device and a device token, and a browser guest has neither. What it does now
+ * is the guest half the Roku and the Apple TV have had all along — it reads the
+ * host's `{state, position}` every two seconds and asks the PLAYER to correct
+ * itself through the narrow surface app.js publishes for it:
+ *
+ *     window.BlazingPlayer.status()        where this browser's film is
+ *     window.BlazingPlayer.step(seconds)   a RELATIVE move, + or -
+ *     window.BlazingPlayer.setPaused(bool) match the host's play state
+ *
+ * THE CORRECTION IS RELATIVE, NEVER ABSOLUTE — tvos Sources/PlayerView.swift:18-20
+ * and PartySession's PartyCommand carry the same rule. Nothing here computes a
+ * target position; it computes a DRIFT and sends that one number, so a joiner
+ * that starts at 0 while the host is 640 seconds in is brought up by the same
+ * code path that keeps the two in step for the rest of the film. There is no
+ * separate start-at path to get wrong, because there is no second path at all.
+ *
+ * THE NUMBERS ARE THE OTHER CLIENTS'. Two seconds between reads and five
+ * seconds of tolerated drift: Apple TV's `reconcileSecs` and
+ * `driftToleranceSecs`. Roku reconciles at the same two seconds and tolerates
+ * 2.5, which is close enough to the staleness floor — the host's number is
+ * already up to two seconds old by the time it is read — that it churns. Five
+ * is the one to copy, and a party with a Roku, an Apple TV and a browser in it
+ * agrees on the cadence either way.
  *
  * WIRE CONTRACT this codes against (fleet.lyreosai.com, blazing-fleet repo):
  *   GET  /party/active?householdId=<id>   -> {code,...} | 204 (no device auth)
@@ -30,7 +55,14 @@
   const FLEET_WS_BASE = 'wss://fleet.lyreosai.com';
   const REQUEST_TIMEOUT_MS = 15000;
   const ACTIVE_POLL_MS = 25000;
-  const STATE_POLL_MS = 12000;
+  // Two cadences for one clock. Two seconds is the reconcile rate every other
+  // client runs at; twelve is what a panel with no film under it needs, and is
+  // the liveness poll this module already had.
+  const SYNC_POLL_MS = 2000;
+  const IDLE_POLL_MS = 12000;
+  // How far out of step before a visible jump is worth it. Below this a
+  // correction is more disruptive than the drift.
+  const DRIFT_TOLERANCE_SECS = 5;
   const RECONNECT_BASE_MS = 3000;
   const MAX_RECONNECT_ATTEMPTS = 6;
   const REACTIONS = ['👍', '😂', '😮', '❤️', '🎉'];
@@ -165,7 +197,14 @@
     reconnectTimer: 0,
     intentionalClose: false,
     activePollTimer: 0,
-    statePollTimer: 0,
+    syncTimer: 0,
+    /** What the room is playing, as last read from /party/:code/state. */
+    roomStream: null,
+    /** A joiner with no playhead of its own must not be "corrected" against
+     *  one that does not exist. Set once this browser's film actually moves. */
+    guestStarted: false,
+    /** What the sync line last said, so it is not rewritten every two seconds. */
+    syncNote: '',
     discoveredCode: null,
     panelOpen: false,
     minimized: false,
@@ -219,6 +258,9 @@
       .wp-head-leave:hover { background: rgba(225,29,43,.4); }
 
       .wp-body { min-height: 0; overflow-y: auto; padding: 12px 14px 0; }
+      .wp-sync { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; background: rgba(255,255,255,.04); }
+      .wp-sync-text { color: var(--muted, #a3a3aa); font-size: 12px; line-height: 1.4; }
+      .wp-sync-play { align-self: stretch; min-height: 40px; border: 1px solid var(--accent, #ff3d47); border-radius: 12px; padding: 0 14px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 13px; font-weight: 850; }
       .wp-call { position: relative; margin-bottom: 12px; }
       .wp-call-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px dashed rgba(255,255,255,.16); border-radius: 14px; color: var(--muted, #a3a3aa); font-size: 12px; line-height: 1.4; }
       .wp-call-retry { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.15); border-radius: 999px; padding: 6px 10px; color: inherit; background: rgba(255,255,255,.06); font-size: 11px; font-weight: 800; }
@@ -341,7 +383,10 @@
       return;
     }
     closeJoinDialog();
-    enterParty(code);
+    // The body of the check that just succeeded IS the room state — contentId,
+    // streamUrl, position and all. Throwing it away and reading it again two
+    // seconds later is the difference between joining a party and watching one.
+    enterParty(code, result.body);
   }
 
   // --- panel shell -------------------------------------------------------
@@ -353,6 +398,9 @@
     ui.panel.hidden = false;
     ui.chip.hidden = true;
     renderChip();
+    // Reopening the panel must show the CURRENT sync state, not whatever it
+    // said when it was minimised — the player may have been closed since.
+    renderSync('');
     window.setTimeout(() => { ui.chatList.scrollTop = ui.chatList.scrollHeight; }, 0);
   }
 
@@ -385,66 +433,266 @@
 
   // --- entering / leaving a party -----------------------------------------
 
-  function enterParty(code) {
+  /**
+   * `room` is the /party/:code/state body when this was an explicit join, and
+   * absent when the code came back out of localStorage on a reload.
+   *
+   * A JOIN STARTS THE FILM; A RELOAD DOES NOT. Joining is a button press, which
+   * is the gesture a browser demands before it will play sound — and it is also
+   * somebody saying "put me in the party now". Reopening a tab is neither, so
+   * the panel offers the film on a button instead of taking the screen.
+   */
+  function enterParty(code, room) {
     state.code = code;
     writeStorage(CODE_KEY, code);
     state.wsAttempt = 0;
     state.intentionalClose = false;
+    state.roomStream = null;
+    state.guestStarted = false;
     ui.headCode.textContent = code;
     ui.chatList.replaceChildren();
     ui.chatEmpty.hidden = false;
     updateLaunchButton();
     showPanel();
     setHeadStatus('live', 'Watch Party');
-    startStatePolling(code);
+    renderSync('');
+    if (room && typeof room === 'object') {
+      rememberRoomStream(room);
+      if (state.roomStream) playRoomStream();
+    }
+    startSyncClock(code);
     connectSignal(code);
     beginCall();
   }
 
+  /**
+   * THE FILM KEEPS PLAYING. Leaving a party stops the corrections and nothing
+   * else — Roku says it out loud on the same action, "Left the watch party -
+   * carry on watching." Closing somebody's video because they left a chat room
+   * would be the same class of bug this whole item is about, in reverse.
+   */
   function leaveParty() {
     state.intentionalClose = true;
     closeSignal();
     teardownCall();
-    stopStatePolling();
+    stopSyncClock();
     removeStorage(CODE_KEY);
     state.code = null;
     state.discoveredCode = null;
+    state.roomStream = null;
+    state.guestStarted = false;
     hidePanelAndChip();
     updateLaunchButton();
   }
 
   function partyEnded(reason) {
+    const watching = Boolean(playerState());
     state.intentionalClose = true;
     closeSignal();
     teardownCall();
-    stopStatePolling();
+    stopSyncClock();
     removeStorage(CODE_KEY);
     state.code = null;
+    state.roomStream = null;
+    state.guestStarted = false;
     updateLaunchButton();
-    setHeadStatus('lost', reason || 'This watch party has ended.');
+    // Roku's own wording for the same moment, and for the same reason: the
+    // viewer is mid-film and the only thing that changed is that nothing is
+    // correcting them any more.
+    setHeadStatus('lost', reason || (watching
+      ? 'The watch party ended — carry on watching.'
+      : 'This watch party has ended.'));
+    renderSync('');
     // Leave the panel up for a moment so the message is readable, then drop it.
     window.setTimeout(() => { if (!state.code) hidePanelAndChip(); }, 2400);
   }
 
-  // --- /party/:code/state liveness polling (read-only, never drives the player) --
+  // --- the sync line ------------------------------------------------------
 
-  function stopStatePolling() {
-    if (state.statePollTimer) {
-      window.clearInterval(state.statePollTimer);
-      state.statePollTimer = 0;
+  /**
+   * One row saying what the sync is doing, plus the button that starts the
+   * room's film when nothing is playing here.
+   *
+   * A control that is drawn and does nothing is the defect this item is about,
+   * so the button is shown ONLY when there is a real stream to start and no
+   * player on screen to start it in.
+   */
+  function renderSync(note) {
+    if (!ui.syncText) return;
+    const status = playerState();
+    const offer = Boolean(state.code && state.roomStream && !status);
+    ui.syncPlay.hidden = !offer;
+    const text = note || (offer
+      ? 'The party is watching something. Select play to join in.'
+      : (state.code && !state.roomStream ? 'The party has not started anything yet.' : ''));
+    if (text !== state.syncNote) {
+      state.syncNote = text;
+      ui.syncText.textContent = text;
+    }
+    ui.sync.hidden = !text && !offer;
+  }
+
+  // --- the sync clock: liveness AND the correction, in one read ------------
+  //
+  // ONE CLOCK, not two. The Apple TV's startGuestClock() reads the room once
+  // per tick and does both jobs from that one answer — a 404 or a 410 ends the
+  // party, anything else is reconciled against — and a second poller here would
+  // mean two different pictures of the same room seconds apart.
+  //
+  // It is a self-scheduling timeout rather than an interval because the rate
+  // changes: two seconds while there is a film to correct, twelve while the
+  // panel is only carrying chat. An interval cannot change its own period.
+
+  function stopSyncClock() {
+    if (state.syncTimer) {
+      window.clearTimeout(state.syncTimer);
+      state.syncTimer = 0;
     }
   }
 
-  function startStatePolling(code) {
-    stopStatePolling();
-    state.statePollTimer = window.setInterval(async () => {
-      if (document.visibilityState === 'hidden') return;
-      const result = await requestJSON(`/party/${encodeURIComponent(code)}/state`);
-      if (state.code !== code) return; // left/switched while the request was in flight
-      if (result.status === 404 || result.status === 410) {
-        partyEnded('This watch party has ended.');
+  function startSyncClock(code) {
+    stopSyncClock();
+    const tick = async () => {
+      state.syncTimer = 0;
+      if (state.code !== code) return;
+      // A hidden tab is not watching anything. Keep the clock alive but skip
+      // the read, exactly as the old liveness poll did.
+      if (document.visibilityState !== 'hidden') {
+        const result = await requestJSON(`/party/${encodeURIComponent(code)}/state`);
+        if (state.code !== code) return; // left/switched while the request was in flight
+        if (result.status === 404 || result.status === 410) {
+          partyEnded();
+          return;
+        }
+        if (result.ok && result.body && typeof result.body === 'object') {
+          reconcile(result.body);
+        }
+        // Anything else is transport. Say nothing and read again — a guest that
+        // announced "the party ended" on every dropped packet would be wrong
+        // far more often than right.
       }
-    }, STATE_POLL_MS);
+      state.syncTimer = window.setTimeout(tick, currentPollMs());
+    };
+    state.syncTimer = window.setTimeout(tick, SYNC_POLL_MS);
+  }
+
+  function currentPollMs() {
+    return playerState() ? SYNC_POLL_MS : IDLE_POLL_MS;
+  }
+
+  /** app.js's player surface, or null when it has not loaded. */
+  function playerApi() {
+    const api = window.BlazingPlayer;
+    return (api && typeof api.status === 'function' && typeof api.step === 'function'
+      && typeof api.setPaused === 'function') ? api : null;
+  }
+
+  /** The player's own report, or null when there is no player on screen. */
+  function playerState() {
+    const api = playerApi();
+    if (!api) return null;
+    let status = null;
+    try { status = api.status(); } catch { return null; }
+    return (status && status.open) ? status : null;
+  }
+
+  /**
+   * Bring this browser back into step with the host.
+   *
+   * ORDER MATTERS, and it is the Apple TV's order: the seek is decided against
+   * the host's position BEFORE the pause state is applied. A paused host keeps
+   * posting the same position, so a guest that paused first would otherwise
+   * never catch up to it.
+   */
+  function reconcile(room) {
+    rememberRoomStream(room);
+
+    const status = playerState();
+    if (!status) {
+      // Nothing is playing here. The room is still live and the chat still
+      // works; the panel offers the film instead of driving one.
+      state.guestStarted = false;
+      renderSync('');
+      return;
+    }
+    if (!status.ready) {
+      renderSync('Starting the film…');
+      return;
+    }
+    if (status.position > 0) state.guestStarted = true;
+
+    const hostPaused = String(room.state || '').toLowerCase() === 'paused';
+    const hostPosition = Number(room.position);
+    const drift = Number.isFinite(hostPosition) ? hostPosition - status.position : 0;
+
+    let corrected = false;
+    if (state.guestStarted && Number.isFinite(hostPosition)
+        && Math.abs(drift) > DRIFT_TOLERANCE_SECS) {
+      corrected = playerApi().step(drift);
+    }
+    if (hostPaused !== status.paused) playerApi().setPaused(hostPaused);
+
+    if (!state.guestStarted && !hostPaused && status.paused) {
+      // Autoplay was refused and there is no gesture to spend. Say so rather
+      // than sitting at 0:00 looking synced.
+      renderSync('Select play to watch along with the party.');
+      return;
+    }
+    if (corrected) {
+      renderSync(drift > 0 ? 'Catching up with the host…' : 'Rewinding to the host…');
+      return;
+    }
+    renderSync(hostPaused ? 'The host paused.' : 'Playing in step with the host.');
+  }
+
+  /**
+   * Remember what the room is playing, so the panel can offer it.
+   *
+   * `streamUrl` is a URL this browser is about to hand to a <video> element, so
+   * it gets the same treatment every other network-supplied link in this app
+   * gets: https or nothing.
+   */
+  function rememberRoomStream(room) {
+    const url = httpsOnly(room && room.streamUrl);
+    if (!url) {
+      if (state.roomStream) {
+        state.roomStream = null;
+        renderSync('');
+      }
+      return;
+    }
+    const contentId = plainText(room && room.contentId);
+    if (state.roomStream && state.roomStream.url === url) return;
+    state.roomStream = { url, contentId };
+    renderSync('');
+  }
+
+  function httpsOnly(value) {
+    try {
+      const url = new URL(String(value || ''));
+      return url.protocol === 'https:' ? url.href : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Start what the room is watching, in this browser.
+   *
+   * Called from the panel's own button, never on a timer: this opens a video
+   * element with sound, and a browser only allows that off a real gesture.
+   * Nothing here tries to start at the host's position — the first reconcile
+   * tick does that jump through the same relative step that keeps the two in
+   * step for the rest of the film.
+   */
+  function playRoomStream() {
+    const api = playerApi();
+    if (!api || typeof api.open !== 'function' || !state.roomStream) return;
+    state.guestStarted = false;
+    api.open('Watch Party', state.roomStream.url);
+    const status = playerState();
+    renderSync(status ? 'Starting the film…'
+      : 'The party is playing something this browser cannot open.');
   }
 
   // --- /party/active discovery (best-effort; needs this browser's own device id) --
@@ -1019,6 +1267,18 @@
     head.append(ui.headDot, headText, ui.headMinimize, ui.headLeave);
 
     const body = element('div', 'wp-body');
+
+    // The sync line. First in the body on purpose: whether this browser is
+    // actually watching the same thing as everyone else is the one fact a
+    // watch party is for, and it belongs above the chat rather than under it.
+    ui.sync = element('div', 'wp-sync');
+    ui.sync.hidden = true;
+    ui.syncText = element('span', 'wp-sync-text', '');
+    ui.syncPlay = element('button', 'wp-sync-play', 'Play what the party is watching');
+    ui.syncPlay.type = 'button';
+    ui.syncPlay.hidden = true;
+    ui.sync.append(ui.syncText, ui.syncPlay);
+
     const callWrap = element('div', 'wp-call');
     ui.callNote = element('div', 'wp-call-note');
     ui.callNote.hidden = true;
@@ -1047,7 +1307,7 @@
     ui.chatEmpty = element('p', 'wp-chat-empty', 'Say hi — messages only reach people currently in this party.');
     ui.chatList.appendChild(ui.chatEmpty);
 
-    body.append(callWrap, reactions, ui.chatList);
+    body.append(ui.sync, callWrap, reactions, ui.chatList);
 
     ui.chatForm = element('form', 'wp-chat-form');
     ui.chatInput = element('input', 'wp-chat-input');
@@ -1086,6 +1346,7 @@
     ui.headMinimize.addEventListener('click', minimizePanel);
     ui.headLeave.addEventListener('click', leaveParty);
     ui.callRetry.addEventListener('click', retryCall);
+    ui.syncPlay.addEventListener('click', playRoomStream);
     ui.chatForm.addEventListener('submit', sendChatMessage);
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !ui.joinLayer.hidden) closeJoinDialog();

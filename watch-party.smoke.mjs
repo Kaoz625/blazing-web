@@ -196,6 +196,173 @@ const WITH_TURN = {
   await ctx.close();
 }
 
+// --- scenario 4: B30. the party actually DRIVES this browser's playback ------
+//
+// The gap this closes: a browser guest used to see the chat and the reactions
+// and nothing else — their video stayed wherever they left it, which is to say
+// the watch party had no effect on what they were watching. The Roku
+// (MainScene.brs onPartyPollState) and the Apple TV (PartySession.reconcile)
+// have corrected their own playhead against the host's for months.
+//
+// The fixture is a real 30-minute WebM, because a seek is the thing under test
+// and an element with no timeline cannot be seeked. VP8 rather than H264 on
+// purpose: CI runs Playwright's chromium, which ships without the proprietary
+// codecs, and a fixture that decodes on this Mac and nowhere else would turn a
+// green lane into a lie.
+{
+  const room = {
+    code: 'SYNC01',
+    contentId: 'tt900',
+    streamUrl: 'https://cdn.example.test/party.webm',
+    state: 'playing',
+    position: 0,
+    updatedAt: new Date().toISOString(),
+  };
+  const fixture = await readFile(join(ROOT, 'scripts', 'fixture-30min.webm'));
+
+  const ctx = await browser.newContext();
+  await ctx.grantPermissions(['camera', 'microphone'], { origin: base });
+  await ctx.addInitScript(STUBS);
+  await ctx.route('https://fleet.lyreosai.com/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/party/ice')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(WITH_TURN) });
+    }
+    if (url.includes('/party/active')) return route.fulfill({ status: 204, body: '' });
+    if (url.includes('/party/SYNC01/state')) {
+      room.updatedAt = new Date().toISOString();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(room) });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+  // RANGE REQUESTS ARE NOT OPTIONAL HERE. A plain 200 with the whole body makes
+  // the element unseekable in Chromium — `currentTime = 600` is accepted, does
+  // nothing, and the test then reports a broken seek that is really a broken
+  // fixture. Measured: without this, the guest stayed at 0.2s.
+  await ctx.route('https://cdn.example.test/**', (route) => {
+    const range = route.request().headers().range || '';
+    const match = /bytes=(\d*)-(\d*)/.exec(range);
+    if (!match) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'video/webm',
+        headers: { 'accept-ranges': 'bytes', 'content-length': String(fixture.length) },
+        body: fixture,
+      });
+    }
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Math.min(Number(match[2]), fixture.length - 1) : fixture.length - 1;
+    const slice = fixture.subarray(start, end + 1);
+    return route.fulfill({
+      status: 206,
+      contentType: 'video/webm',
+      headers: {
+        'accept-ranges': 'bytes',
+        'content-range': `bytes ${start}-${end}/${fixture.length}`,
+        'content-length': String(slice.length),
+      },
+      body: slice,
+    });
+  });
+  await prepareProfile(ctx);
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
+  await selectProfile(page);
+
+  await page.waitForSelector('#watch-party-launch-button');
+  await page.click('#watch-party-launch-button');
+  await page.fill('#watch-party-join-input', 'SYNC01');
+  await page.click('.wp-join-submit');
+
+  // 1. Joining starts what the room is watching. The join IS the gesture a
+  //    browser demands before it will play sound, which is why it happens here
+  //    and not on a timer.
+  await page.waitForFunction(
+    () => !document.querySelector('#player').hidden
+      && document.querySelector('#video').getAttribute('src') === 'https://cdn.example.test/party.webm',
+    null, { timeout: 20000 },
+  ).catch(() => {});
+  const opened = await page.evaluate(() => ({
+    hidden: document.querySelector('#player').hidden,
+    src: document.querySelector('#video').getAttribute('src'),
+  }));
+  check('joining a party starts what the party is watching',
+    opened.hidden === false && opened.src === 'https://cdn.example.test/party.webm',
+    JSON.stringify(opened));
+
+  // The element needs a timeline before anything can be corrected.
+  await page.waitForFunction(() => document.querySelector('#video').readyState >= 1,
+    null, { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('#video').currentTime > 0,
+    null, { timeout: 20000 });
+
+  // 2. The host is ten minutes in. The guest is at the start. One relative step
+  //    closes the whole gap — there is no separate start-at path.
+  room.position = 600;
+  await page.waitForFunction(() => Math.abs(document.querySelector('#video').currentTime - 600) < 15,
+    null, { timeout: 20000 }).catch(() => {});
+  const at = await page.evaluate(() => document.querySelector('#video').currentTime);
+  check('a guest behind the host is stepped up to the host', Math.abs(at - 600) < 15, `at ${at.toFixed(1)}s`);
+  check('the sync line says what it is doing',
+    /host/i.test(await page.locator('.wp-sync-text').textContent()),
+    await page.locator('.wp-sync-text').textContent());
+
+  // 3. The host pauses. So does this browser.
+  room.state = 'paused';
+  await page.waitForFunction(() => document.querySelector('#video').paused === true,
+    null, { timeout: 20000 }).catch(() => {});
+  check('the host pausing pauses the guest',
+    (await page.evaluate(() => document.querySelector('#video').paused)) === true);
+  check('and the panel says so',
+    (await page.locator('.wp-sync-text').textContent()) === 'The host paused.',
+    await page.locator('.wp-sync-text').textContent());
+
+  // 4. And resumes. Never a blind toggle: two ticks of the same state in a row
+  //    must not invert it.
+  room.state = 'playing';
+  await page.waitForFunction(() => document.querySelector('#video').paused === false,
+    null, { timeout: 20000 }).catch(() => {});
+  check('the host resuming resumes the guest',
+    (await page.evaluate(() => document.querySelector('#video').paused)) === false);
+  await page.waitForTimeout(5000);
+  check('two ticks of the same state do not toggle it back',
+    (await page.evaluate(() => document.querySelector('#video').paused)) === false);
+
+  // 5. Close the film while still in the party. The panel must OFFER it back —
+  //    a control that is drawn and does nothing is the exact defect this item
+  //    is about, so the button is asserted by pressing it, not by existing.
+  await page.click('#player-close');
+  await page.waitForFunction(() => document.querySelector('#player').hidden === true,
+    null, { timeout: 10000 });
+  await page.waitForSelector('.wp-sync-play:not([hidden])', { timeout: 20000 });
+  check('closing the film offers it back instead of leaving a dead panel',
+    (await page.locator('.wp-sync-play').textContent()) === 'Play what the party is watching');
+  await page.click('.wp-sync-play');
+  await page.waitForFunction(
+    () => !document.querySelector('#player').hidden
+      && document.querySelector('#video').getAttribute('src') === 'https://cdn.example.test/party.webm',
+    null, { timeout: 20000 },
+  ).catch(() => {});
+  check('and the button actually starts it',
+    (await page.evaluate(() => !document.querySelector('#player').hidden
+      && document.querySelector('#video').getAttribute('src'))) === 'https://cdn.example.test/party.webm');
+
+  // 6. Leaving stops the corrections and NOTHING else. Roku says the same thing
+  //    out loud on the same action: "Left the watch party - carry on watching."
+  await page.click('.wp-head-leave');
+  await page.waitForTimeout(3000);
+  const after = await page.evaluate(() => ({
+    hidden: document.querySelector('#player').hidden,
+    src: document.querySelector('#video').getAttribute('src'),
+  }));
+  check('leaving the party leaves the film playing',
+    after.hidden === false && after.src === 'https://cdn.example.test/party.webm',
+    JSON.stringify(after));
+
+  await ctx.close();
+}
+
 const real = errors.filter((e) => !/Failed to fetch|NetworkError|CORS|load resource/i.test(e));
 check('no page errors', real.length === 0, real.join(' | '));
 

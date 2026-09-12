@@ -4111,7 +4111,15 @@ async function loadStreams(meta) {
           source: String(s._from || '').replace(/^site:/, ''),
           res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
         });
-        openPlayer(meta.name, s.url, { headers: streamHeaders(s) });
+        // The WHOLE ranked list, and this row's place in it. A row picked by
+        // hand is not a dead end either - Roku's startPlayback() searches the
+        // same list for the same reason.
+        openPlayer(meta.name, s.url, {
+          headers: streamHeaders(s),
+          candidates: streams,
+          candidateIndex: streams.indexOf(s),
+          meta,
+        });
         // AFTER openPlayer, which clears it. This is the one press that arms
         // auto-next, and it arms it for the episode actually being played.
         playingEpisodeId = state.selectedEpisode ? state.selectedEpisode.id : '';
@@ -4330,7 +4338,12 @@ async function playSelected() {
       showSourceFallback(meta, 'No compatible direct stream is available right now.', result.refused);
       return;
     }
-    openPlayer(meta.name, playable.url, { headers: streamHeaders(playable) });
+    openPlayer(meta.name, playable.url, {
+      headers: streamHeaders(playable),
+      candidates: streams,
+      candidateIndex: streams.indexOf(playable),
+      meta,
+    });
     closeDetail();
   } catch {
     if (!isCurrent()) return;
@@ -4371,6 +4384,65 @@ function setPlayerState(kind, message) {
 --------------------------------------------------------------------------- */
 let playSession = 0;
 let playerWatchdog = null;
+
+/* ---------------------------------------------------------------------------
+   B10. AUTOMATIC SOURCE FAILOVER — walk the ranked list, the way the Roku and
+   the Fire TV already do.
+
+   This browser used to try ONE row. When it failed it asked /proxy/resolve for
+   the SAME url and, when that answered nothing, put an error on the screen and
+   stopped. Meanwhile the ranked list that produced that row - routinely 300-700
+   entries - was thrown away at the point of the pick. A dead debrid link is
+   invisible on the two televisions because the next source starts on its own;
+   here it ended the film.
+
+   The shape is the Roku's onTryNextStream (MainScene.brs:6480-6620) and the
+   Fire TV's tryNextCandidate (PlayerActivity.kt:635-649), and three things are
+   copied deliberately rather than re-invented:
+
+     THE POSITION IS CARRIED. A stall ten minutes in continues from ten minutes
+     in, not from where the player opened. Fire TV's rule:
+     `startAt = maxOf(startAt, currentPosition)`.
+
+     THE FAILED ROW IS MARKED DEAD before moving on, so the ranker sorts it to
+     the bottom of every future list for this title and the SECOND attempt
+     starts below the rows that already failed. Same store, same key and same
+     86400-second window as the Roku - see markDeadLink() above.
+
+     IT LANDS ON THE SOURCE LIST, never on Home. Markus on the Roku doing the
+     other thing: "it tried 2 sources stopped brought me back to the home
+     screen." He has already chosen what to watch; the point of holding hundreds
+     of sources is that the next one down might work.
+
+   HOW FAR IT WALKS ON ITS OWN: 19, which is Roku's LastAutoTry() to the number.
+   Not "all of them" - each dead link costs a stall-watchdog wait, so a 400-row
+   list would be a ten-minute silence. Twenty attempts is about a minute in the
+   bad case, and because every failure on the way is remembered, the next attempt
+   at the same title buys twenty FRESH sources rather than the same twenty
+   failures.
+
+   Only a caller that HAS a ranked list passes one. locker.js, youtube.js and
+   games.js hand over a single resolved URL and get exactly the behaviour they
+   had - one attempt, one honest error. That is also why there is no
+   locker carve-out here like the Roku's: a signed, time-limited locker link
+   never reaches this path in the first place.
+--------------------------------------------------------------------------- */
+const MAX_AUTO_TRY = 19;
+
+/** The ranked list behind whatever is on screen, and where in it we are. */
+let playbackCandidates = [];
+let candidateIndex = 0;
+/** Seconds to resume at on the next attempt. Carried across every failover. */
+let candidateResume = 0;
+/** The title, so exhaustion can put its source list back up. */
+let candidateMeta = null;
+
+function clearCandidates() {
+  playbackCandidates = [];
+  candidateIndex = 0;
+  candidateResume = 0;
+  candidateMeta = null;
+}
 
 function clearPlayerWatchdog() {
   if (playerWatchdog !== null) {
@@ -4425,13 +4497,27 @@ function watchPlayerLoad(session, originalUrl, canRetry) {
     clearPlayerWatchdog();
     video.removeEventListener('error', onFail);
     setPlayerState('playing');
+    // WHERE THE LAST ATTEMPT GOT TO. Nothing to do on a first load, where this
+    // is 0; after a failover it is the whole point of carrying the position -
+    // a debrid link that expires forty minutes in must not restart the film.
+    if (candidateResume > 1 && Number(video.currentTime) < candidateResume - 1) {
+      try { video.currentTime = candidateResume; } catch (e) { /* seek refused; play on */ }
+    }
+    // A DEAD LINK DOES NOT ALWAYS DIE DURING THE LOAD. A debrid URL that has
+    // already started can expire mid-film, and until now that was the end of
+    // the evening: the pair of listeners above are one-shot and both are gone
+    // by this line. Fire TV covers the same case with armStallTimeout() and its
+    // onPlayerError, and walks to the same ranked backups.
+    watchPlaybackFailure(session);
   };
   const onFail = () => {
     if (session !== playSession) return;
     clearPlayerWatchdog();
     video.removeEventListener('loadedmetadata', onReady);
     if (canRetry) retryViaProxy(session, originalUrl);
-    else setPlayerState('error', playFailureReason('This stream cannot play in this browser. Try another source.'));
+    else if (!tryNextCandidate(session, 'That link was dead')) {
+      giveUpOnCandidates(session, playFailureReason('This stream cannot play in this browser. Try another source.'));
+    }
   };
   video.addEventListener('loadedmetadata', onReady, { once: true });
   video.addEventListener('error', onFail, { once: true });
@@ -4442,8 +4528,28 @@ function watchPlayerLoad(session, originalUrl, canRetry) {
     video.removeEventListener('loadedmetadata', onReady);
     video.removeEventListener('error', onFail);
     if (canRetry) retryViaProxy(session, originalUrl);
-    else setPlayerState('error', playFailureReason('This stream did not start. Try another source.'));
+    else if (!tryNextCandidate(session, 'That source did not start')) {
+      giveUpOnCandidates(session, playFailureReason('This stream did not start. Try another source.'));
+    }
   }, PLAYER_STALL_TIMEOUT);
+}
+
+/**
+ * The mid-playback half of the failover. Armed once a load has succeeded and
+ * torn down by closePlayer() bumping the session.
+ *
+ * Only `error` is watched, never `stalled` or `waiting`: those two fire
+ * constantly on a healthy stream over a slow link, and treating them as death
+ * is how a film gets yanked to a different source in the middle of a scene.
+ */
+function watchPlaybackFailure(session) {
+  const onDied = () => {
+    if (session !== playSession) return;
+    if (!tryNextCandidate(session, 'That link stopped working')) {
+      giveUpOnCandidates(session, 'This source stopped part way through. Try another one.');
+    }
+  };
+  video.addEventListener('error', onDied, { once: true });
 }
 
 async function retryViaProxy(session, originalUrl) {
@@ -4451,7 +4557,11 @@ async function retryViaProxy(session, originalUrl) {
   const resolved = await resolveViaProxy(originalUrl);
   if (session !== playSession) return;
   if (!resolved || resolved === originalUrl) {
-    setPlayerState('error', playFailureReason('This stream cannot play in this browser. Try another source.'));
+    // The proxy had nothing for THIS row. That is the end of this source, not
+    // the end of the title - fall through to the next one on the ranked list.
+    if (!tryNextCandidate(session, 'That link was dead')) {
+      giveUpOnCandidates(session, playFailureReason('This stream cannot play in this browser. Try another source.'));
+    }
     return;
   }
   setPlayerState('loading');
@@ -4463,6 +4573,81 @@ async function retryViaProxy(session, originalUrl) {
   video.load();
   const play = video.play();
   if (play && typeof play.catch === 'function') play.catch(() => {});
+}
+
+/**
+ * Start the next row on the ranked list. False when there is no next row, which
+ * is the caller's cue to stop and say so.
+ *
+ * `reason` is the first half of a sentence, and the count is the second half:
+ * "That link was dead - trying 3 of 340...". Counted from 1 and always with the
+ * total, for the reason the Roku's own comment gives - "trying 3 of 340" is a
+ * progress report, and "trying 2" on its own reads like it is about to give up.
+ */
+function tryNextCandidate(session, reason) {
+  if (session !== playSession) return true; // superseded; there is nothing to report
+  if (!playbackCandidates.length) return false;
+
+  // A mid-playback failure continues from where it stopped, not from where the
+  // player opened. Fire TV: `startAt = maxOf(startAt, currentPosition)`.
+  const at = Number(video.currentTime);
+  if (Number.isFinite(at) && at > candidateResume) candidateResume = at;
+
+  // The row that just failed is remembered BEFORE moving on, so the ranker
+  // stops offering it first next time. Roku marks it at exactly this point.
+  const failed = playbackCandidates[candidateIndex];
+  if (failed && failed.url) markDeadLink(failed.url);
+
+  let next = candidateIndex + 1;
+  let url = '';
+  let stream = null;
+  while (next < playbackCandidates.length && next <= MAX_AUTO_TRY) {
+    stream = playbackCandidates[next];
+    url = stream ? safeHttpsUrl(stream.url) : '';
+    // A row with no link a browser can open is not an attempt; skipping it
+    // silently is right, but it must not also burn one of the twenty tries.
+    if (url) break;
+    next += 1;
+    url = '';
+  }
+  if (!url) return false;
+
+  candidateIndex = next;
+  showToast(`${reason} - trying ${candidateIndex + 1} of ${playbackCandidates.length}…`);
+
+  const declared = String(stream.streamFormat || '');
+  playerHeaders = streamHeaders(stream);
+  setPlayerState('loading');
+  // Same canRetry rule as openPlayer(): /proxy/resolve hands back a direct media
+  // file, so asking it about a manifest can only make the error slower.
+  watchPlayerLoad(session, url, !looksLikeHls(url, declared));
+  const attachError = attachSource(url, declared);
+  if (attachError) {
+    setPlayerState('error', attachError);
+    return true;
+  }
+  const play = video.play();
+  if (play && typeof play.catch === 'function') play.catch(() => {});
+  return true;
+}
+
+/**
+ * Out of automatic tries. Land on the SOURCE LIST whenever there is one to land
+ * on, never on Home - Roku's rule, and the reason it is a rule.
+ */
+function giveUpOnCandidates(session, message) {
+  if (session !== playSession) return;
+  const tried = playbackCandidates.length
+    ? Math.min(candidateIndex + 1, playbackCandidates.length)
+    : 0;
+  const meta = candidateMeta;
+  if (tried > 1 && meta) {
+    closePlayer();
+    showToast(`Tried ${tried} sources and none of them started. Pick one from the list.`);
+    openDetail(meta);
+    return;
+  }
+  setPlayerState('error', message);
 }
 
 
@@ -4683,6 +4868,24 @@ function openPlayer(title, rawUrl, opts) {
   const headers = (opts && opts.headers) || {};
   playerHeaders = headers;
 
+  // B10. THE REST OF THE RANKED LIST, kept rather than thrown away at the pick.
+  // Cleared on every call - including the ones that hand off to a native shell,
+  // so a stale list cannot be walked on behalf of a film that is no longer on.
+  clearCandidates();
+  const ranked = (opts && Array.isArray(opts.candidates)) ? opts.candidates : null;
+  if (ranked && ranked.length) {
+    playbackCandidates = ranked;
+    // Where in the list this url sits. Roku does the same search in
+    // startPlayback() so that a row PICKED BY HAND also falls through to the
+    // next one down rather than being a dead end.
+    const at = Number(opts.candidateIndex);
+    candidateIndex = Number.isInteger(at) && at >= 0 && at < ranked.length
+      ? at
+      : Math.max(0, ranked.findIndex((row) => row && row.url === rawUrl));
+    candidateMeta = (opts && opts.meta) || null;
+    candidateResume = Math.max(0, Number(opts.startAt) || 0);
+  }
+
   if (Platform.isAppleTV) {
     window.webkit.messageHandlers.avplayer.postMessage({ url, streamFormat: declared, headers });
     return;
@@ -4768,6 +4971,10 @@ function openPlayer(title, rawUrl, opts) {
 function closePlayer() {
   ++playSession;
   clearPlayerWatchdog();
+  // The ranked list belongs to the film that was on. Leaving it standing is how
+  // a late `error` event from the element being torn down here would otherwise
+  // start an unrelated source over whatever screen the viewer landed on.
+  clearCandidates();
   stopSync();
   destroyHls();
   $('#resume-btn').hidden = true;
@@ -4790,11 +4997,93 @@ function closePlayer() {
  * most. games.js draws its own bare <video> for a short promo clip and that is
  * fine; a full-length video is not that case.
  *
- * Assigned rather than declared as a global function so the surface stays two
- * names. It is the same pattern manga.js, games.js and media-library.js already
- * publish themselves through.
+ * Assigned rather than declared as a global function so the surface stays one
+ * named object. It is the same pattern manga.js, games.js and media-library.js
+ * already publish themselves through. It carried two entries — open and close —
+ * until B30 added the three the watch party drives playback through; see the
+ * block below for why those three and no more.
  */
-window.BlazingPlayer = { open: openPlayer, close: closePlayer };
+/* ---------------------------------------------------------------------------
+   B30. THE WATCH PARTY'S CONTROLLED HOOK INTO THE PLAYER.
+
+   watch-party.js is a self-contained module that draws a room - chat, five
+   reactions and a small mesh call - and it deliberately does not own a video
+   element. Its own header says so: "next to (never inside of) the existing
+   player", "never touches #video". That was the right boundary and it is kept.
+   What was missing is the other side of it: a narrow, named surface the party
+   may drive, so a browser guest's film moves with the host's instead of sitting
+   wherever they left it.
+
+   THE CORRECTION IS A RELATIVE STEP, NEVER AN ABSOLUTE SEEK. That rule is the
+   Apple TV's (Sources/PlayerView.swift:18-20) and it is not a style choice: the
+   party never computes a target, it computes a DRIFT, and the one number it
+   sends is how far this box is behind or ahead. An absolute path would be a
+   second way to move the playhead, tested once at join time and never again.
+   `step()` is therefore the only mover here, and the arithmetic that turns a
+   host position into a delta stays on the party's side of the line.
+
+   `status()` is the tick the Roku and the Apple TV both run - where this box is,
+   how long the film is, and whether it is paused. It only reads.
+--------------------------------------------------------------------------- */
+function playerStatus() {
+  const duration = Number(video.duration);
+  const position = Number(video.currentTime);
+  return {
+    open: !player.hidden,
+    // readyState 1 is HAVE_METADATA: below it there is no timeline to move.
+    ready: video.readyState >= 1,
+    position: Number.isFinite(position) ? position : 0,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+    paused: Boolean(video.paused),
+    title: playerTitle.textContent || '',
+  };
+}
+
+/** Move the playhead by [seconds], + or -. False when there is nothing to move. */
+function playerStep(seconds) {
+  const delta = Number(seconds);
+  if (!Number.isFinite(delta) || !delta) return false;
+  if (player.hidden || video.readyState < 1) return false;
+  const duration = Number(video.duration);
+  const from = Number.isFinite(Number(video.currentTime)) ? Number(video.currentTime) : 0;
+  let target = from + delta;
+  if (target < 0) target = 0;
+  // One second short of the end, never past it. Seeking to exactly `duration`
+  // fires `ended` and the auto-next queue would take the party somewhere the
+  // host is not.
+  if (Number.isFinite(duration) && duration > 1 && target > duration - 1) target = duration - 1;
+  try { video.currentTime = target; } catch (e) { return false; }
+  return true;
+}
+
+/**
+ * Match the host's play state.
+ *
+ * Never a blind toggle - Apple TV's note on the same call. The party asks for a
+ * STATE, so two reconcile ticks in a row cannot invert it and pause a film the
+ * host is watching. A browser may still refuse to start audio without a
+ * gesture; the refusal is swallowed here and the party reads it back on its
+ * next tick from `status().paused`, which is the only honest signal there is.
+ */
+function playerSetPaused(paused) {
+  if (player.hidden) return false;
+  if (paused) {
+    if (!video.paused) video.pause();
+    return true;
+  }
+  if (!video.paused) return true;
+  const play = video.play();
+  if (play && typeof play.catch === 'function') play.catch(() => {});
+  return true;
+}
+
+window.BlazingPlayer = {
+  open: openPlayer,
+  close: closePlayer,
+  status: playerStatus,
+  step: playerStep,
+  setPaused: playerSetPaused,
+};
 /**
  * RESTORED, both of these. The BlazeOS Phase 1 patch (48f1be5) deleted
  * loadContinueWatching() outright while leaving five calls to it standing —
@@ -5420,7 +5709,12 @@ async function autoNextEpisode() {
     source: String(pick._from || '').replace(/^site:/, ''),
     res: Number((qualityOf(pick).match(/\d+/) || [0])[0]) || 0,
   });
-  openPlayer(meta.name, pick.url, { headers: streamHeaders(pick) });
+  openPlayer(meta.name, pick.url, {
+    headers: streamHeaders(pick),
+    candidates: streams,
+    candidateIndex: streams.indexOf(pick),
+    meta,
+  });
   // Re-armed for the episode that just started, or the one after this would
   // never advance — openPlayer clears it on the way in.
   playingEpisodeId = next.id;
