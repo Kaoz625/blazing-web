@@ -107,6 +107,71 @@
     return next !== null && next !== now ? next : null;
   }
 
+  /* ── the parental rule module ─────────────────────────────────────────────
+   *
+   * B28's fix line: "Copy the rule module too — ProfileGateRules.newProfileFields
+   * is the tested Kids interlock and neither client has one." This is that
+   * module, ported function for function from firetv ProfileGateRules.kt, and
+   * kept as pure functions beside avatarChange() for the same reason that file
+   * gives: a rule left inline in a click handler is a rule with no test behind
+   * it, and that is exactly how the Fire TV's own Kids interlock was wrong for
+   * weeks — the listener assigned maxRating and only THEN returned on the kids
+   * case, so a Kids profile could be created capped at "adult".
+   */
+
+  /** firetv ProfileClient.kt:47 — the order IS the ladder, lowest first. */
+  const RATINGS = Object.freeze(['general', 'teen', 'mature', 'adult']);
+  /** firetv ProfileClient.kt:51. A kids profile is pinned here, adult off. */
+  const KIDS_CAP = 'general';
+
+  /** True when a cap admits content at `tier`. Unknown tier is not a verdict. */
+  function ratingAllowed(cap, tier) {
+    const capIndex = RATINGS.indexOf(String(cap || '').toLowerCase());
+    if (capIndex < 0) return false;
+    const tierIndex = RATINGS.indexOf(String(tier || '').toLowerCase());
+    if (tierIndex < 0) return false;
+    return tierIndex <= capIndex;
+  }
+
+  /**
+   * May the edit form offer Delete?
+   *
+   * NEVER on the last profile in the house — firetv ProfileGateRules.kt:28.
+   * A picker with zero rows is a broken picker, not an empty one: the gate
+   * would land on the first-run copy with a household that already has an
+   * account, a device token and watch history, and no way back to any of it.
+   */
+  const canDelete = (profileCount) => profileCount > 1;
+
+  /**
+   * The fields a profile is actually written with, after the Kids interlock.
+   *
+   * The fleet forces KIDS_CAP with adult off on isKids:true, so sending
+   * anything else is either silently overridden or rejected — and in the
+   * meantime the form has been telling the household something untrue about
+   * the profile they are making. An unrecognised rating falls back to 'teen',
+   * the same conservative default profileFrom() uses.
+   */
+  function newProfileFields(isKids, maxRating, allowAdult) {
+    if (isKids) return { isKids: true, maxRating: KIDS_CAP, allowAdult: false };
+    const cap = RATINGS.includes(String(maxRating || '').toLowerCase())
+      ? String(maxRating).toLowerCase() : 'teen';
+    return { isKids: false, maxRating: cap, allowAdult: allowAdult === true };
+  }
+
+  /** Is this rating change a RAISE? A raise is what needs the PIN. */
+  function raising(from, to) {
+    const a = RATINGS.indexOf(String(from || '').toLowerCase());
+    const b = RATINGS.indexOf(String(to || '').toLowerCase());
+    return b > a;
+  }
+
+  /** firetv ProfileGateRules.kt:121 — not a Kids profile, and at least 'mature'. */
+  function grownUp(profile) {
+    if (!profile || profile.isKids === true) return false;
+    return ratingAllowed(profile.maxRating, 'mature');
+  }
+
   const state = {
     credentials: null,
     profiles: [],
@@ -159,6 +224,25 @@
     // because the grid's own buttons are rebuilt on every open and a closure
     // over a stale profile would PATCH the wrong id after a refresh.
     iconProfile: null,
+    // ── parental controls ────────────────────────────────────────────────
+    // The profile the parental sheet is open on, held for the same reason
+    // iconProfile is: the sheet is rebuilt after every save and a closure over
+    // a stale object would write to a profile that has since been replaced by
+    // a fresh listing.
+    parentalProfile: null,
+    // What the PIN pad is collecting right now:
+    //   ''        the profile unlock at the gate (what it has always done)
+    //   'unlock'  a re-verify from the parental sheet, to earn an unlockToken
+    //   'newpin'  four digits to SET as the PIN — never sent to /verify
+    // ownerMode is still its own flag, because the owner pad is seven digits
+    // and belongs to the gate rather than to a profile.
+    padPurpose: '',
+    // What to run once 'unlock'/'newpin' has its digits. Cleared before it is
+    // called, so a handler that re-opens the pad cannot re-enter itself.
+    padAfter: null,
+    // Delete asks twice, in the button itself. Reset by every re-render, so
+    // walking away from the sheet disarms it.
+    deleteArmed: false,
   };
 
   const ui = {};
@@ -341,6 +425,26 @@
       .bp-icon:hover, .bp-icon:focus-visible { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.11); outline: none; }
       .bp-icon[aria-checked="true"] { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.13); box-shadow: 0 0 0 3px var(--accent-glow, rgba(255,61,71,.35)); }
       .bp-icon:disabled { cursor: wait; opacity: .52; }
+      /* PARENTAL CONTROLS. One column of full-width rows, which is the shape
+         Fire TV's ParentalSettingsActivity uses (a vertical LinearLayout of
+         Buttons) and the shape Roku's openProfileEditMenu uses (a Dialog button
+         list). The rating ladder is the one exception and is a row of four,
+         because it is a choice between values rather than a toggle — the same
+         horizontal weightSum row ParentalSettingsActivity.kt:107-125 draws. */
+      .bp-parental[hidden] { display: none; }
+      .bp-parental-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+      .bp-parental-row { min-height: 52px; width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 12px 16px; color: inherit; background: rgba(255,255,255,.05); font-size: 15px; font-weight: 800; text-align: left; }
+      .bp-parental-row:hover:not(:disabled), .bp-parental-row:focus-visible { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.1); outline: none; }
+      .bp-parental-row:disabled { opacity: .45; cursor: not-allowed; }
+      .bp-parental-row[data-tone="danger"] { border-color: rgba(255,61,71,.55); color: #ff8a8f; }
+      .bp-parental-label { margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+      .bp-parental-ratings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+      .bp-parental-rating { min-height: 48px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 4px; color: inherit; background: rgba(255,255,255,.05); font-size: 13px; font-weight: 800; }
+      .bp-parental-rating[aria-pressed="true"] { border-color: var(--accent, #ff3d47); background: rgba(255,61,71,.2); }
+      .bp-parental-rating:disabled { opacity: .45; cursor: not-allowed; }
+      .bp-parental-note { margin: 14px 0 0; color: var(--muted, #a3a3aa); font-size: 13px; line-height: 1.45; }
+      .bp-parental-note[data-tone="error"] { color: #ff8a8f; }
+      .bp-parental-note[data-tone="success"] { color: #7ee2a8; }
       .bp-pin { margin-top: 22px; }
       .bp-pin[hidden] { display: none; }
       .bp-pin-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -569,6 +673,10 @@
     'signupBack', 'signupName', 'signupEmail', 'signupPassword', 'signupSubmit',
     'emailBack', 'emailAddress', 'emailPassword', 'emailSubmit',
     'approveBack', 'approveInput', 'approveYes', 'approveNo',
+    // The parental sheet's own way out. Its ROWS are rebuilt by
+    // renderParental() and read state.busy themselves, the way the icon tiles
+    // and the profile tiles do, so only the Back button needs a key here.
+    'parentalBack',
   ];
 
   function setBusy(busy) {
@@ -583,9 +691,14 @@
     // The pencil and the icon tiles are in this list for the same reason the
     // profile tiles are: they are built by renderProfileList()/showIconPicker()
     // rather than held in `ui`, so setBusy() cannot reach them by key.
-    document.querySelectorAll('.bp-profile, .bp-pencil, .bp-icon, .bp-digit, .bp-action').forEach((button) => {
+    document.querySelectorAll('.bp-profile, .bp-pencil, .bp-icon, .bp-digit, .bp-action, .bp-parental-row, .bp-parental-rating').forEach((button) => {
       button.disabled = busy || button.dataset.unavailable === 'true';
     });
+    // A row that is disabled for a REASON — Remove PIN on a profile with no
+    // PIN, the rating ladder on a Kids profile — must not come back live when
+    // the busy flag clears. renderParental() is the only thing that knows
+    // which those are, so it decides again.
+    if (!busy && ui.parental && !ui.parental.hidden) renderParental();
   }
 
   function clearUnlock() {
@@ -808,14 +921,17 @@
       pencil.disabled = state.busy || profile.disabled;
       pencil.dataset.unavailable = String(profile.disabled);
       // The glyph is decoration; the label is the whole control for anyone not
-      // looking at it.
-      pencil.setAttribute('aria-label', `Change the picture for ${profile.name}`);
+      // looking at it. It no longer says "picture": the pencil opened a picture
+      // grid and nothing else, which is why this client had no parental
+      // surface at all (B28) — it now opens the whole edit sheet, with the
+      // picture as one row of it.
+      pencil.setAttribute('aria-label', `Edit ${profile.name}`);
       pencil.addEventListener('click', (event) => {
         // The tile behind it selects a profile, and selecting a profile closes
-        // the panel. Without this, the pencil opened the chooser and the click
+        // the panel. Without this, the pencil opened the sheet and the click
         // fell through to the tile that shut it again.
         event.stopPropagation();
-        showIconPicker(profile);
+        showParental(profile);
       });
       // The pencil is over the tile's own artwork, so keep the art in step with
       // it rather than letting the backdrop go stale under a focused control.
@@ -908,7 +1024,7 @@
       // Not an error, and not silence either — the tap did land, it just had
       // nothing to do. Fire TV's avatarChange returns null here and skips the
       // call the same way.
-      showProfiles(`${profile.name} already uses that picture.`);
+      backFromIcons(profile, `${profile.name} already uses that picture.`);
       return;
     }
     if (!state.credentials) {
@@ -940,10 +1056,435 @@
       const live = state.profiles.find((entry) => entry.id === profile.id);
       if (live) live.avatar = value;
       if (state.activeProfile && state.activeProfile.id === profile.id) state.activeProfile.avatar = value;
-      showProfiles(`${profile.name} now uses ${value}.`);
+      backFromIcons(profile, `${profile.name} now uses ${value}.`);
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Where the picture grid goes back to.
+   *
+   * It has two doors now: the parental sheet's "Profile picture" row, which is
+   * how the pencil reaches it, and nothing else — but a future caller that
+   * opens it straight off the rail must still land on the rail rather than on
+   * a sheet nobody opened. So the answer is "wherever this was opened from",
+   * not a fixed screen.
+   */
+  function backFromIcons(profile, message) {
+    state.iconProfile = null;
+    if (state.parentalProfile && profile && state.parentalProfile.id === profile.id) {
+      // The sheet's labels read off the profile object, and the avatar just
+      // changed on it, so the sheet has to be rebuilt rather than re-shown.
+      state.parentalProfile = state.profiles.find((entry) => entry.id === profile.id) || profile;
+      showParental(state.parentalProfile);
+      if (message) setStatus(message, 'info');
+      return;
+    }
+    showProfiles(message);
+  }
+
+  /* ── PARENTAL CONTROLS ────────────────────────────────────────────────────
+   *
+   * B1 / B3 / B15 / B28. Until this sheet existed the browser could change a
+   * profile's PICTURE and nothing else: profile.js's only PATCH sent
+   * `{avatar}` and there was no DELETE anywhere in the file. A household that
+   * only used the web could never set a rating cap, never make a Kids profile,
+   * never turn adult content off, never create or remove a PIN, and never
+   * delete a profile made by mistake. The web even said so out loud — "A PIN
+   * can be added later on a TV."
+   *
+   * PORTED WHOLESALE from firetv ParentalSettingsActivity.kt:88-213: the same
+   * controls, in the same order, with the same labels and the same interlocks.
+   * Roku's openProfileEditMenu (MainScene.brs:4802-4838) is the same list again
+   * with Rename and Profile Color, which the browser does not have surfaces
+   * for; everything the two TVs share is here.
+   *
+   * THE PIN IS NOT A FORMALITY. Raising the rating cap, or turning adult
+   * content on, both go through a fresh /verify first, because the fleet
+   * refuses a raise without an unlock token anyway (server profiles.js 401s
+   * it). Doing it here means a failed or skipped check can never leave this
+   * screen showing a state the server would have rejected.
+   */
+  function showParental(profile) {
+    if (state.busy || !profile) return;
+    state.parentalProfile = profile;
+    state.deleteArmed = false;
+    hideAllScreens();
+    setPanelView('');
+    ui.parental.hidden = false;
+    ui.kicker.textContent = 'Parental controls';
+    ui.heading.textContent = profile.name;
+    renderParental();
+    setStatus('Changes save at once.', 'info');
+    window.setTimeout(() => ui.parentalRows.querySelector('button:not(:disabled)')?.focus(), 0);
+  }
+
+  function parentalNote(message, tone = 'info') {
+    if (!ui.parentalNote) return;
+    ui.parentalNote.textContent = message;
+    ui.parentalNote.dataset.tone = tone;
+  }
+
+  /**
+   * Rebuilt whole after every save, so a label can never drift from what the
+   * server actually holds — the same promise rebuildPlaybackForm makes on the
+   * Fire TV and buildButtons makes on the Roku.
+   */
+  function renderParental() {
+    const profile = state.parentalProfile;
+    if (!profile || !ui.parentalRows) return;
+    ui.parentalRows.replaceChildren();
+    const onOff = (value) => (value ? 'ON' : 'OFF');
+
+    const row = (label, onPress, { disabled = false, tone = '', id = '' } = {}) => {
+      const node = element('button', 'bp-parental-row', label);
+      node.type = 'button';
+      node.disabled = state.busy || disabled;
+      if (tone) node.dataset.tone = tone;
+      if (id) node.id = id;
+      node.addEventListener('click', onPress);
+      ui.parentalRows.appendChild(node);
+      return node;
+    };
+
+    /* Kids profile. Turning it ON is the ONE change that needs no PIN and
+       still tightens everything: newProfileFields pins the cap to KIDS_CAP and
+       clears allowAdult in the SAME request, so the fleet is never sent a pair
+       it has to reconcile. Turning it OFF only removes the kids flag; the cap
+       stays where it was and has to be raised deliberately, which is a raise
+       and therefore needs the PIN. */
+    row(`Kids profile: ${onOff(profile.isKids)}`, () => {
+      const next = !profile.isKids;
+      if (next) {
+        const fields = newProfileFields(true, profile.maxRating, profile.allowAdult);
+        applyParental(fields);
+      } else {
+        applyParental({ isKids: false });
+      }
+    }, { id: 'bp-parental-kids' });
+
+    const ratingLabel = element('p', 'bp-parental-label', 'Rating limit');
+    ui.parentalRows.appendChild(ratingLabel);
+    const ratings = element('div', 'bp-parental-ratings');
+    ratings.id = 'bp-parental-ratings';
+    ratings.setAttribute('role', 'group');
+    ratings.setAttribute('aria-label', 'Rating limit');
+    RATINGS.forEach((tier) => {
+      const chosen = tier === String(profile.maxRating || '').toLowerCase();
+      // Fire TV writes the chosen one as "[mature]"; a browser has a pressed
+      // state, so the brackets would be a second, redundant marker.
+      const node = element('button', 'bp-parental-rating', tier);
+      node.type = 'button';
+      node.setAttribute('aria-pressed', chosen ? 'true' : 'false');
+      // A kids profile is pinned to KIDS_CAP by the fleet, so offering the
+      // ladder would be offering a change that is silently thrown away.
+      node.disabled = state.busy || profile.isKids || chosen;
+      node.addEventListener('click', () => {
+        if (tier === profile.maxRating) return;
+        if (raising(profile.maxRating, tier)) {
+          requireUnlockThen(profile, (token) => applyParental({ maxRating: tier }, token));
+        } else {
+          applyParental({ maxRating: tier });
+        }
+      });
+      ratings.appendChild(node);
+    });
+    ui.parentalRows.appendChild(ratings);
+
+    /* B1. "Allow adult content" could only be turned on from a Fire TV, and
+       Roku and Apple TV both draw an Adult destination gated on a flag neither
+       could ever set. Same shape as the Fire TV's: OFF needs nothing, ON needs
+       a fresh PIN check. Note it does NOT also push maxRating='adult' — the
+       audit's fix line says Fire TV does that at ParentalSettingsActivity.kt:
+       127-139 and it does not; that file sends allowAdult alone. Parity means
+       copying what the client actually does. */
+    row(`Allow adult content: ${onOff(profile.allowAdult)}`, () => {
+      if (profile.allowAdult) applyParental({ allowAdult: false });
+      else requireUnlockThen(profile, (token) => applyParental({ allowAdult: true }, token));
+    }, { disabled: profile.isKids, id: 'bp-parental-adult' });
+
+    // The picture. It is the surface this pencil used to open directly, and it
+    // keeps working — it is just one row of the sheet now instead of the whole
+    // sheet. No PIN: the fleet needs no unlock token for an avatar.
+    row('Profile picture', () => showIconPicker(profile), { id: 'bp-parental-icon' });
+
+    /* B3. Set / Change / Remove PIN. The wire contract is the one every TV
+       already uses: PATCH /profiles/:id with {"pin":"1234"} to set, and with
+       {"pin":null} to clear — firetv ProfileClient.kt:515 — plus
+       ?unlockToken=… in the query when one is needed. */
+    row(profile.hasPin ? 'Change PIN' : 'Set PIN', () => {
+      if (profile.hasPin) {
+        requireUnlockThen(profile, (token) => collectNewPin((pin) => applyParental({ pin }, token)));
+      } else {
+        collectNewPin((pin) => applyParental({ pin }));
+      }
+    }, { id: 'bp-parental-pin' });
+
+    row('Remove PIN', () => {
+      requireUnlockThen(profile, (token) => applyParental({ clearPin: true }, token));
+    }, { disabled: !profile.hasPin, id: 'bp-parental-pin-remove' });
+
+    /* B15. Delete. TWO PRESSES, in the button itself — firetv
+       ParentalSettingsActivity.kt:170-200 moved to this shape after one press
+       on the wrong row of a 10-foot list removed a household member and their
+       whole watch history. And it is not drawn at all on a one-profile
+       household: canDelete(). */
+    if (canDelete(state.profiles.length)) {
+      const deleteRow = row(
+        state.deleteArmed ? `Press again to delete ${profile.name}` : 'Delete profile',
+        () => {
+          if (!state.deleteArmed) {
+            state.deleteArmed = true;
+            parentalNote('This cannot be undone.', 'error');
+            renderParental();
+            window.setTimeout(() => document.getElementById('bp-parental-delete')?.focus(), 0);
+            return;
+          }
+          if (profile.hasPin) requireUnlockThen(profile, (token) => deleteParental(profile, token));
+          else deleteParental(profile, null);
+        },
+        { tone: 'danger', id: 'bp-parental-delete' },
+      );
+      deleteRow.setAttribute('aria-label', state.deleteArmed
+        ? `Confirm deleting ${profile.name}` : `Delete ${profile.name}`);
+    }
+
+    row('Done', () => showProfiles(), { id: 'bp-parental-done' });
+  }
+
+  /**
+   * PATCH /profiles/:id?deviceId=…[&unlockToken=…] with ONLY the fields that
+   * changed.
+   *
+   * Same rule as chooseAvatar's: naming a field is what makes it change, so a
+   * fuller body would overwrite whatever a television wrote a second ago.
+   * `clearPin` is the one field that is not sent under its own name — the wire
+   * contract for "remove the PIN" is `pin: null` (firetv ProfileClient.kt:515,
+   * roku ProfilesApi.brs:183-189).
+   */
+  async function applyParental(change, unlockToken = null) {
+    const profile = state.parentalProfile;
+    if (state.busy || !profile) return;
+    if (!state.credentials) {
+      parentalNote('This browser is not connected yet. Select Refresh profiles first.', 'error');
+      return;
+    }
+    const body = {};
+    if (typeof change.name === 'string') body.name = change.name;
+    if (typeof change.avatar === 'string') body.avatar = change.avatar;
+    if (typeof change.isKids === 'boolean') body.isKids = change.isKids;
+    if (typeof change.maxRating === 'string') body.maxRating = change.maxRating;
+    if (typeof change.allowAdult === 'boolean') body.allowAdult = change.allowAdult;
+    if (change.clearPin === true) body.pin = null;
+    else if (typeof change.pin === 'string' && change.pin) body.pin = change.pin;
+    if (!Object.keys(body).length) return;
+
+    state.deleteArmed = false;
+    setBusy(true);
+    parentalNote('Saving…', 'info');
+    renderParental();
+    try {
+      let path = `/profiles/${encodeURIComponent(profile.id)}?deviceId=${encodeURIComponent(state.credentials.id)}`;
+      if (unlockToken) path += `&unlockToken=${encodeURIComponent(unlockToken)}`;
+      const result = await request(path, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        body: JSON.stringify(body),
+      });
+      if (result.status === 401 || result.status === 403) {
+        parentalNote(serverError(result, 'That change needs this profile’s PIN. Try again.'), 'error');
+        return;
+      }
+      if (!result.ok) {
+        parentalNote(serverError(result, result.timeout
+          ? 'The profile server did not answer in time. Nothing was changed.'
+          : 'Could not save that change.'), 'error');
+        return;
+      }
+      // Trust the server's echo over what was sent: it is the record every
+      // other screen and every other television will read.
+      const saved = profileFrom(result.body && result.body.profile);
+      if (saved) {
+        state.parentalProfile = saved;
+        const index = state.profiles.findIndex((entry) => entry.id === saved.id);
+        if (index >= 0) state.profiles[index] = saved;
+        // The viewer may be editing the profile they are WATCHING as. A cap
+        // that just came down has to reach app.js now, not at the next reload,
+        // or the shelves keep showing what the new cap forbids.
+        if (state.activeProfile && state.activeProfile.id === saved.id) {
+          state.activeProfile = saved;
+          dispatchProfileSelection(saved);
+        }
+      }
+      parentalNote('Saved.', 'success');
+    } finally {
+      setBusy(false);
+      renderParental();
+    }
+  }
+
+  /** DELETE /profiles/:id?deviceId=…[&unlockToken=…] — firetv ProfileClient.kt:528. */
+  async function deleteParental(profile, unlockToken) {
+    if (state.busy || !profile || !state.credentials) return;
+    setBusy(true);
+    parentalNote('Deleting…', 'info');
+    renderParental();
+    try {
+      let path = `/profiles/${encodeURIComponent(profile.id)}?deviceId=${encodeURIComponent(state.credentials.id)}`;
+      if (unlockToken) path += `&unlockToken=${encodeURIComponent(unlockToken)}`;
+      const result = await request(path, {
+        method: 'DELETE',
+        headers: { 'X-Device-Token': state.credentials.token },
+      });
+      if (!result.ok) {
+        state.deleteArmed = false;
+        parentalNote(serverError(result, result.timeout
+          ? 'The profile server did not answer in time. Nothing was deleted.'
+          : 'Could not delete this profile.'), 'error');
+        return;
+      }
+      // The profile that just went may be the one this browser is watching as.
+      const wasActive = state.activeProfile && state.activeProfile.id === profile.id;
+      if (wasActive) clearActiveProfile();
+      state.parentalProfile = null;
+      state.deleteArmed = false;
+      const listing = await listProfiles(state.credentials);
+      applyProfileList(listing);
+      showProfiles(`${profile.name} was deleted.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Verify this profile's existing PIN, then run `onUnlocked` with the token.
+   *
+   * If the profile has NO PIN a raise is impossible — there is nothing to
+   * verify against, which matches the server, whose patchProfile requires a
+   * token from a real /verify call. firetv ParentalSettingsActivity.kt:216-224,
+   * same sentence.
+   */
+  function requireUnlockThen(profile, onUnlocked) {
+    if (!profile.hasPin) {
+      parentalNote('Set a PIN first — adult access needs one to unlock.', 'error');
+      return;
+    }
+    state.padPurpose = 'unlock';
+    state.padAfter = onUnlocked;
+    openParentalPad(profile, 'Enter this profile’s PIN, then select Verify.');
+  }
+
+  /** Collect four digits to SET. Nothing is sent to /verify — there is nothing
+   *  to check them against; they ARE the new PIN. */
+  function collectNewPin(onChosen) {
+    state.padPurpose = 'newpin';
+    state.padAfter = onChosen;
+    openParentalPad(state.parentalProfile, 'Enter four digits for the new PIN, then select Save.');
+  }
+
+  function openParentalPad(profile, message) {
+    state.pendingProfile = profile;
+    clearPinEntry();
+    hideAllScreens();
+    setPanelView('');
+    ui.pin.hidden = false;
+    renderPin();
+    setStatus(message, 'info');
+    window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
+  }
+
+  /** Leave the pad without doing the thing it was collecting for. */
+  function leaveParentalPad(message) {
+    const profile = state.parentalProfile;
+    state.padPurpose = '';
+    state.padAfter = null;
+    state.pendingProfile = null;
+    clearPinEntry();
+    if (profile) showParental(profile);
+    else showProfiles();
+    if (message) setStatus(message, 'info');
+  }
+
+  /**
+   * The pad's Verify while the parental sheet owns it.
+   *
+   * 'newpin' never touches the network: four digits and a callback. 'unlock'
+   * posts the same /verify the gate posts and keeps the token ONLY long enough
+   * to hand it to the pending action — it is deliberately not written into
+   * state.unlockToken, which is the watching session's grant and has its own
+   * expiry.
+   */
+  async function verifyParentalPin() {
+    const profile = state.pendingProfile || state.parentalProfile;
+    if (state.busy || !profile || state.pinDigits.length !== 4) return;
+
+    if (state.padPurpose === 'newpin') {
+      const pin = state.pinDigits.join('');
+      const after = state.padAfter;
+      state.padPurpose = '';
+      state.padAfter = null;
+      state.pendingProfile = null;
+      clearPinEntry();
+      showParental(state.parentalProfile || profile);
+      if (after) after(pin);
+      return;
+    }
+
+    if (!state.credentials) {
+      leaveParentalPad('This browser is not connected yet. Select Refresh profiles first.');
+      return;
+    }
+    let candidate = state.pinDigits.join('');
+    let requestBody = JSON.stringify({ pin: candidate });
+    clearPinEntry();
+    setBusy(true);
+    setStatus('Checking this profile…', 'info');
+    let result;
+    try {
+      result = await request(`/profiles/${encodeURIComponent(profile.id)}/verify?deviceId=${encodeURIComponent(state.credentials.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+        body: requestBody,
+      });
+    } finally {
+      candidate = '';
+      requestBody = '';
+      setBusy(false);
+      renderPin();
+    }
+    if (!result.ok) {
+      if (result.status === 429) setStatus('Too many PIN checks. Wait before trying this profile again.', 'error');
+      else setStatus(serverError(result, result.timeout
+        ? 'The profile server did not answer in time. Nothing was changed.'
+        : 'Could not check this PIN. Nothing was changed.'), 'error');
+      return;
+    }
+    const body = result.body || {};
+    if (body.ok !== true) {
+      const lockedUntil = text(body.lockedUntil);
+      if (lockedUntil) {
+        const date = new Date(lockedUntil);
+        const when = Number.isNaN(date.getTime()) ? 'the time shown by the profile server' : date.toLocaleString();
+        setStatus(`This profile is locked until ${when}.`, 'error');
+      } else if (Number.isInteger(body.attemptsLeft)) {
+        setStatus(`That PIN was not accepted. ${body.attemptsLeft} attempt${body.attemptsLeft === 1 ? '' : 's'} left.`, 'error');
+      } else {
+        setStatus('That PIN was not accepted. Try again.', 'error');
+      }
+      return;
+    }
+    const unlockToken = text(body.unlockToken);
+    if (!unlockToken) {
+      setStatus('The profile server returned an unusable unlock. Nothing was changed.', 'error');
+      return;
+    }
+    const after = state.padAfter;
+    state.padPurpose = '';
+    state.padAfter = null;
+    state.pendingProfile = null;
+    showParental(state.parentalProfile || profile);
+    if (after) after(unlockToken);
   }
 
   function renderPin() {
@@ -956,10 +1497,18 @@
     ui.pin.hidden = !active;
     if (!active) return;
     const length = pinLength();
-    ui.pinName.textContent = state.ownerMode ? 'Owner PIN' : profile.name;
+    ui.pinName.textContent = state.ownerMode ? 'Owner PIN'
+      : state.padPurpose === 'newpin' ? `New PIN for ${profile.name}`
+        : profile.name;
     // "Choose another profile" is a lie on the owner pad: from the gate there
-    // are no profiles to choose from yet, and Back goes to the gate.
-    ui.back.textContent = state.ownerMode ? 'Back' : 'Choose another profile';
+    // are no profiles to choose from yet, and Back goes to the gate. It is a
+    // lie on the parental pad too — Back there returns to the sheet the pad was
+    // opened from, with nothing changed.
+    ui.back.textContent = (state.ownerMode || state.padPurpose) ? 'Back' : 'Choose another profile';
+    // Setting a PIN is not a check of anything, so the button must not claim to
+    // verify one. Roku's KeyboardDialog says "Save" on the same screen
+    // (MainScene.brs:5107-5120) and this matches it.
+    ui.verify.textContent = state.padPurpose === 'newpin' ? 'Save' : 'Verify';
     ui.dots.replaceChildren();
     for (let index = 0; index < length; index += 1) {
       const dot = element('span', 'bp-dot');
@@ -980,6 +1529,13 @@
 
   function openPin(profile) {
     clearUnlock();
+    // The gate's pad, not the parental one. Cleared explicitly rather than
+    // assumed: verifyPin() branches on padPurpose FIRST, so a stale value here
+    // would send a profile unlock down the parental path and hand its token to
+    // whatever the sheet was in the middle of.
+    state.padPurpose = '';
+    state.padAfter = null;
+    state.parentalProfile = null;
     state.activeProfile = null;
     updateConnectButton();
     state.pendingProfile = profile;
@@ -1009,6 +1565,12 @@
     }
     state.pendingProfile = null;
     state.ownerMode = true;
+    // Same reason openPin() clears these: verifyPin() tests ownerMode first and
+    // padPurpose second, so a stale padPurpose is harmless HERE — but Back and
+    // renderPin() read it too, and a pad that says "Owner PIN" must not offer
+    // the parental sheet's way out.
+    state.padPurpose = '';
+    state.padAfter = null;
     state.padFrom = from;
     clearPinEntry();
     hideAllScreens();
@@ -1111,6 +1673,12 @@
     state.pendingProfile = null;
     state.iconProfile = null;
     state.ownerMode = false;
+    // Leaving the rail abandons whatever the parental sheet was in the middle
+    // of, including a half-armed Delete. Nothing here is left half-held.
+    state.parentalProfile = null;
+    state.padPurpose = '';
+    state.padAfter = null;
+    state.deleteArmed = false;
     clearPinEntry();
     hideAllScreens();
     setPanelView('profiles');
@@ -1141,6 +1709,7 @@
     ui.pin.hidden = true;
     ui.profiles.hidden = true;
     if (ui.icons) ui.icons.hidden = true;
+    if (ui.parental) ui.parental.hidden = true;
     if (ui.qr) ui.qr.hidden = true;
     if (ui.signup) ui.signup.hidden = true;
     if (ui.email) ui.email.hidden = true;
@@ -1784,7 +2353,11 @@
     ui.heading.textContent = 'Create a profile';
     ui.createName.value = '';
     ui.createKids.checked = false;
-    setStatus('Name this profile. A PIN can be added later on a TV.', 'info');
+    // NO LONGER "a PIN can be added later on a TV" — B3. It was true when this
+    // client could not create one; the pencil now opens Profile settings, where
+    // Set PIN lives, so the sentence would be sending a browser-only household
+    // to a television they may not own.
+    setStatus('Name this profile. A PIN and a rating limit can be set from Profile settings.', 'info');
     window.setTimeout(() => ui.createName.focus(), 0);
   }
 
@@ -1861,10 +2434,22 @@
     setBusy(true);
     setStatus('Creating this profile…', 'info');
     try {
+      // THE KIDS INTERLOCK, applied before the request rather than hoped for
+      // after it — firetv ProfileGateRules.newProfileFields. The fleet pins a
+      // kids profile to KIDS_CAP with adult off, so sending anything else is
+      // either silently overridden or rejected, and in the meantime the form
+      // has been telling the household something untrue about the profile they
+      // are making.
+      const fields = newProfileFields(!!ui.createKids.checked, 'teen', false);
       const create = (credentials) => request(`/profiles?deviceId=${encodeURIComponent(credentials.id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Device-Token': credentials.token },
-        body: JSON.stringify({ name, isKids: !!ui.createKids.checked }),
+        body: JSON.stringify({
+          name,
+          isKids: fields.isKids,
+          maxRating: fields.maxRating,
+          allowAdult: fields.allowAdult,
+        }),
       });
       let result = await create(state.credentials);
       if (shouldRepairCredentials(result)) {
@@ -2448,9 +3033,10 @@
   }
 
   async function verifyPin() {
-    // One button, two jobs. The branch is here rather than at the listener so the
-    // keyboard Enter path cannot diverge from the button.
+    // One button, four jobs now. The branch is here rather than at the listener
+    // so the keyboard Enter path cannot diverge from the button.
     if (state.ownerMode) return verifyOwnerPin();
+    if (state.padPurpose) return verifyParentalPin();
     const profile = state.pendingProfile;
     if (state.busy || !profile || state.pinDigits.length !== 4 || !state.credentials) return;
     let candidate = state.pinDigits.join('');
@@ -2963,6 +3549,26 @@
     ui.iconGrid.setAttribute('aria-label', 'Profile picture');
     ui.icons.append(iconsTop, iconCurrent, ui.iconGrid);
 
+    // PARENTAL CONTROLS. Same sheet shape as every other screen in this panel:
+    // Back on the left, a title beside it, the rows under. Everything inside
+    // .bp-parental-rows is rebuilt by renderParental() on every save, so the
+    // only permanent children are the header and the note.
+    ui.parental = element('section', 'bp-parental');
+    ui.parental.id = 'bp-parental';
+    ui.parental.hidden = true;
+    const parentalTop = element('div', 'bp-pin-top');
+    ui.parentalBack = element('button', 'bp-back', 'Back');
+    ui.parentalBack.type = 'button';
+    ui.parentalBack.id = 'bp-parental-back';
+    parentalTop.append(ui.parentalBack, element('strong', '', 'Profile settings'));
+    ui.parentalRows = element('div', 'bp-parental-rows');
+    ui.parentalRows.id = 'bp-parental-rows';
+    ui.parentalNote = element('p', 'bp-parental-note', 'Changes save at once.');
+    ui.parentalNote.id = 'bp-parental-note';
+    ui.parentalNote.dataset.tone = 'info';
+    ui.parentalNote.setAttribute('role', 'status');
+    ui.parental.append(parentalTop, ui.parentalRows, ui.parentalNote);
+
     ui.pin = element('section', 'bp-pin');
     ui.pin.hidden = true;
     const pinTop = element('div', 'bp-pin-top');
@@ -3022,7 +3628,7 @@
     const downloadLink = element('a', 'bp-secondary', 'Get the app');
     downloadLink.href = 'https://blazingstream.lyreosai.com/downloads/';
     footer.append(downloadLink);
-    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.icons, ui.profiles, ui.pin, footer);
+    panel.append(ui.close, kicker, heading, copy, ui.status, ui.welcome, ui.invite, ui.qr, ui.email, ui.signup, ui.approve, ui.createProfile, ui.icons, ui.parental, ui.profiles, ui.pin, footer);
     // Art FIRST, so the close-catcher and the rail both paint over it.
     ui.layer.append(ui.art, backdrop, panel);
     document.body.appendChild(ui.layer);
@@ -3072,9 +3678,11 @@
       }
     });
     ui.iconsBack.addEventListener('click', () => {
-      state.iconProfile = null;
-      showProfiles('Choose who is watching.');
+      const from = state.iconProfile;
+      backFromIcons(from, from && state.parentalProfile && state.parentalProfile.id === from.id
+        ? 'Changes save at once.' : 'Choose who is watching.');
     });
+    ui.parentalBack.addEventListener('click', () => showProfiles('Choose who is watching.'));
     ui.createBack.addEventListener('click', () => showProfiles());
     ui.createSubmit.addEventListener('click', submitCreateProfile);
     ui.createName.addEventListener('keydown', (event) => {
@@ -3092,6 +3700,13 @@
       // with no hatch and no way back (see state.padFrom).
       if (state.ownerMode) {
         leaveOwnerPad(state.padFrom === 'gate' ? undefined : 'Choose who is watching.');
+        return;
+      }
+      // The parental pad returns to the sheet it was opened from, with the
+      // pending change dropped — a PIN prompt that is walked away from must
+      // never fall through to the change it was guarding.
+      if (state.padPurpose) {
+        leaveParentalPad('Changes save at once.');
         return;
       }
       showProfiles('Choose who is watching.');
@@ -3219,8 +3834,95 @@
     }
   }
 
+  /**
+   * The keys settings.js is allowed to name on /account/secret/<key>.
+   *
+   * An allow list, not a pass-through, for the same reason mediaRequest()
+   * validates its path: this function holds the device token, and the locker
+   * behind it stores provider credentials. A caller that can name any key can
+   * read any secret the account has.
+   */
+  const SECRET_KEYS = Object.freeze(['stremio_addon_url']);
+
+  /**
+   * GET / PUT / DELETE /account/secret/<key>, as the device.
+   *
+   * Same route and same shape firetv AddonConfig.kt uses, so an add-on set in
+   * the browser is the add-on every approved Fire TV and Roku picks up.
+   *
+   * B13's gate is enforced HERE as well as in the settings screen's markup. A
+   * screen can be walked round — a console call, a stale DOM, a future caller —
+   * and "where content comes from" is exactly the setting the Fire TV left open
+   * by gating the add-on STORE and not the Settings field that writes the same
+   * value. Not a Kids profile, and rated at least 'mature'. NULL IS A NO.
+   */
+  async function accountSecret(key, { method = 'GET', value } = {}) {
+    if (!SECRET_KEYS.includes(key)) return { ok: false, error: 'Unknown setting.' };
+    const profile = state.activeProfile;
+    if (!state.approved || !state.credentials) {
+      return { ok: false, error: 'This browser is not connected yet.' };
+    }
+    if (!grownUp(profile)) {
+      return { ok: false, error: `This profile's rating limit hides Sources.` };
+    }
+    const path = `/account/secret/${encodeURIComponent(key)}?deviceId=${encodeURIComponent(state.credentials.id)}`;
+    const headers = { 'X-Device-Token': state.credentials.token };
+    let body;
+    if (method === 'PUT') {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify({ value: String(value == null ? '' : value) });
+    }
+    const result = await request(path, { method, headers, body });
+    if (!result.ok) {
+      return { ok: false, status: result.status, error: serverError(result, result.timeout
+        ? 'The account server did not answer in time.'
+        : 'The account server refused that.') };
+    }
+    const answer = result.body || {};
+    return { ok: true, present: answer.present === true, value: text(answer.value) };
+  }
+
+  /**
+   * POST /device/live/sources — the household's own M3U or Xtream playlist.
+   *
+   * The same route firetv LiveClient.kt:228 posts to. Gated exactly like
+   * accountSecret above: adding a playlist is adding a source of unrated
+   * content, which is the whole of B13.
+   *
+   * The password is forwarded and never stored, never logged and never put in
+   * the address.
+   */
+  async function addLiveSource(payload) {
+    const profile = state.activeProfile;
+    if (!state.approved || !state.credentials) {
+      return { ok: false, error: 'This browser is not connected yet.' };
+    }
+    if (!grownUp(profile)) {
+      return { ok: false, error: `This profile's rating limit hides Sources.` };
+    }
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const url = text(source.url);
+    if (!url) return { ok: false, error: 'Enter a playlist URL first.' };
+    const body = { kind: source.kind === 'xtream' ? 'xtream' : 'm3u', name: text(source.name, 'My Playlist'), url };
+    if (source.username) body.username = String(source.username);
+    if (source.password) body.password = String(source.password);
+    const result = await request(`/device/live/sources?deviceId=${encodeURIComponent(state.credentials.id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
+      body: JSON.stringify(body),
+    });
+    if (!result.ok) {
+      return { ok: false, status: result.status, error: serverError(result, result.timeout
+        ? 'The profile server did not answer in time. Nothing was added.'
+        : 'Could not add that playlist.') };
+    }
+    return { ok: true };
+  }
+
   window.BlazingProfile = {
     mediaRequest,
+    accountSecret,
+    addLiveSource,
     open() {
       if (!ui.layer) return false;
       openPanel();
@@ -3228,10 +3930,30 @@
       else showWelcome();
       return true;
     },
+    /**
+     * Open the panel straight on one profile's parental controls.
+     *
+     * The Settings screen's "Parental controls" row is the caller. It hands an
+     * id rather than a profile object because settings.js only ever sees the
+     * broadcast detail, and the object it would build from that has no
+     * hasPin — which is the field every gate on the sheet turns on.
+     */
+    openParental(profileId) {
+      if (!ui.layer) return false;
+      openPanel();
+      const id = text(profileId) || (state.activeProfile ? state.activeProfile.id : '');
+      const known = state.profiles.find((entry) => entry.id === id);
+      if (known) showParental(known);
+      else if (storedCredentials()) connectProfiles();
+      else showWelcome();
+      return true;
+    },
     /** True while the gate is on screen — app.js uses it to avoid a double open. */
     isOpen() {
       return Boolean(ui.layer && !ui.layer.hidden);
     },
+    /** The pure parental rules, for profile-parental.test.mjs. */
+    rules: Object.freeze({ RATINGS, KIDS_CAP, ratingAllowed, canDelete, newProfileFields, raising, grownUp, avatarChange }),
   };
 
   if (document.readyState === 'loading') {

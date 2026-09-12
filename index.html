@@ -221,6 +221,12 @@
         <button type="button" data-view="trailers">Trailers</button>
         <button type="button" data-view="requests">Requests</button>
         <button type="button" data-view="admin">Admin</button>
+        <!-- SETTINGS. Not in the canonical eleven, so it is not a .topnav chip;
+             it belongs here with Admin, which is the other household-level
+             screen. This is the ONLY way into it, so deleting this button
+             strands the view on every width — see the note at the head of the
+             drawer about what navparity counts. -->
+        <button type="button" data-view="settings">Settings</button>
         <!-- loadDiscoverMenu() (app.js) replaceChildren()s ONLY this wrapper,
              not the nav above — it used to target the whole nav, which wiped
              every static view button (Emby/Education/Comics/Trailers/Requests/
@@ -779,6 +785,27 @@
       <button type="button" id="livetv-load-more" class="primary-button" hidden>Load more</button>
     </section>
 
+    <!-- SETTINGS (B32). This client had no settings screen at all — no view, no
+         route, no chip — while the Roku has eighteen working rows on the same
+         screen, the Fire TV has MainActivity, and the Apple TV has a Settings
+         section. Quality floor, seeders, size cap, instant-only, codec skips,
+         auto-next and the add-on source were all unreachable from a browser,
+         and from a webOS or Tizen television running this same client.
+
+         The whole screen is built by settings.js into #settings-host rather
+         than written out here, because every row's LABEL carries its current
+         value ("Minimum quality: 1080p") and a label in markup is a label that
+         drifts from what is stored. That is the same decision Fire TV's
+         rebuildPlaybackForm and Roku's buildButtons both make. -->
+    <section id="settings-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Settings</p>
+        <h1>Settings</h1>
+        <p>Playback, sources, language and parental controls.</p>
+      </div>
+      <div id="settings-host" class="settings-host"></div>
+    </section>
+
   </main>
 
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
@@ -905,5 +932,11 @@
   <!-- Same ordering requirement as youtube.js above: livetv.js plays through
        window.BlazingPlayer, which app.js defines. -->
   <script src="./livetv.js" defer></script>
+  <!-- Settings. Loaded BEFORE nothing in particular, but it must be in the
+       service worker's SHELL list (sw.js) as well, or an installed PWA reaches
+       the new index.html, addresses #settings-host and finds
+       window.BlazingSettings undefined — the exact failure the book reader
+       comment in sw.js describes. It is in that list. -->
+  <script src="./settings.js" defer></script>
 </body>
 </html>

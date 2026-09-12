@@ -798,6 +798,32 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .search-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); }
 .search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: var(--fs-body); }
 .search-results, .library-results { margin-top: 24px; }
+
+/* SETTINGS (B32). One column of full-width rows that CYCLE on press, which is
+   the shape Fire TV's rebuildPlaybackForm and Roku's SettingsScreen both use.
+   It is kept on the web because this same file is what a webOS and a Tizen
+   television run, where the only input is a D-pad and there is no place to type
+   a number — and because dpad.js moves focus by GEOMETRY, so one column of
+   equal-width rows is the layout it navigates correctly. A mouse loses nothing.
+   .settings-row stays 48px+ tall for the same tap-target reason .search-form
+   input does. */
+.settings-host { max-width: 760px; margin: 0 auto; padding: 0 20px 64px; }
+.settings-section { margin: 32px 0 12px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.settings-section:first-child { margin-top: 8px; }
+.settings-row { display: block; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--text); background: var(--surface); font-size: var(--fs-body); font-weight: 700; text-align: left; transition: border-color var(--transition), background var(--transition); }
+.settings-row:hover:not(:disabled), .settings-row:focus-visible { border-color: var(--accent); background: var(--surface-focus); outline: none; }
+.settings-row:disabled { opacity: .5; cursor: not-allowed; }
+.settings-input { width: 100%; min-height: 48px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); font-size: var(--fs-body); }
+.settings-input::placeholder { color: var(--quiet); }
+.settings-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.settings-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.45; }
+.settings-note[data-tone="error"] { color: #ff8a8f; }
+.settings-note[data-tone="success"] { color: #7ee2a8; }
+.settings-language { margin-top: 8px; }
+.settings-about { display: grid; grid-template-columns: minmax(0, 9rem) minmax(0, 1fr); gap: 6px 16px; margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); }
+.settings-about dt { font-weight: 700; }
+.settings-about dd { margin: 0; overflow-wrap: anywhere; }
 .result-row { margin-bottom: 29px; }
 
 /* ── Emby library browse ─────────────────────────────────── */

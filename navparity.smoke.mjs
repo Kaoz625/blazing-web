@@ -82,6 +82,14 @@ const VIEWS = [
   { id: 'education', heading: true },
   { id: 'roadmaps', heading: true },
   { id: 'admin', heading: true },
+  // `true`, not 'Settings', for the same reason as YouTube and Live TV above:
+  // a string heading also joins the `titles` set counted at the end, and that
+  // count is the BROWSE routes plus the book/audio room. Settings is neither.
+  //
+  // It is IN this list rather than exempt from it because the drawer count
+  // below is asserted against VIEWS.length — a destination added to the markup
+  // and not to this list reads as drift, which is exactly what this file is for.
+  { id: 'settings', heading: true },
 ];
 
 let pass = 0, fail = 0;

@@ -59,7 +59,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 //
 // Raised 32 -> 33 when director-filmography.smoke.mjs landed with the web half
 // of director filmography. Same rule: this number is the real count, always.
-const MIN_SUITES = 33;
+//
+// Raised 33 -> 34 when settings.smoke.mjs landed with the Settings screen and
+// the parental controls (audit B32/B35/B1/B3/B13/B15/B28). Same rule: this
+// number is the real count, always.
+const MIN_SUITES = 34;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
@@ -73,7 +77,13 @@ const MIN_SUITES = 33;
 // exits 1 when an assertion fails. Both halves of that were measured before
 // wiring it up, because a unit file that ran nothing and exited 0 would add
 // fake green to the gate and be worse than leaving it out.
-const MIN_UNITS = 3;
+//
+// Raised 3 -> 5 when settings.test.mjs and profile-parental.test.mjs landed:
+// the source-filter ladders and the parental rule module (the Kids interlock,
+// the raise test, the last-profile Delete guard, the grown-up gate). Those are
+// the decisions a source list and a parental control are made of, and firetv
+// keeps its copies in ProfileGateRules/SourceFilters for exactly this reason.
+const MIN_UNITS = 5;
 
 const filters = process.argv.slice(2);
 const entries = (await readdir(ROOT)).sort();

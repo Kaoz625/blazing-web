@@ -1848,6 +1848,12 @@ function showRoute(route, mediaOptions = {}) {
   // URLs are http and the routes authenticate with a header a <video> cannot
   // send. Both are answered by the fleet's /live/ticket + /live/play pair.
   const livetvView = $('#livetv-view');
+  // Settings (settings.js), the same self-contained-module shape again. B32:
+  // this router handled seventeen routes and 'settings' was not one of them, so
+  // the quality floor, the seeder minimum, the size cap, instant-only, the
+  // codec skips, auto-next and the add-on source were unreachable from a
+  // browser while all three televisions had a screen for them.
+  const settingsView = $('#settings-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
@@ -1857,6 +1863,7 @@ function showRoute(route, mediaOptions = {}) {
   if (gamesView) gamesView.hidden = route !== 'games';
   if (youtubeView) youtubeView.hidden = route !== 'youtube';
   if (livetvView) livetvView.hidden = route !== 'livetv';
+  if (settingsView) settingsView.hidden = route !== 'settings';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
   // were the only callers of window.mountStorybook / mountPodcastStudio /
@@ -1878,6 +1885,11 @@ function showRoute(route, mediaOptions = {}) {
   if (route === 'games') window.BlazingGames && window.BlazingGames.mount();
   if (route === 'youtube') window.BlazingYouTube && window.BlazingYouTube.mount();
   if (route === 'livetv') window.BlazingLiveTv && window.BlazingLiveTv.mount();
+  // Mounted on EVERY visit, not once: every row's label carries its current
+  // value and the "where content comes from" section appears and disappears
+  // with the profile, so a screen built once would be stale the moment somebody
+  // switched profiles on another tab.
+  if (route === 'settings') window.BlazingSettings && window.BlazingSettings.mount();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -3372,6 +3384,16 @@ const FOREIGN_DUB = /(?:^|[^a-z0-9])(?:rus|russian|ita|italian|latino|french|dub
 
 let streamsRequest = 0;
 const sampledStreams = new WeakSet();
+
+/**
+ * The episode the player was actually given, or '' for anything else.
+ *
+ * Declared HERE rather than beside autoNextEpisode() because both the source
+ * row's click handler (below) and openPlayer() (further down) write it, and a
+ * `let` that sits after its first writer is a temporal-dead-zone trap waiting
+ * for the day one of them is called during load. See autoNextEpisode().
+ */
+let playingEpisodeId = '';
 function rememberSampledStreams(result) {
   for (const stream of result.streams) {
     if (window.BlazingStreamEvidence?.inspected(stream, result.verification, result.preferences)) sampledStreams.add(stream);
@@ -3437,12 +3459,37 @@ async function loadStreams(meta) {
     // has been wrong before — see sw.js), so a missing window.BlazingCaps keeps
     // the old dead-link/dub ordering and shows every row. A capability filter
     // that takes the source list down when it fails is worse than no filter.
+    // WHAT THE VIEWER ASKED FOR, which is the other half of the question and a
+    // different one. The probe above answers "can this device decode it"; this
+    // answers "do I want it" — a quality floor, a seeder minimum, a size cap,
+    // instant-only, codec and 3D skips. Kept separate for the reason roku
+    // SourceFilter.brs's header gives: mixing them would let a person's taste
+    // hide a real capability bug, and a capability change silently undo a
+    // preference. Every filter defaults to OFF, so a browser that has never
+    // opened Settings behaves exactly as it did before this existed.
+    let viewerDropped = { total: 0 };
     let ranked = null;
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
       if (!isCurrent()) return;
       ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) });
-      streams = ranked.streams.map((info) => info.raw);
+      if (window.BlazingSettings) {
+        // Filtered on the RANKED info objects, not the raw rows, so the order
+        // the device probe produced survives and nothing has to be re-parsed.
+        const wanted = window.BlazingSettings.filterInfos(ranked.streams);
+        viewerDropped = wanted.dropped;
+        streams = wanted.infos.map((info) => info.raw);
+      } else {
+        streams = ranked.streams.map((info) => info.raw);
+      }
+      if (!streams.length && viewerDropped.total) {
+        // The device kept rows and the viewer's own settings took them all.
+        // Saying "no compatible stream" here would be a lie that sends somebody
+        // to reinstall the app over a filter they set themselves.
+        detailStatus.textContent = `${window.BlazingSettings.droppedNote(viewerDropped)} `
+          + 'Open Settings to loosen them.';
+        return;
+      }
       if (!streams.length) {
         // Every row was rejected. Say WHICH ceiling did it, because "no
         // compatible stream" on a screen full of results is the message that
@@ -3469,6 +3516,19 @@ async function loadStreams(meta) {
         return FOREIGN_DUB.test(blob) ? 100 : 0;
       };
       streams.sort((a, b) => penaltyOf(a) - penaltyOf(b));
+      // caps.js did not load, but the viewer's own filters still apply — they
+      // are a preference, not a capability, so they must not vanish with the
+      // probe. settings.js parses the row itself on this path.
+      if (window.BlazingSettings) {
+        const wanted = window.BlazingSettings.filterStreams(streams);
+        viewerDropped = wanted.dropped;
+        streams = wanted.streams;
+        if (!streams.length && viewerDropped.total) {
+          detailStatus.textContent = `${window.BlazingSettings.droppedNote(viewerDropped)} `
+            + 'Open Settings to loosen them.';
+          return;
+        }
+      }
     }
 
     detailStatus.textContent = '';
@@ -3482,6 +3542,16 @@ async function loadStreams(meta) {
     // to be the raw addon response, so a viewer who counted 400 results
     // yesterday and 260 today needs to know a probe did that on purpose.
     if (ranked && ranked.dropped.total) container.appendChild(buildFilterNote(ranked));
+    // The viewer's own filters get their own line, separate from the device
+    // one, for the same reason the two filters are separate: "your screen
+    // cannot show this" and "you asked me not to show this" are different
+    // sentences and only one of them is something to change your mind about.
+    if (viewerDropped.total) {
+      const mine = el('div', 'stream-note');
+      mine.id = 'stream-viewer-filter-note';
+      mine.textContent = `${window.BlazingSettings.droppedNote(viewerDropped)} Change them in Settings.`;
+      container.appendChild(mine);
+    }
 
     for (const s of streams) {
       const row = el('div', 'stream-row');
@@ -3530,6 +3600,9 @@ async function loadStreams(meta) {
           res: Number((qualityOf(s).match(/\d+/) || [0])[0]) || 0,
         });
         openPlayer(meta.name, s.url, { headers: streamHeaders(s) });
+        // AFTER openPlayer, which clears it. This is the one press that arms
+        // auto-next, and it arms it for the episode actually being played.
+        playingEpisodeId = state.selectedEpisode ? state.selectedEpisode.id : '';
         closeDetail();
       });
 
@@ -4083,6 +4156,11 @@ let playerHeaders = {};
 
 function openPlayer(title, rawUrl, opts) {
   window.BlazingMediaLibrary?.pause();
+  // CLEARED ON EVERY CALL, and re-set only by the episode row that pressed
+  // Play. This is the whole of auto-next's "is this even the thing the queue
+  // follows" guard — see autoNextEpisode(). window.BlazingPlayer.open is this
+  // same function, so youtube.js and every other module clear it too, for free.
+  playingEpisodeId = '';
   const url = safeHttpsUrl(rawUrl);
   if (!url) return;
   // What the server said the container is. Native shells get it forwarded so
@@ -4743,7 +4821,98 @@ video.addEventListener('ended', () => {
     percent: video.duration ? Math.round((video.currentTime / video.duration) * 100) : 0,
     reason: 'finished',
   });
+  autoNextEpisode();
 });
+
+/**
+ * "Play next episode automatically" — the Settings row, doing what it says.
+ *
+ * The Roku has had this for months (MainScene.brs:6968 playNextEpisode, behind
+ * AutoNextEnabled) and the Fire TV has the toggle; this client had neither the
+ * toggle nor the behaviour, so an episode simply ended.
+ *
+ * Its guards are the Roku's, and each one is there because of a real way this
+ * can pick the wrong thing:
+ *
+ *   - OFF MEANS OFF. Checked first, so nothing else here runs on a browser
+ *     whose viewer switched it off.
+ *   - THE THING THAT FINISHED MUST BE THE THING THE QUEUE FOLLOWS. `state
+ *     .selected` and `state.selectedEpisode` are both moved by the detail sheet,
+ *     so they can have walked on while a video played. playingEpisodeId is the
+ *     episode the player was actually given, and if it no longer matches, the
+ *     viewer went somewhere else and nothing should start.
+ *   - A TRAILER RAISES THE SAME `ended`. It plays through this same <video>,
+ *     so without the id check above, watching a trailer to the end would have
+ *     started an episode.
+ *   - SPECIALS ARE NOT NEXT. Season 0 is skipped for the same reason
+ *     firstRealEpisode() skips it when choosing where to open.
+ *
+ * The rating cap is re-asked through openDetail's own path rather than trusted:
+ * the next episode is a different title id, and a cap that refuses it must
+ * refuse it here too.
+ */
+async function autoNextEpisode() {
+  if (!window.BlazingSettings || !window.BlazingSettings.autoNext()) return;
+  const meta = state.selected;
+  const current = state.selectedEpisode;
+  if (!meta || meta.type !== 'series' || !current) return;
+  // STRICT, not "unset is fine". openPlayer() clears this on every single call,
+  // so anything that is not an episode press — a trailer, an Emby title, a
+  // YouTube video, a Live TV channel — leaves it empty and can never advance.
+  if (playingEpisodeId !== current.id) return;
+  const episodes = Array.isArray(meta.videos) ? meta.videos : [];
+  const at = episodes.findIndex((episode) => episode.id === current.id);
+  if (at < 0) return;
+  const next = episodes.slice(at + 1).find((episode) => episode.season >= 1);
+  if (!next) return;
+
+  showToast(`Next: ${seasonLabel(next.season)}, episode ${next.episode}`);
+  state.selectedEpisode = next;
+  playingEpisodeId = next.id;
+
+  let result;
+  try {
+    result = await resolveStreams(meta, next.id);
+  } catch {
+    // The player stays up on whatever it holds; the viewer closes it or opens
+    // the detail sheet. An auto-advance that fails must not also tear the
+    // screen down.
+    showToast('Could not load the next episode.', 'error');
+    return;
+  }
+  // The viewer moved on while the search was running.
+  if (state.selectedEpisode !== next || player.hidden) return;
+
+  let streams = result.streams;
+  if (!streams.length) {
+    showToast('No sources for the next episode.', 'error');
+    return;
+  }
+  const isDead = deadLinkProbe();
+  const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
+  if (window.BlazingCaps) {
+    const caps = await window.BlazingCaps.probe();
+    if (state.selectedEpisode !== next) return;
+    const ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) });
+    streams = window.BlazingSettings.filterInfos(ranked.streams).infos.map((info) => info.raw);
+  } else {
+    streams = window.BlazingSettings.filterStreams(streams).streams;
+  }
+  const pick = streams.find((stream) => safeHttpsUrl(stream.url));
+  if (!pick) {
+    showToast('Nothing playable for the next episode.', 'error');
+    return;
+  }
+  telemetry('play_start', {
+    id: meta.id, title: meta.name, type: meta.type,
+    source: String(pick._from || '').replace(/^site:/, ''),
+    res: Number((qualityOf(pick).match(/\d+/) || [0])[0]) || 0,
+  });
+  openPlayer(meta.name, pick.url, { headers: streamHeaders(pick) });
+  // Re-armed for the episode that just started, or the one after this would
+  // never advance — openPlayer clears it on the way in.
+  playingEpisodeId = next.id;
+}
 
 $('#player-close').addEventListener('click', () => {
   if (!video.duration) return;

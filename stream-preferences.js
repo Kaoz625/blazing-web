@@ -23,7 +23,21 @@
   let profileGeneration = 0;
   let preferences = { ...DEFAULTS };
   let detailHost = null;
+  // The SAME two selects on the Settings screen. They were reachable only from
+  // the detail sheet, which is a per-title surface — the Fire TV and the Roku
+  // both put audio and subtitle language on Settings, where a household sets it
+  // once (roku SettingsScreen.brs:78-81). Both hosts render from this one
+  // module and this one storage key, so the two can never disagree.
+  let settingsHost = null;
   let playerCleanup = null;
+  /* "Hide SDH captions" (Settings). Fire TV strips the SDH furniture out of an
+     external .srt (SubtitleFilter.kt:74); this client fetches no external
+     subtitle files at all, so the same intent here is "never offer, and never
+     auto-pick, the hearing-impaired track". Read live rather than cached: the
+     Settings screen can change it while a video is playing. */
+  const hideSdh = () => Boolean(window.BlazingSettings && window.BlazingSettings.hideSdh());
+  const isSdh = (track) => Boolean(window.BlazingSettings
+    && window.BlazingSettings.isSdhLabel(String(track?.name || track?.label || '')));
   const current = () => ({ profileId, ...preferences });
   const query = () => profileId ? parameters(preferences) : '';
   const element = (tag, className, text) => {
@@ -45,27 +59,42 @@
     wrapper.append(select); parent.append(wrapper);
     return select;
   }
-  function save(change) {
+  function save(change, origin) {
     if (!profileId) return;
     preferences = normalize({ ...preferences, ...change });
     try { localStorage.setItem(KEY + encodeURIComponent(profileId), JSON.stringify(preferences)); } catch { /* Session still works without storage. */ }
     document.dispatchEvent(new CustomEvent(CHANGE, { detail: current() }));
+    // The OTHER host is showing the same two values and has to follow. Never
+    // the one the change came from: re-rendering it would replaceChildren() the
+    // very <select> whose change event is still running, which takes the
+    // viewer's focus with it.
+    if (origin !== detailHost) renderDetail();
+    if (origin !== settingsHost) renderSettings();
   }
-  function renderDetail() {
-    if (!detailHost) return;
-    detailHost.replaceChildren();
+  /** The two selects, drawn into whichever host asked for them. */
+  function renderInto(host) {
+    if (!host) return;
+    host.replaceChildren();
     if (!profileId) return;
     const mountedGeneration = profileGeneration;
-    const update = (change) => { if (profileGeneration === mountedGeneration) save(change); };
+    const update = (change) => { if (profileGeneration === mountedGeneration) save(change, host); };
     const fields = element('div', 'stream-preferences');
     selectControl(fields, 'Preferred audio', [['english', 'English'], ['any', 'Any language']], preferences.audio, (audio) => update({ audio }));
     selectControl(fields, 'Preferred subtitles', [['english', 'English'], ['any', 'Any language'], ['off', 'Off']], preferences.subtitles, (subtitles) => update({ subtitles }));
-    detailHost.append(fields);
+    host.append(fields);
   }
+  function renderDetail() { renderInto(detailHost); }
+  function renderSettings() { renderInto(settingsHost); }
   function mountDetail(host) {
     if (detailHost && detailHost !== host) detailHost.replaceChildren();
     detailHost = host || null; renderDetail();
     return () => { if (detailHost === host) { host.replaceChildren(); detailHost = null; } };
+  }
+  /** The Settings screen's copy of the same pair — see `settingsHost` above. */
+  function mountSettings(host) {
+    if (settingsHost && settingsHost !== host) settingsHost.replaceChildren();
+    settingsHost = host || null; renderSettings();
+    return () => { if (settingsHost === host) { host.replaceChildren(); settingsHost = null; } };
   }
   function resetPlayer() {
     const cleanup = playerCleanup; playerCleanup = null;
@@ -116,7 +145,11 @@
         if (index !== -1 && audioIndex(found.audio) !== index) chooseAudio(index, found.audio);
       }
       if (!manualSubtitles) {
-        const index = preferences.subtitles === 'off' ? -1 : preferences.subtitles === 'english' ? found.subtitles.findIndex(english) : null;
+        // "Hide SDH captions" also means "never auto-pick one" — a viewer who
+        // turned it off does not want the hearing-impaired track chosen for
+        // them just because it happens to be the first English one.
+        const wanted = (track) => english(track) && !(hideSdh() && isSdh(track));
+        const index = preferences.subtitles === 'off' ? -1 : preferences.subtitles === 'english' ? found.subtitles.findIndex(wanted) : null;
         if (index !== null && (index !== -1 || preferences.subtitles === 'off') && subtitleIndex(found.subtitles) !== index) chooseSubtitles(index, found.subtitles);
       }
       const focused = document.activeElement === audioSelect ? 'audio' : document.activeElement === subtitleSelect ? 'subtitles' : '';
@@ -129,7 +162,14 @@
         audioSelect.disabled = found.audio.length < 2;
       }
       if (found.subtitles.length) {
-        subtitleSelect = selectControl(host, 'Subtitle track', [[-1, 'Off'], ...found.subtitles.map((track, index) => [index, label(track, 'Subtitles', index)])], subtitleIndex(found.subtitles), (value) => {
+        // The index in each option is the track's REAL index in the engine's
+        // list, so hiding a row cannot renumber the ones below it — hls
+        // .subtitleTrack and video.textTracks are both addressed by that index.
+        const offered = found.subtitles
+          .map((track, index) => [index, label(track, 'Subtitles', index), track])
+          .filter(([index, , track]) => !(hideSdh() && isSdh(track)) || index === subtitleIndex(found.subtitles))
+          .map(([index, text]) => [index, text]);
+        subtitleSelect = selectControl(host, 'Subtitle track', [[-1, 'Off'], ...offered], subtitleIndex(found.subtitles), (value) => {
           if (stopped || profileId !== boundProfile) return;
           manualSubtitles = true; chooseSubtitles(Number(value), tracks().subtitles); schedule();
         }, 'stream-subtitle-track');
@@ -175,11 +215,11 @@
     profileId = typeof event.detail?.id === 'string' && event.detail.id.trim() ? event.detail.id : null;
     let stored;
     try { stored = profileId ? JSON.parse(localStorage.getItem(KEY + encodeURIComponent(profileId))) : null; } catch { /* Invalid storage uses defaults. */ }
-    preferences = normalize(stored); renderDetail();
+    preferences = normalize(stored); renderDetail(); renderSettings();
   });
   document.addEventListener('blazing-profile-signed-out', () => {
     ++profileGeneration;
-    resetPlayer(); profileId = null; preferences = { ...DEFAULTS }; renderDetail();
+    resetPlayer(); profileId = null; preferences = { ...DEFAULTS }; renderDetail(); renderSettings();
   });
-  window.BlazingStreamPreferences = Object.freeze({ current, query, mountDetail, bindPlayer, resetPlayer, core: Object.freeze({ normalize, english, label, parameters }) });
+  window.BlazingStreamPreferences = Object.freeze({ current, query, mountDetail, mountSettings, bindPlayer, resetPlayer, core: Object.freeze({ normalize, english, label, parameters }) });
 })();

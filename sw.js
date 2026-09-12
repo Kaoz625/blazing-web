@@ -89,7 +89,14 @@
 // against a page whose scripts never define window.BlazingBookReader or
 // window.BlazingReadingMode. Every Read button and every mode switch would be
 // inert, and the whole feature would read as never shipped.
-const CACHE = 'blazing-shell-v34';
+// v35: the Settings screen (settings.js — A NEW FILE, same trap as v22's
+// caps.js and v34's reader) and the parental controls in profile.js, plus the
+// Settings chip, #settings-view and the settings styles. Without a bump an
+// installed PWA keeps serving v34's index.html, which has no #settings-view, so
+// the new chip would hide every view and land on a blank screen — and its
+// profile.js pencil would still open a picture grid with no PIN, no rating cap
+// and no Delete behind it.
+const CACHE = 'blazing-shell-v35';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -117,6 +124,11 @@ const SHELL = [
   './games.js',
   './youtube.js',
   './livetv.js',
+  // The Settings screen. A NEW FILE, so an installed PWA holding the previous
+  // shell has no entry for it at all: it would get the new index.html, find the
+  // Settings chip, open a view whose host never fills, and read as a dead
+  // screen. Same reason the book reader is in this list.
+  './settings.js',
   './manga.js',
   './anime-room.js',
   './tv-comics-reader.js',
