@@ -111,7 +111,15 @@
 // that nothing fills — and app.js's boot would bind #detail-collection and
 // #detail-watched against a window.BlazingLists that was never loaded. Three
 // controls drawn and dead, which is precisely what this audit is about.
-const CACHE = 'blazing-shell-v37';
+// v38: B25/B12 — the real Roadmaps screen and a Calendar that did not exist at
+// all. roadmaps.js and calendar.js are BOTH NEW FILES, the same trap as v22's
+// caps.js, v34's reader, v35's settings.js and v37's lists.js: an installed PWA
+// holding v37 has no entry for either. It would get the new index.html, whose
+// Roadmaps view is now an empty #roadmaps-grid with a status line nothing
+// fills, plus a brand-new Calendar chip pointing at a #calendar-view whose
+// module was never loaded — two destinations drawn and dead, which is precisely
+// what this audit is about.
+const CACHE = 'blazing-shell-v38';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -139,6 +147,9 @@ const SHELL = [
   './emby.js',
   './dpad.js',
   './games.js',
+  // Roadmaps and Calendar. NEW FILES — see the v38 note on CACHE above.
+  './roadmaps.js',
+  './calendar.js',
   './youtube.js',
   './livetv.js',
   // The Settings screen. A NEW FILE, so an installed PWA holding the previous

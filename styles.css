@@ -996,11 +996,111 @@ button:focus-visible, a:focus-visible, input:focus-visible {
    less than half the Roku's. The cap stays as a max-width so narrow windows
    still collapse instead of overflowing. */
 .roadmap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 582px)); gap: 16px; max-width: 1778px; margin: 0 auto; padding: 0 var(--gutter); justify-content: center; }
-.roadmap-grid article { min-height: 392px; padding: 22px; border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
-.roadmap-grid article:hover { border-color: rgba(255,61,71,.3); box-shadow: 0 8px 24px rgba(255,61,71,.1); }
-.roadmap-grid span { color: var(--accent); font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: .12em; }
-.roadmap-grid h2 { margin: 25px 0 8px; font-size: var(--fs-display); letter-spacing: -.03em; }
-.roadmap-grid p { margin: 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
+
+/* B25. A franchise card, not a blurb card. The three <article>s this block used
+   to dress were a static product pitch; these are buttons over the franchise's
+   own TMDB backdrop, which is why 582x392 was the right box all along -- a
+   poster does not fill it, a backdrop does. The same left-to-right darkening
+   roadmaps.js paints inline keeps the name readable over a light still, exactly
+   as .home-hero-scrim and the detail art do. */
+.roadmap-card {
+  display: flex;
+  align-items: flex-end;
+  min-height: 392px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--surface) center / cover no-repeat;
+  text-align: left;
+  transition: border-color var(--focus-ease), box-shadow var(--focus-ease), transform var(--focus-ease);
+}
+.roadmap-card:hover, .roadmap-card:focus-visible { border-color: rgba(255,61,71,.5); box-shadow: 0 8px 24px rgba(255,61,71,.14); outline: none; transform: scale(1.01); }
+.roadmap-card.no-art { background-image: linear-gradient(135deg, #1B1417, #0E0A0C); }
+.roadmap-card-body { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 22px; }
+.roadmap-card-name { font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: -.03em; line-height: 1.1; }
+.roadmap-card-meta { color: var(--accent); font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.roadmap-card-copy {
+  color: var(--muted); font-size: var(--fs-body); line-height: 1.5;
+  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
+.roadmaps-hint { max-width: 760px; margin: 0 auto 16px; padding: 0 20px; color: var(--muted); font-size: var(--fs-body); }
+
+/* ── One franchise ───────────────────────────────────────────
+   The backdrop is confined to the header block, the way tvOS's RoadmapHeader
+   and the Roku's `one` group both confine it: a full-bleed art behind a wall of
+   posters makes every poster harder to read. */
+.roadmap-header {
+  margin: 0 auto 8px;
+  padding: 36px var(--gutter) 28px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  background: transparent center / cover no-repeat;
+}
+.roadmap-header-body { max-width: 1180px; margin: 0 auto; }
+.roadmap-header-body h1 { margin: 16px 0 0; font-size: clamp(30px, 6vw, 48px); letter-spacing: -.03em; }
+.roadmap-about { max-width: 900px; margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
+.roadmap-header-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 14px; }
+.roadmap-stats { margin: 0; color: var(--muted); font-size: var(--fs-body); font-weight: var(--fw-bold); }
+/* The order button. A real control here, unlike tvOS's state indicator, because
+   this screen can genuinely re-sort. The :disabled rule is a guard rather than
+   a state anything reaches today -- Saga and Release are real on every roadmap,
+   so roadmaps.js only ever disables a button that would have one stop, and a
+   one-stop order button must LOOK dead rather than look pressable. */
+.roadmap-order {
+  min-height: 44px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  padding: 8px 18px;
+  color: var(--text);
+  background: rgba(255,61,71,.22);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: background var(--focus-ease), border-color var(--focus-ease);
+}
+.roadmap-order:hover:not(:disabled), .roadmap-order:focus-visible { background: var(--accent); outline: none; }
+.roadmap-order:disabled { border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: var(--muted); cursor: default; }
+#roadmap-back { margin-bottom: 4px; }
+
+.roadmap-chapter { margin: 0 0 29px; }
+.roadmap-chapter .row-title { margin: 24px var(--gutter) 0; }
+.roadmap-chapter-sub { margin: 4px var(--gutter) 10px; color: var(--muted); font-size: var(--fs-body); }
+/* The poster and its caption are one flex item, so the column is exactly as
+   wide as the poster -- the same shape .list-item uses in the Library. */
+.roadmap-entry, .calendar-entry { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; }
+/* `width: 0; min-width: 100%` so a long caption contributes NOTHING to the flex
+   item's intrinsic width and still fills it. Without it "Ep 12  ·  11:30 pm"
+   would make its own column wider than the poster above it, and the whole row
+   would stop lining up with every other poster row in the app. */
+.roadmap-entry-meta, .calendar-entry-meta { width: 0; min-width: 100%; color: var(--muted); font-size: var(--fs-caption); line-height: 1.3; }
+/* The position in the WHOLE watch order, not in this chapter. Top-left, where
+   .card-source would sit -- a roadmap entry never carries a source badge, so
+   the two can never collide. */
+.roadmap-pos {
+  position: absolute; top: 8px; left: 8px;
+  min-width: 24px;
+  border-radius: var(--radius-pill);
+  padding: 3px 7px;
+  color: #fff;
+  background: rgba(10,10,11,.86);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-bold);
+  text-align: center;
+}
+/* A `tmdb:` id: visible, ordered, and honestly not openable. 0.45 is the site's
+   own number and tvOS's. */
+.card.roadmap-unplayable { opacity: .45; cursor: default; }
+.card.roadmap-unplayable:hover, .card.roadmap-unplayable:focus-visible { transform: none; box-shadow: 0 8px 22px rgba(0,0,0,.3); }
+
+/* ── Calendar (B12) ──────────────────────────────────────────
+   One .result-row per DAY, so the rows are the same rows the Library and the
+   search results already draw. A manga chapter is a release note with no
+   details page: dimmed like an unplayable roadmap entry, and a press says so
+   instead of opening an empty sheet. */
+.calendar-days { margin-top: 24px; }
+.card.calendar-unopenable { opacity: .55; }
 
 /* ── Education tabs ──────────────────────────────────────── */
 .edu-tabs {
@@ -1743,6 +1843,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .hero-art { opacity: .58; background-position: 64% top; }
   .hero-content { padding-top: 170px; }
   .roadmap-grid { grid-template-columns: 1fr; }
+  .roadmap-card { min-height: 260px; }
 }
 
 @media (max-width: 420px) {

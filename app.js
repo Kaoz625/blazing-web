@@ -2037,6 +2037,11 @@ function showRoute(route, mediaOptions = {}) {
   // codec skips, auto-next and the add-on source were unreachable from a
   // browser while all three televisions had a screen for them.
   const settingsView = $('#settings-view');
+  // B25 / B12. Roadmaps has had a <section> since the first build and nothing
+  // behind it; Calendar had neither. Both are the self-contained-module shape
+  // again — roadmaps.js and calendar.js own their fetch, their state and their
+  // markup, and this router only flips visibility and calls mount().
+  const calendarView = $('#calendar-view');
   if (trailersView) trailersView.hidden = route !== 'trailers';
   if (educationView) educationView.hidden = route !== 'education';
   if (comicsView) comicsView.hidden = route !== 'comics';
@@ -2047,6 +2052,7 @@ function showRoute(route, mediaOptions = {}) {
   if (youtubeView) youtubeView.hidden = route !== 'youtube';
   if (livetvView) livetvView.hidden = route !== 'livetv';
   if (settingsView) settingsView.hidden = route !== 'settings';
+  if (calendarView) calendarView.hidden = route !== 'calendar';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
   // were the only callers of window.mountStorybook / mountPodcastStudio /
@@ -2073,6 +2079,13 @@ function showRoute(route, mediaOptions = {}) {
   // with the profile, so a screen built once would be stale the moment somebody
   // switched profiles on another tab.
   if (route === 'settings') window.BlazingSettings && window.BlazingSettings.mount();
+  // Mounted on every visit for the same reason Settings is: both screens are
+  // filtered by the connected profile's rating cap, and a cap can change in
+  // another tab while this one is looking at something else. Neither module
+  // re-fetches on a mount — the index and the 61-day window are each asked for
+  // once — so a revisit costs a re-render and nothing on the wire.
+  if (route === 'roadmaps') window.BlazingRoadmaps && window.BlazingRoadmaps.mount();
+  if (route === 'calendar') window.BlazingCalendar && window.BlazingCalendar.mount();
   telemetry('screen_view', { screen: route });
   if (browseRoute) applyRowFilter(route);
   if (route === 'library') renderLibrary();
@@ -2469,8 +2482,15 @@ function attachHoverTrailer(card, meta) {
  * a real src from the start. It carries the URL in a data attribute instead,
  * and hydrates on the card's first hover/focus — which in practice is only
  * ever a row-hero card, since that is the only place the image is visible.
+ *
+ * `onSelect` is optional and exists for exactly one case: a card that is NOT a
+ * title you can open. The calendar draws manga chapters, which are release
+ * notes with no details page, and a card that opened an empty sheet would be
+ * the same lie as a control that is drawn and does nothing (B12). Everything
+ * else passes nothing and gets openDetail, which is what every caller did
+ * before this argument existed.
  */
-function buildCard(meta) {
+function buildCard(meta, onSelect) {
   const card = el('button', 'card');
   card.type = 'button';
   card.setAttribute('aria-label', `View ${meta.name}`);
@@ -2542,6 +2562,10 @@ function buildCard(meta) {
 
   attachHoverTrailer(card, meta);
   card.addEventListener('click', () => {
+    if (typeof onSelect === 'function') {
+      onSelect(meta);
+      return;
+    }
     if (state.route === 'anime') meta.isAnime = true;
     openDetail(meta);
   });
@@ -5826,6 +5850,130 @@ function ratingAllowed(tier) {
   if (tierIndex < 0) return String(cap).toLowerCase() !== 'general';
   return tierIndex <= capIndex;
 }
+
+/* ── What a title is RATED, for screens whose items carry no certification ───
+ *
+ * ratingAllowed() above needs a tier and the catalogues that feed Roadmaps and
+ * Calendar do not send one: /roadmaps items are {id,type,name,year,date,poster,
+ * runtime,rating} where `rating` is a TMDB vote average, and /calendar items
+ * carry no certification at all. So both screens would hand ratingAllowed() an
+ * empty string for every row, which is UNKNOWN — and unknown fails closed under
+ * a kids cap, emptying the whole screen for a child rather than narrowing it.
+ *
+ * The fleet already answers the question: GET /rating/{movie|series}/{id} ->
+ * {certification, tier}. Fire TV has asked it per title since the parental work
+ * (RatingClient.visibleTo) and the Roku asks it from the calendar task itself
+ * (RatingFilterItems in components/tasks/AddonTask.brs). The browser was the one
+ * client with no way to ask, which is why this lives here beside the cap rather
+ * than inside either new module — both need it and there is one copy.
+ *
+ * THE THREE RULES ARE FIRE TV'S, UNCHANGED:
+ *   · An 'adult' cap filters nothing, because ratingAllowed admits every tier
+ *     there and the lookups could not change a single answer.
+ *   · An UNKNOWN tier still passes under teen, mature and adult. Only a kids
+ *     cap treats it as a block — that is ratingAllowed's own rule, reused.
+ *   · Only a `tt` id is worth asking about. An `anilist:`, `mangadex:` or
+ *     `tmdb:` id is not something any ratings source can classify, so asking
+ *     costs a round trip to be told nothing. That is most of the calendar.
+ */
+const RATING_TIER_CACHE = new Map();
+/** Concurrent rating lookups, and the per-screen budget. Both are the Roku's
+ *  numbers from RatingSessionStart("calendar", 150, 20) rounded to what a
+ *  browser should open at once. */
+const RATING_LOOKUPS = 6;
+const RATING_BUDGET = 150;
+
+/**
+ * The id to ask about: the TITLE, with any episode suffix removed and any
+ * NAMESPACE left alone. Ported from Fire TV's RatingClient.ratingLookupId,
+ * including the reason it is not `id.split(':')[0]` — a Kitsu id IS `kitsu:42`,
+ * and that split returned the literal "kitsu" for every anime on the device, so
+ * one answer became the tier of thousands of titles.
+ *
+ *   tt0903747      -> tt0903747
+ *   tt0903747:5:14 -> tt0903747      Stremio episode: strip season/episode
+ *   kitsu:42:3     -> kitsu:42       namespaced episode: keep the first two
+ */
+function ratingLookupId(id) {
+  const value = String(id || '').trim();
+  if (!value.includes(':')) return value;
+  if (value.slice(0, 2).toLowerCase() === 'tt') return value.split(':')[0];
+  return value.split(':').slice(0, 2).join(':');
+}
+
+/** '' means UNKNOWN, which ratingAllowed() already knows what to do with. */
+async function ratingTierFor(type, id) {
+  const lookup = ratingLookupId(id);
+  if (lookup.slice(0, 2).toLowerCase() !== 'tt') return '';
+  const kind = type === 'series' ? 'series' : 'movie';
+  const key = `${kind}:${lookup}`;
+  if (RATING_TIER_CACHE.has(key)) return RATING_TIER_CACHE.get(key);
+  let tier = '';
+  try {
+    const data = await fetchJSON(`${FLEET_BASE}/rating/${kind}/${encodeURIComponent(lookup)}`);
+    tier = String((data && data.tier) || '').toLowerCase();
+  } catch {
+    // NOT CACHED. A failed request is not an answer, and remembering it as one
+    // would pin a title to "unknown" for the rest of the session — the mistake
+    // the Roku's calendar task writes down at AddonTask.brs:438.
+    return '';
+  }
+  RATING_TIER_CACHE.set(key, tier);
+  return tier;
+}
+
+/**
+ * The subset of `metas` this profile may see, in the order they came in.
+ * Anything already carrying its own certification is judged on that and costs
+ * no request, which is how an Emby or add-on meta passes through free.
+ */
+async function visibleMetas(metas) {
+  const list = Array.isArray(metas) ? metas : [];
+  if (!list.length) return [];
+  if (String(state.profileCap || '').toLowerCase() === 'adult') return list;
+  const keep = new Array(list.length).fill(null);
+  let cursor = 0;
+  let spent = 0;
+  const worker = async () => {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      const meta = list[index];
+      let tier = String((meta && meta.contentRating) || '');
+      if (!tier && spent < RATING_BUDGET) {
+        spent += 1;
+        tier = await ratingTierFor(meta.type, meta.id);
+      }
+      if (ratingAllowed(tier)) keep[index] = meta;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RATING_LOOKUPS, list.length) }, worker));
+  return keep.filter(Boolean);
+}
+
+/**
+ * WHAT A SELF-CONTAINED MODULE BORROWS FROM THIS FILE.
+ *
+ * roadmaps.js and calendar.js draw ordinary catalogue cards and gate them by
+ * the connected profile's cap, and both of those live here. anime-room.js gets
+ * the same four things by argument, because showRoute() mounts it with a
+ * services object; these two are mounted with none, so the handles hang off one
+ * global instead of four.
+ *
+ * IT IS PUBLISHED HERE AND READ AT MOUNT, NOT AT LOAD, and that is script
+ * order rather than taste: index.html loads app.js BEFORE roadmaps.js and
+ * calendar.js (both `defer`, so both run in document order), which means
+ * window.BlazingRoadmaps does not exist yet at this line and a push from here
+ * would land on undefined. A pull from mount() always arrives after both.
+ */
+window.BlazingCatalogue = {
+  buildCard,
+  openDetail,
+  visibleMetas,
+  showToast,
+  /** A function, not a value: the cap changes when somebody switches profile. */
+  cap: () => state.profileCap,
+};
 
 async function appendEmbyRow(title, type, load, request = homeRequest) {
   let items;

@@ -68,6 +68,12 @@ const VIEWS = [
   { id: 'music', heading: 'Books & Audio' },
   { id: 'podcasts', heading: 'Books & Audio' },
   { id: 'games', heading: true },
+  // B12. `true`, not 'Calendar', for the same reason as YouTube and Live TV
+  // below: a string heading also joins the `titles` set counted at the end, and
+  // that count is the BROWSE routes plus the book/audio room. Calendar is
+  // neither. It is in this list rather than exempt from it because the drawer
+  // count is asserted against VIEWS.length.
+  { id: 'calendar', heading: true },
   // `true`, not the string 'YouTube'. A string heading also joins the `titles`
   // set checked at the end, and that check counts the BROWSE routes plus the
   // book/audio room — YouTube is neither, so naming it there would move a

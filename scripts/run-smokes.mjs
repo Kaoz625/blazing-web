@@ -76,7 +76,12 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // was written: 36 files on disk against a floor of 35, so one of them could
 // have gone missing for free. Same rule as every note above - this number is
 // the real count, always, and catching it up is part of adding to it.
-const MIN_SUITES = 37;
+// Raised 37 -> 38 when roadmaps-calendar.smoke.mjs landed with B25/B12: the
+// real Roadmaps screen (the chip used to open a static product blurb) and a
+// Calendar the browser did not have at all. Same rule as every raise above:
+// this number goes up when a suite lands, so a deleted suite is a failure
+// rather than a quieter run.
+const MIN_SUITES = 38;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
@@ -101,7 +106,13 @@ const MIN_SUITES = 37;
 // rating cap, the now/next line and bar, and the EPG grid's slot maths. Same
 // reason again — firetv keeps ProfileGateRules and GuideTimeline outside its
 // Views precisely so those three are reachable by a test.
-const MIN_UNITS = 6;
+// Raised 6 -> 8 when roadmaps.test.mjs and calendar.test.mjs landed with
+// B25/B12. Same reason as the raises above: the fleet sends chapters and days
+// and nothing else, so the years range, the running position, the stats line,
+// the three orders, the day ordering and the twelve-hour clock are all
+// decisions the client holds — and the Roku got several of them wrong once
+// each before it got them right.
+const MIN_UNITS = 8;
 
 const filters = process.argv.slice(2);
 const entries = (await readdir(ROOT)).sort();

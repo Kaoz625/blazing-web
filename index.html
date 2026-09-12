@@ -218,6 +218,10 @@
         <button type="button" data-view="comics">Comics</button>
         <button type="button" data-view="manga">Manga</button>
         <button type="button" data-view="games">Games</button>
+        <!-- B12. Right after Games, which is where the Roku's own drawer puts it
+             (fillDrawer in components/MainScene.brs). Not a .topnav chip: it is
+             not in the canonical eleven, and neither is it on the Roku's bar. -->
+        <button type="button" data-view="calendar">Calendar</button>
         <button type="button" data-view="trailers">Trailers</button>
         <button type="button" data-view="requests">Requests</button>
         <button type="button" data-view="admin">Admin</button>
@@ -343,9 +347,9 @@
            row-hero ancestor makes that visible, so buildCard() itself needed no
            per-row branching." -->
       <!-- Every other view opens with an eyebrow + <h1> + one line: Library,
-           Emby, Comics, Manga, Games, Requests, Trailers, Education, Roadmaps
-           and Admin all do. Home/Movies/Shows/Anime are the SAME section with
-           the rows filtered (applyRowFilter), so all four inherited one
+           Emby, Comics, Manga, Games, Requests, Trailers, Education, Roadmaps,
+           Calendar and Admin all do. Home/Movies/Shows/Anime are the SAME
+           section with the rows filtered (applyRowFilter), so all four inherited one
            headless top and were the only browse screens with no title on them.
            This is NOT the standalone hero banner the comment above rules out —
            it is the small heading the other ten already carry, retitled per
@@ -521,17 +525,85 @@
       </div>
     </section>
 
+    <!-- B25. THE REAL ROADMAPS SCREEN. What stood here was three fixed
+         <article> cards under the heading "What is next" — Search / Source
+         checks / My list — a product blurb with no franchise data, no fetch and
+         nothing to press, behind the same chip that opens 170 browsable
+         franchises on the Roku, the Fire Stick and the Apple TV.
+
+         The heading, the subtitle, the card caption, the stats line, the
+         chapter subline and the order button are the strings those three
+         already print. roadmaps.js fills every id below; they are empty here on
+         purpose, because a count written into the markup is a count that drifts
+         from what the fleet answered. -->
     <section id="roadmaps-view" class="view" hidden>
+      <div id="roadmaps-index">
+        <div class="page-heading">
+          <p class="eyebrow">Roadmaps</p>
+          <h1>Franchise Roadmaps</h1>
+          <p>Every film and series in a universe, in the order worth watching them.</p>
+        </div>
+        <p id="roadmaps-status" class="search-status" role="status"></p>
+        <button id="roadmaps-retry" class="secondary-button" type="button" hidden>Try again</button>
+        <p id="roadmaps-hint" class="roadmaps-hint"></p>
+        <div id="roadmaps-grid" class="roadmap-grid"></div>
+      </div>
+
+      <!-- One franchise. The backdrop is confined to this header block under the
+           same left-to-right darkening every other art panel in this app uses,
+           so the name stays readable over a light still. -->
+      <div id="roadmap-detail" hidden>
+        <div id="roadmap-art" class="roadmap-header">
+          <div class="roadmap-header-body">
+            <button id="roadmap-back" class="secondary-button" type="button">Back to roadmaps</button>
+            <h1 id="roadmap-name"></h1>
+            <p id="roadmap-about" class="roadmap-about"></p>
+            <div class="roadmap-header-foot">
+              <p id="roadmap-stats" class="roadmap-stats"></p>
+              <!-- SAGA ORDER / RELEASE ORDER / FILMS FIRST. Saga and Release
+                   are always both real, so this button is always live; the
+                   THIRD stop is offered only on the 30-of-170 roadmaps that
+                   actually hold both films and series, because a pill that
+                   sorts nothing is the same lie as a button that cannot be
+                   pressed. `hidden` until a roadmap has loaded, for the same
+                   reason. -->
+              <button id="roadmap-order" class="roadmap-order" type="button" hidden>Saga order</button>
+            </div>
+          </div>
+        </div>
+        <p id="roadmap-status" class="search-status" role="status"></p>
+        <div id="roadmap-chapters"></div>
+      </div>
+    </section>
+
+    <!-- B12. CALENDAR — what is out, and when. It existed on the Roku alone
+         while /calendar has served the whole window the entire time. One day per
+         row rather than one row per kind, because the question this screen
+         answers is "what is on today", not "what films exist"; the kind filter
+         along the top narrows it when you only care about one of them. That is
+         the Roku's own CalendarScreen.xml, and the five filters below are its
+         five, in its order.
+
+         The tab row reuses .emby-tabs so it is the same control as the
+         Movies/Shows pair on the Emby screen rather than a second kind of tab. -->
+    <section id="calendar-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Roadmaps</p>
-        <h1>What is next</h1>
-        <p>Blazing keeps one source list and one visual language across your devices.</p>
+        <p class="eyebrow">Calendar</p>
+        <h1>Calendar</h1>
+        <p>What is out, and when, across films, TV, anime and manga.</p>
       </div>
-      <div class="roadmap-grid">
-        <article><span>01</span><h2>Search</h2><p>Catalog and source results appear in one place.</p></article>
-        <article><span>02</span><h2>Source checks</h2><p>Only a direct, compatible stream is offered to the player.</p></article>
-        <article><span>03</span><h2>My list</h2><p>Keep titles you want to return to on this device.</p></article>
+      <div class="emby-controls">
+        <div id="calendar-tabs" class="emby-tabs" role="tablist" aria-label="Filter by kind">
+          <button type="button" class="emby-tab" data-calendar-kind="" aria-selected="true">All</button>
+          <button type="button" class="emby-tab" data-calendar-kind="movie" aria-selected="false">Movies</button>
+          <button type="button" class="emby-tab" data-calendar-kind="series" aria-selected="false">TV Shows</button>
+          <button type="button" class="emby-tab" data-calendar-kind="anime" aria-selected="false">Anime</button>
+          <button type="button" class="emby-tab" data-calendar-kind="manga" aria-selected="false">Manga</button>
+        </div>
       </div>
+      <p id="calendar-status" class="search-status" role="status"></p>
+      <button id="calendar-retry" class="secondary-button" type="button" hidden>Try again</button>
+      <div id="calendar-days" class="calendar-days"></div>
     </section>
 
     <header id="anime-room-header" class="anime-room-header" hidden>
@@ -1019,6 +1091,11 @@
   <script src="./manga.js" defer></script>
   <script src="./anime-room.js" defer></script>
   <script src="./games.js" defer></script>
+  <!-- B25 / B12. Two self-contained modules, the same shape as games.js and
+       livetv.js: showRoute() flips the view and calls mount(), and each module
+       owns its own fetch, state and markup. -->
+  <script src="./roadmaps.js" defer></script>
+  <script src="./calendar.js" defer></script>
   <!-- AFTER app.js, and that is an ordering requirement rather than a habit:
        youtube.js hands its resolved URL to window.BlazingPlayer, which app.js
        defines beside its own openPlayer. Both are `defer`, so they run in
