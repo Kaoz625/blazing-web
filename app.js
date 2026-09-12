@@ -17,7 +17,27 @@ const RESOLVE_TIMEOUT = 12000;
 const PLAYER_STALL_TIMEOUT = 25000;
 const TOAST_LIFETIME_MS = 4200;
 const UPSCALE_LABEL = '4K Upscale';
-const LIST_KEY = 'blazing-my-list-v2:';
+/* B27 / B31 / B22. The saved list lives on the FLEET now — lists.js owns the
+   routes, the cache and the three list names. What is left here is the three
+   labels and the two screens that draw them.
+
+   THE THREE SPECS, IN THE ROKU'S AND FIRE TV'S ORDER, with Fire TV's rule that
+   the label shows the state it is IN (DetailActivity.kt:784-787). The Roku
+   carries the same pair of labels without the tick glyph, because Barlow on a
+   Roku draws U+2713 as a missing-character box; a browser has no such problem,
+   so the tick is kept.
+
+   `description` is the one-line subtitle under each section heading on the
+   Library screen — ListsActivity.kt:172/:179/:186, word for word. */
+const LIST_SPECS = Object.freeze([
+  { list: 'watchlist', button: '#detail-save', title: 'Watchlist', description: 'Titles you plan to watch', out: '+ Watchlist', in: '\u2713 In watchlist' },
+  { list: 'collection', button: '#detail-collection', title: 'Collection', description: 'Titles you want to keep', out: '+ Collection', in: '\u2713 In collection' },
+  { list: 'watched', button: '#detail-watched', title: 'Watched', description: 'Titles you finished', out: 'Mark watched', in: '\u2713 Watched' },
+]);
+/* The one thing a failed write is allowed to say. Fire TV puts it in the button
+   itself rather than in a toast, so the control that lied is the control that
+   admits it — and it stays pressable, so the retry is the same gesture. */
+const LIST_SAVE_FAILED = 'Couldn\u2019t save \u2014 try again';
 const FRESH_HOME_SHELVES = Object.freeze([
   {
     id: 'fresh-in-theaters',
@@ -676,16 +696,6 @@ function setBackground(node, value) {
     : '';
 }
 
-function readList(profileId) {
-  if (!profileId) return [];
-  try {
-    const stored = JSON.parse(localStorage.getItem(LIST_KEY + encodeURIComponent(profileId)) || '[]');
-    return Array.isArray(stored) ? stored.map(safeMeta).filter(Boolean).slice(0, 100) : [];
-  } catch {
-    return [];
-  }
-}
-
 const state = {
   catalogs: [],
   selected: null,
@@ -693,7 +703,9 @@ const state = {
   route: 'home',
   profileId: null,
   mediaProfile: null,
-  myList: [],
+  // NO myList. The saved list is not this object's to hold any more: it is the
+  // fleet's, cached by lists.js, and read through window.BlazingLists so that
+  // exactly one copy of it exists in the browser. See LIST_SPECS above.
   // The rating cap of the connected profile, or null when nobody has connected
   // one. profile.js has broadcast this on blazing-profile-selected since it was
   // written; until now NOTHING listened, so every Emby row reached every viewer
@@ -1100,32 +1112,57 @@ const discoverResults = $('#discover-results');
 let discoverRequest = 0;
 let searchRequest = 0;
 
-function persistList() {
-  if (!state.profileId) return;
-  try {
-    localStorage.setItem(LIST_KEY + encodeURIComponent(state.profileId), JSON.stringify(state.myList));
-  } catch {
-    showToast('This browser could not save your list.', 'error');
+/* ── The saved lists ─────────────────────────────────────────────────────────
+ *
+ * B27. This used to be persistList(): localStorage.setItem, and nothing else.
+ * A title saved here lived in this browser on this machine, never reached the
+ * Roku or the Fire Stick, and died with the site data. Every write below now
+ * goes to the fleet through lists.js and localStorage is only its cache.
+ *
+ * B31. And there are THREE lists, not one — the same three the TVs have.
+ */
+
+function listHas(list, meta) {
+  return Boolean(meta) && Boolean(window.BlazingLists) && window.BlazingLists.contains(list, meta.id);
+}
+
+/**
+ * One list button, pressed.
+ *
+ * Disabled for the round trip so a double press cannot add and immediately
+ * remove, and a FAILED call says so in the label rather than flipping it —
+ * Fire TV's tri-state (true / false / null) is the whole reason toggle()
+ * returns three things instead of two.
+ */
+async function toggleList(list, meta, button) {
+  if (!meta || !state.profileId || !window.BlazingLists) return;
+  if (button) button.disabled = true;
+  const nowIn = await window.BlazingLists.toggle(list, meta);
+  if (button) button.disabled = false;
+  // The viewer moved on while the fleet was answering; whatever is on screen
+  // now is a different title and must not be relabelled with this answer.
+  if (state.selected !== meta) return;
+  if (nowIn === null) {
+    if (button) button.textContent = LIST_SAVE_FAILED;
+    return;
   }
-}
-
-function listHas(meta) {
-  return state.myList.some((item) => item.id === meta.id && item.type === meta.type);
-}
-
-function toggleMyList(meta) {
-  if (!meta || !state.profileId) return;
-  const index = state.myList.findIndex((item) => item.id === meta.id && item.type === meta.type);
-  if (index >= 0) state.myList.splice(index, 1);
-  else state.myList.unshift(meta);
-  persistList();
   updateSaveLabels();
-  if (state.route === 'library') renderLibrary();
 }
+
+/* toggleMyList() lived here. It was the browser's ONE saved-list gesture and
+   the only caller of persistList(); B31 replaced it with the three buttons
+   bound to toggleList() at the foot of this file. The watchlist is what "My
+   list" meant, which is why lists.js migrates the old localStorage entries into
+   that list and not another. */
 
 function updateSaveLabels() {
-  const saved = state.selected && listHas(state.selected);
-  $('#detail-save').textContent = saved ? 'Remove from list' : 'My list';
+  for (const spec of LIST_SPECS) {
+    const button = $(spec.button);
+    if (!button) continue;
+    const saved = listHas(spec.list, state.selected);
+    button.textContent = saved ? spec.in : spec.out;
+    button.setAttribute('aria-pressed', String(saved));
+  }
 }
 
 function openDrawer() {
@@ -1730,35 +1767,176 @@ async function runSearch(event) {
   renderSearchCards();
 }
 
+/* buildResultRow() lived here. It had exactly one caller — the single
+   "Saved titles" grid the old renderLibrary() drew — and B22 replaced that grid
+   with three counted sections, so buildListSection() below is the same shape
+   with a count and a description on it. Its .result-row and .result-grid
+   classes are untouched in styles.css and are what the new section uses. */
+
 /**
- * RESTORED with runSearch: d18e9ca deleted this and renderLibrary() below it,
- * leaving two live calls to renderLibrary() standing — in toggleMyList() and in
- * showRoute(). Pressing Library threw "renderLibrary is not defined" and took the
- * rest of showRoute() with it, so the tab never even highlighted.
+ * B22. The Library screen: Watchlist, Collection and Watched, each with its
+ * count, its description and its rows — Fire TV's ListsActivity, in a browser.
  *
- * .result-row and .result-grid are still in styles.css, untouched.
+ * Every string here is Fire TV's, deliberately. "1 saved title" / "N saved
+ * titles", "This list is empty.", "No saved titles yet. Add a title from its
+ * details page.", "Saved titles could not load. Check the network and try
+ * again." A screen that says the same words on all three boxes is what parity
+ * actually means to the person holding the remote.
+ *
+ * A LIST THAT FAILED TO LOAD IS NOT AN EMPTY LIST. The old screen had one
+ * outcome for both, because localStorage cannot fail in an interesting way.
+ * The fleet can, and "you have saved nothing" is the one wrong thing to say to
+ * somebody whose list is fine and whose network is not — they would add it all
+ * again. So a failed load keeps the cached rows on screen, says why, and offers
+ * Try again.
  */
-function buildResultRow(title, metas) {
-  const section = el('section', 'result-row');
+function renderLibrary() {
+  const results = $('#library-results');
+  const status = $('#library-status');
+  const subtitle = $('#library-subtitle');
+  const retry = $('#library-retry');
+  if (!results) return;
+  results.replaceChildren();
+  if (retry) retry.hidden = true;
+
+  const lists = window.BlazingLists;
+  if (!state.profileId || !lists) {
+    if (subtitle) subtitle.textContent = 'Saved titles';
+    if (status) status.textContent = 'My Lists needs a connected profile.';
+    return;
+  }
+
+  const name = plainText(state.mediaProfile && state.mediaProfile.name);
+  if (subtitle) subtitle.textContent = name ? `${name}’s saved titles` : 'Saved titles';
+
+  const snapshot = lists.snapshot();
+  const phase = lists.phase();
+  // Nothing cached and nothing loaded yet: there is no screen to draw, only a
+  // wait. With a cache in hand the rows are drawn and the wait is silent.
+  if (phase === 'loading' && snapshot.total === 0) {
+    if (status) status.textContent = 'Loading saved titles…';
+    return;
+  }
+
+  let total = 0;
+  for (const spec of LIST_SPECS) {
+    // Same gate as every other shelf in this file. The list rows carry the
+    // contentRating this client saved with them; one saved on a TV carries
+    // none, and an unrated row is refused under a 'general' cap and admitted
+    // above it — ratingAllowed('') already decides that, the same way it does
+    // for the Emby and scraped-site rows.
+    // safeMeta() is this file's allow list and it is what buildCard()
+    // understands, so a fleet row becomes a drawable card by the same route
+    // every other source in the app takes.
+    const visible = snapshot[spec.list]
+      .map(safeMeta)
+      .filter((meta) => meta && ratingAllowed(meta.contentRating));
+    total += visible.length;
+    results.appendChild(buildListSection(spec, visible));
+  }
+
+  if (status) {
+    if (phase === 'error') {
+      status.textContent = 'Saved titles could not load. Check the network and try again.';
+      if (retry) retry.hidden = false;
+    } else if (total === 0) {
+      status.textContent = 'No saved titles yet. Add a title from its details page.';
+    } else {
+      status.textContent = total === 1 ? '1 saved title' : `${total} saved titles`;
+    }
+  }
+}
+
+/** One section: "Watchlist (3)", its description, then the rows. */
+function buildListSection(spec, metas) {
+  const section = el('section', 'result-row list-section');
+  section.dataset.list = spec.list;
   const heading = el('h2', 'row-title');
-  heading.textContent = title;
+  heading.textContent = `${spec.title} (${metas.length})`;
+  const description = el('p', 'list-section-copy');
+  description.textContent = spec.description;
+  section.append(heading, description);
+  if (!metas.length) {
+    const empty = el('p', 'empty-copy');
+    empty.textContent = 'This list is empty.';
+    section.appendChild(empty);
+    return section;
+  }
   const grid = el('div', 'result-grid');
-  grid.append(...metas.map(buildCard));
-  section.append(heading, grid);
+  grid.append(...metas.map((meta) => buildListItem(spec, meta)));
+  section.appendChild(grid);
   return section;
 }
 
-function renderLibrary() {
-  const target = $('#library-results');
-  target.replaceChildren();
-  const visible = state.myList.filter((meta) => ratingAllowed(meta.contentRating));
-  if (!visible.length) {
-    const message = el('p', 'empty-copy');
-    message.textContent = 'Open a title and use My list to save it here.';
-    target.appendChild(message);
+/**
+ * One row: the poster card that OPENS it, and a Remove that takes it off this
+ * list.
+ *
+ * Two explicit targets, exactly as ListsActivity.addItemRow does, and for its
+ * reason: a saved list whose only gesture is "open" cannot be tidied, and a
+ * card that removes itself when you click it is a trap. The Remove sits beside
+ * the card rather than inside it because buildCard() returns a <button> and a
+ * button cannot contain another one.
+ */
+function buildListItem(spec, meta) {
+  const item = el('div', 'list-item');
+  const actions = el('div', 'list-actions');
+  item.append(buildCard(meta), actions);
+  drawListRemove(actions, spec, meta);
+  return item;
+}
+
+function drawListRemove(actions, spec, meta) {
+  const remove = el('button', 'list-remove');
+  remove.type = 'button';
+  remove.textContent = 'Remove';
+  remove.setAttribute('aria-label', `Remove ${meta.name} from ${spec.title}`);
+  remove.addEventListener('click', () => drawListRemoveConfirm(actions, spec, meta));
+  actions.replaceChildren(remove);
+}
+
+/**
+ * ALWAYS ASK BEFORE WRITING. ListsActivity.confirmRemove shows a Keep / Remove
+ * dialog so a stray press cannot erase a saved title, and focuses Keep.
+ *
+ * Drawn INTO the row rather than as window.confirm(): this same client runs on
+ * webOS and Tizen televisions, where dpad.js walks real focusable elements and
+ * a native browser prompt is not one of them — the viewer would be stuck at a
+ * question their remote cannot answer. Two ordinary buttons are reachable from
+ * a remote, a keyboard and a mouse alike.
+ */
+function drawListRemoveConfirm(actions, spec, meta) {
+  const question = el('p', 'list-confirm-copy');
+  question.textContent = `Remove ${meta.name} from your ${spec.title}?`;
+  const keep = el('button', 'list-keep');
+  keep.type = 'button';
+  keep.textContent = 'Keep';
+  keep.setAttribute('aria-label', `Keep ${meta.name} in ${spec.title}`);
+  keep.addEventListener('click', () => drawListRemove(actions, spec, meta));
+  const confirm = el('button', 'list-remove');
+  confirm.type = 'button';
+  confirm.textContent = 'Remove';
+  confirm.setAttribute('aria-label', `Confirm removing ${meta.name} from ${spec.title}`);
+  confirm.addEventListener('click', () => removeFromList(spec, meta, confirm));
+  actions.replaceChildren(question, keep, confirm);
+  // The safe choice gets the focus, the same as ListsActivity's dialog.
+  keep.focus();
+}
+
+async function removeFromList(spec, meta, button) {
+  if (!window.BlazingLists) return;
+  const status = $('#library-status');
+  if (status) status.textContent = `Removing ${meta.name}…`;
+  button.disabled = true;
+  const removed = await window.BlazingLists.remove(spec.list, meta.id);
+  button.disabled = false;
+  if (!removed) {
+    if (status) status.textContent = `${meta.name} could not be removed. Try again.`;
     return;
   }
-  target.appendChild(buildResultRow('Saved titles', visible));
+  // A successful remove republishes the snapshot, and the listener on
+  // blazing-lists-changed redraws this screen — which is also what puts the
+  // new count in the section heading.
 }
 
 function applyRowFilter(route) {
@@ -3088,6 +3266,11 @@ function openDetail(meta, opts) {
   detailStatus.textContent = '';
   renderRatingChips(meta);
   updateSaveLabels();
+  // The cached membership draws the three labels on this frame; the fleet's
+  // answer relabels them through blazing-lists-changed when it lands. Fire TV
+  // refreshes on every detail open for the same reason — a title added on the
+  // Roku a minute ago must not still read "+ Watchlist" here.
+  window.BlazingLists?.refresh();
   resetQualitySelect();
   if (typeof detailDialog.showModal === 'function') detailDialog.showModal();
   else detailDialog.setAttribute('open', '');
@@ -5560,7 +5743,12 @@ function restoreProfileSession() {
   state.profileCap = RATINGS.includes(cap) ? cap : 'general';
   state.profileIsKids = stored.isKids === true;
   state.profileId = id;
-  state.myList = readList(id);
+  // A RESTORED SESSION IS A PROFILE CHANGE TOO. This path never goes through
+  // the blazing-profile-selected listener below, which is why the saved list is
+  // handed to lists.js here as well — leave it out and a returning browser
+  // shows an empty Library and three un-ticked buttons until the viewer picks
+  // again.
+  window.BlazingLists?.setProfile(id);
   updateSaveLabels();
   renderLibrary();
   return true;
@@ -5578,7 +5766,7 @@ document.addEventListener('blazing-profile-selected', (event) => {
   state.mediaProfile = { ...detail };
   state.profileCap = detail.maxRating || 'general';
   state.profileIsKids = detail.isKids === true;
-  state.myList = readList(state.profileId);
+  window.BlazingLists?.setProfile(state.profileId);
   state.selected = null;
   state.selectedEpisode = null;
   localStorage.setItem('profileId', state.profileId);
@@ -5614,7 +5802,10 @@ document.addEventListener('blazing-profile-signed-out', () => {
   state.mediaProfile = null;
   state.profileCap = null;
   state.profileIsKids = false;
-  state.myList = [];
+  // Signing out takes the saved list off the screen and out of memory. The
+  // fleet keeps it, which is the point: it is there again at the next sign-in,
+  // on this browser or on any of the four boxes.
+  window.BlazingLists?.setProfile(null);
   state.selected = null;
   state.selectedEpisode = null;
   state.catalogs = [];
@@ -5841,7 +6032,26 @@ document.addEventListener('blazing-stream-preferences-changed', () => {
   ++playRequest;
   if (state.selected && detailDialog.open) loadStreams(state.selected);
 });
-$('#detail-save').addEventListener('click', () => state.selected && toggleMyList(state.selected));
+/* B31. Three buttons, one binding. The spec table at the top of this file is
+   the only place the list names and their labels are written down, so a fourth
+   list would be one row there and nothing here. */
+for (const spec of LIST_SPECS) {
+  const button = $(spec.button);
+  if (button) button.addEventListener('click', () => state.selected && toggleList(spec.list, state.selected, button));
+}
+$('#library-retry')?.addEventListener('click', () => {
+  window.BlazingLists?.refresh();
+  renderLibrary();
+});
+/* The lists are on the fleet now, so they arrive AFTER the screen is drawn and
+   they can change while the viewer is looking at something else — another box
+   in the household adding a title, or this browser's own first load landing.
+   lists.js publishes every change and both surfaces follow it, which is why
+   neither toggleList() nor removeFromList() redraws anything itself. */
+document.addEventListener('blazing-lists-changed', () => {
+  updateSaveLabels();
+  renderLibrary();
+});
 $('#detail-upscale').addEventListener('click', requestUpscale);
 // A SECOND listener on #player-close rather than an edit to the telemetry one a
 // few hundred lines up: that one has to read video.currentTime before the source

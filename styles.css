@@ -826,6 +826,48 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .settings-about dd { margin: 0; overflow-wrap: anywhere; }
 .result-row { margin-bottom: 29px; }
 
+/* ── B22: the Library's three saved-title sections ────────
+   Watchlist, Collection and Watched, each a .result-row with a count in its
+   heading, a one-line description under it and a Remove beside every poster.
+   The section and grid classes are the ones the old single "Saved titles" grid
+   used, so the focus law above applies to these cards unchanged. */
+.library-status { margin: 12px var(--gutter) 0; color: var(--muted); font-size: var(--fs-body); }
+#library-retry { margin: 12px 0 0 var(--gutter); }
+.list-section-copy { margin: -6px var(--gutter) 10px; color: var(--muted); font-size: var(--fs-body); }
+/* The flex item is the PAIR now, not the card. The card keeps its own width, so
+   the column is exactly as wide as the poster and the Remove sits under it. */
+.list-item { display: flex; flex: 0 0 auto; flex-direction: column; gap: 8px; }
+.list-actions { display: flex; flex-direction: column; gap: 6px; }
+.list-confirm-copy { margin: 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.3; }
+.list-keep {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: var(--radius-pill);
+  color: #fff;
+  background: rgba(28,28,31,.9);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+.list-keep:hover, .list-keep:focus-visible { background: var(--surface-focus); }
+.list-remove {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,61,71,.42);
+  border-radius: var(--radius-pill);
+  color: #ff8a8f;
+  background: rgba(255,61,71,.12);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: background var(--focus-ease), border-color var(--focus-ease);
+}
+.list-remove:hover, .list-remove:focus-visible { border-color: rgba(255,61,71,.8); background: rgba(255,61,71,.24); }
+.list-remove[disabled] { opacity: .5; cursor: default; }
+
 /* ── Emby library browse ─────────────────────────────────── */
 .emby-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 760px; margin: 0 auto; padding: 0 20px; flex-wrap: wrap; }
 .emby-tabs { display: flex; gap: 8px; }

@@ -383,12 +383,30 @@
       <div id="search-media-results" hidden></div>
     </section>
 
+    <!-- B22. The three-section saved-titles screen, ported from Fire TV's
+         ListsActivity.kt: Watchlist, Collection and Watched, each with its own
+         count and its own one-line description, and every row openable or
+         removable. Before this the browser drew a single "Saved titles" grid
+         out of localStorage, so a title saved on the Fire Stick could not be
+         found here at all.
+
+         The heading says "Library" because the nav chip says Library and the
+         destination has to use the same word — the same decision ListsActivity
+         writes down at its own title. Watchlist / Collection / Watched are the
+         three sections INSIDE it.
+
+         #library-subtitle, #library-status and #library-retry are filled by
+         renderLibrary() in app.js. They are empty here on purpose: a count or a
+         state written into the markup is a count that drifts from what is
+         stored, which is the same reasoning as the Settings rows above. -->
     <section id="library-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Library</p>
-        <h1>My list</h1>
-        <p>Titles saved on this device.</p>
+        <h1>Library</h1>
+        <p id="library-subtitle">Saved titles</p>
       </div>
+      <p id="library-status" class="library-status" role="status"></p>
+      <button id="library-retry" class="secondary-button" type="button" hidden>Try again</button>
       <div id="library-results" class="library-results"></div>
     </section>
 
@@ -825,7 +843,23 @@
         <button id="detail-copy-toggle" class="detail-copy-toggle" type="button" aria-expanded="false" aria-controls="detail-copy" hidden>Show more</button>
         <div class="detail-actions">
           <button id="detail-play" class="primary-button" type="button">Play</button>
-          <button id="detail-save" class="secondary-button" type="button">My list</button>
+          <!-- B31 / B27. ONE localStorage button became THREE fleet-backed ones,
+               the same three the Roku (DetailsScreen.brs:1422-1424) and Fire TV
+               (DetailActivity.kt:780-812) have always drawn, in that order.
+
+               EACH LABEL SHOWS THE STATE IT IS IN, NOT THE ACTION. Fire TV's
+               rule, and the reason for it is written in its own comment: "a
+               button that reads '+ Watchlist' after you added it is the single
+               most common way this kind of control lies to people." The labels
+               here are filled in by updateSaveLabels() in app.js, so what is in
+               the markup is only the not-in-the-list state.
+
+               #detail-save keeps its id on the Watchlist button: it is the
+               element the detail sheet's focus order and the restored listener
+               block at the foot of app.js both address by name. -->
+          <button id="detail-save" class="secondary-button" type="button" data-list="watchlist">+ Watchlist</button>
+          <button id="detail-collection" class="secondary-button" type="button" data-list="collection">+ Collection</button>
+          <button id="detail-watched" class="secondary-button" type="button" data-list="watched">Mark watched</button>
           <button id="detail-upscale" class="secondary-button" type="button" aria-pressed="false">4K Upscale</button>
           <!-- Quality selector — hidden until streams are loaded -->
           <select id="quality-select" class="quality-select" hidden aria-label="Stream quality">
@@ -951,6 +985,9 @@
        app.js's boot behind its download. defer keeps document order, so
        window.Hls still exists before app.js runs. -->
   <script src="./hls.min.js" defer></script>
+  <!-- BEFORE app.js, which reads window.BlazingLists from boot onwards. `defer`
+       keeps document order, so this is the whole of the guarantee. -->
+  <script src="./lists.js" defer></script>
   <script src="./stream-preferences.js" defer></script>
   <script src="./stream-evidence.js" defer></script>
   <script src="./media-library.js" defer></script>

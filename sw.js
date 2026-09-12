@@ -103,11 +103,21 @@
 // boot. An installed PWA holding v35's index.html has no such element, so
 // addEventListener would be called on null — a TypeError before the first
 // screen is drawn, which does not break one feature, it breaks the app.
-const CACHE = 'blazing-shell-v36';
+// v37: B27/B31/B22 — the saved list moved off this browser and onto the fleet.
+// lists.js is A NEW FILE, the same trap as v22's caps.js, v34's reader and
+// v35's settings.js: an installed PWA holding v36 has no entry for it at all.
+// It would get the new index.html, whose detail sheet now draws three list
+// buttons and whose Library view is three empty sections with a #library-status
+// that nothing fills — and app.js's boot would bind #detail-collection and
+// #detail-watched against a window.BlazingLists that was never loaded. Three
+// controls drawn and dead, which is precisely what this audit is about.
+const CACHE = 'blazing-shell-v37';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
 const SHELL = [
+  // The saved lists. A NEW FILE — see the v37 note on CACHE above.
+  './lists.js',
   './stream-preferences.js', './stream-evidence.js',
   './media-library.js',
   './',

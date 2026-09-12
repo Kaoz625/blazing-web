@@ -28,6 +28,39 @@ const profiles = [
   { id: 'kids-two', name: 'Sam', maxRating: 'general', isKids: true, hasPin: false },
 ];
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+/* B27. The saved list is on the FLEET now, so the fixture has to behave like
+   one: a real per-profile store behind GET/POST/DELETE /profiles/:id/lists.
+   A plain `{}` for every /profiles route would make "the list is empty" and
+   "the list could not load" the same answer, and the assertions below are
+   exactly about telling one profile's list from another's. */
+const listStore = new Map();
+const listsFor = (id) => {
+  if (!listStore.has(id)) listStore.set(id, { watchlist: [], collection: [], watched: [] });
+  return listStore.get(id);
+};
+function listRoute(url, route, request) {
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts[0] !== 'profiles' || parts[2] !== 'lists') return false;
+  const lists = listsFor(decodeURIComponent(parts[1]));
+  const name = parts[3] ? decodeURIComponent(parts[3]) : '';
+  if (request.method() === 'GET' && !name) { json(route, lists); return true; }
+  if (request.method() === 'POST' && lists[name]) {
+    const item = JSON.parse(request.postData() || '{}');
+    // Idempotent, the way the server's POST is: adding a title already on the
+    // list updates it in place rather than duplicating the row.
+    lists[name] = [{ ...item, addedAt: new Date().toISOString() }, ...lists[name].filter((row) => row.id !== item.id)];
+    json(route, { ok: true });
+    return true;
+  }
+  if (request.method() === 'DELETE' && lists[name] && parts[4]) {
+    const itemId = decodeURIComponent(parts[4]);
+    lists[name] = lists[name].filter((row) => row.id !== itemId);
+    json(route, { ok: true });
+    return true;
+  }
+  return false;
+}
 let browser;
 let releaseHistory;
 try {
@@ -52,6 +85,7 @@ try {
     if (url.hostname === 'fleet.lyreosai.com') {
       if (url.pathname === '/profiles') return json(route, { profiles });
       if (url.pathname === '/accounts/me') return json(route, { account: { id: 'acc-fixture', name: 'Home test' }, device: { id: 'dev-home', enrollmentStatus: 'approved' } });
+      if (listRoute(url, route, route.request())) return;
       if (url.pathname.startsWith('/profiles/')) return json(route, { items: [] });
       if (url.pathname.startsWith('/discover/filter/')) return json(route, { items: [meta('Fresh family movie'), meta('Fresh grown movie', 'mature')] });
       if (url.pathname.startsWith('/emby/')) return json(route, { metas: [] });
@@ -104,18 +138,31 @@ try {
   assert.ok(await page.locator('#rows .row').count() >= 7, 'Home has more than the four surviving rows');
   console.log('PASS returning approval + partial SDUI: populated, distinct Home shelves');
 
-  await page.evaluate((item) => { toggleMyList(item); renderLibrary(); }, meta('Alex saved movie', 'mature', 'tt301'));
+  // AWAITED, because a save is a round trip to the fleet now rather than a
+  // localStorage write. This file is about PROFILE SEPARATION, so it writes
+  // through BlazingLists directly; lists-fleet.smoke.mjs is the one that drives
+  // the three detail-sheet buttons. blazing-lists-changed redraws the screen.
+  await page.evaluate((item) => window.BlazingLists.toggle('watchlist', item), meta('Alex saved movie', 'mature', 'tt301'));
   assert.match(await page.locator('#library-results').innerText(), /Alex saved movie/);
+  assert.match(await page.locator('#library-results').innerText(), /Watchlist \(1\)/, 'B22: the saved title lands in a counted Watchlist section');
+  assert.deepEqual(
+    listStore.get('adult-one').watchlist.map((row) => row.id), ['tt301'],
+    'B27: the save reached the fleet, not just this browser',
+  );
   assert.doesNotMatch(await page.locator('#library-results').innerText(), /Legacy private saved/);
   await page.locator('#profile-connect-button').click();
   await page.getByRole('button', { name: 'Choose Sam', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#rows')?.textContent.includes('More Shows') && document.querySelectorAll('#rows .skeleton').length === 0);
   assert.doesNotMatch(await page.locator('#rows').innerText(), /Grown title|Unrated title|Fresh grown movie|Alex private history/, 'Kids never retain the previous Home or history');
+  // Polled, not read once: the list now arrives from the fleet, so "it is not
+  // there yet" and "it is not this viewer's" look identical for a moment.
+  await page.waitForFunction(() => !/Alex saved movie|Legacy private saved/.test(document.querySelector('#library-results')?.innerText || ''));
   assert.doesNotMatch(await page.locator('#library-results').innerText(), /Alex saved movie|Legacy private saved/, 'Saved list belongs to this profile');
-  await page.evaluate((item) => { toggleMyList(item); renderLibrary(); }, meta('Sam saved movie', 'general', 'tt302'));
+  await page.evaluate((item) => window.BlazingLists.toggle('watchlist', item), meta('Sam saved movie', 'general', 'tt302'));
   assert.match(await page.locator('#library-results').innerText(), /Sam saved movie/);
   await page.locator('#profile-connect-button').click();
   await page.getByRole('button', { name: 'Choose Alex', exact: true }).click();
+  await page.waitForFunction(() => /Alex saved movie/.test(document.querySelector('#library-results')?.innerText || ''));
   assert.match(await page.locator('#library-results').innerText(), /Alex saved movie/);
   assert.doesNotMatch(await page.locator('#library-results').innerText(), /Sam saved movie/);
   console.log('PASS profile switches: whole Home respects new cap and lists stay separate');
@@ -134,7 +181,18 @@ try {
   await page.waitForTimeout(100);
   assert.equal(await page.locator('#rows .row').count(), 0, 'Logout clears rows and ignores pending requests');
   assert.doesNotMatch(await page.locator('#library-results').innerText(), /saved movie/, 'Logout clears personal saved content');
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('blazing-my-list-v2:adult-one')).length), 1, 'Logout preserves the private saved list for its next login');
+  // B27: THE LIST SURVIVES THE BROWSER, not the other way round. It used to be
+  // asserted against localStorage['blazing-my-list-v2:adult-one'] — the store
+  // that made the list die with the site data and never reach the Roku. The
+  // fleet is the store now, so that is where the list has to still be.
+  assert.deepEqual(
+    listStore.get('adult-one').watchlist.map((row) => row.id), ['tt301'],
+    'Logout preserves the private saved list for its next login',
+  );
+  assert.deepEqual(
+    listStore.get('kids-two').watchlist.map((row) => row.id), ['tt302'],
+    'and the two profiles still hold two different lists',
+  );
   assert.deepEqual(faults, [], 'No browser errors');
   console.log('PASS late requests + logout: old personal data cannot reappear');
 } finally {
