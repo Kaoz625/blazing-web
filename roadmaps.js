@@ -98,6 +98,126 @@
     return response.json();
   }
 
+  /* ── What a title is RATED, resolved HERE rather than left inside app.js ───
+   *
+   * THE HOLE THIS CLOSES. app.js's visibleMetas() (app.js:5930) resolves a tier
+   * for every meta it is handed, keeps that answer in a LOCAL VARIABLE, and
+   * returns the metas it kept without ever writing the tier onto them. This
+   * screen used to hand it `contentRating: ''` for every row, so the tier that
+   * admitted a card died inside that call — while app.js goes on to re-read
+   * meta.contentRating on the SAME card twice more: at openDetail (app.js:3257)
+   * and 550ms into a hover or a tab-focus in attachHoverTrailer (app.js:2423 and
+   * :2430). ratingAllowed('') is false for exactly one cap, 'general', which is
+   * every Kids profile — so under that cap a saga was drawn in full, with its
+   * position numbers, and then a press answered "This title is not available for
+   * this profile." while a hover DELETED the card out of the grid and left its
+   * caption behind. Resolving the tier here and writing it onto the meta means
+   * ONE value admits a card and re-admits it at every later check.
+   *
+   * ONLY A `tt` ID IS WORTH ASKING ABOUT: a `tmdb:` id is the one TMDB knew
+   * without an IMDb id (see normaliseEntry's `playable` below) and no ratings
+   * source can classify it, so asking costs a round trip to be told nothing.
+   * Asking twice about one id is the same waste, and a saga repeats ids across
+   * its orders. Both rules are the Roku's, from source/lib/RatingApi.brs:96-108.
+   *
+   * A SECOND COPY OF THIS LIVES IN calendar.js, for the same reason and with the
+   * same numbers. app.js's copy cannot be borrowed: window.BlazingCatalogue
+   * (app.js:5969) publishes visibleMetas() and not ratingTierFor(), so there is
+   * no way to ask app.js what tier it resolved.
+   */
+  /** The Roku's RatingSessionStart numbers, rounded to what a browser should
+   *  have open at once. app.js:5878 carries the same pair. */
+  const RATING_BUDGET = 150;
+  const RATING_LOOKUPS = 6;
+  /** `${kind}:${id}` -> tier, for the session. A FAILED request is NOT an answer
+   *  and is not remembered here: caching it would pin a title to "unknown" for
+   *  the rest of the session, the mistake the Roku's calendar task writes down at
+   *  AddonTask.brs:438. */
+  const TIERS = new Map();
+
+  /** The key a rating answer is filed under, or '' for an id no ratings source
+   *  can classify. The `split(':')[0]` is for a Stremio episode id
+   *  (tt0903747:5:14), which is rated as its series. */
+  function ratingKey(entry) {
+    const id = String((entry && entry.id) || '').trim();
+    if (id.slice(0, 2).toLowerCase() !== 'tt') return '';
+    return `${entry.type === 'series' ? 'series' : 'movie'}:${id.split(':')[0]}`;
+  }
+
+  /** The keys this pass should ask about: classifiable ids only, once each,
+   *  never one already answered, and never more than the budget. */
+  function ratingWants(entries, known = TIERS, budget = RATING_BUDGET) {
+    const wants = [];
+    const seen = new Set();
+    for (const entry of entries || []) {
+      const key = ratingKey(entry);
+      if (!key || seen.has(key) || known.has(key)) continue;
+      seen.add(key);
+      if (wants.length >= budget) break;
+      wants.push(key);
+    }
+    return wants;
+  }
+
+  /** Fill TIERS for everything in `entries` worth asking about. Six at a time,
+   *  and a failure leaves the id unknown rather than wrong. */
+  async function resolveTiers(entries) {
+    const wants = ratingWants(entries);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < wants.length) {
+        const key = wants[cursor];
+        cursor += 1;
+        const cut = key.indexOf(':');
+        try {
+          const data = await fetchJSON(
+            `${FLEET}/rating/${key.slice(0, cut)}/${encodeURIComponent(key.slice(cut + 1))}`,
+          );
+          TIERS.set(key, String((data && data.tier) || '').toLowerCase());
+        } catch { /* see TIERS above: not an answer, so not remembered */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(RATING_LOOKUPS, wants.length) }, worker));
+  }
+
+  /**
+   * The ids that may be DRAWN, out of the metas app.js's visibleMetas() kept.
+   *
+   * THE RESIDUAL THIS CLOSES, and it is the last way the two halves can still
+   * disagree. TIERS deliberately does not remember a FAILED request (see the
+   * note on TIERS above), so a `tt` entry whose lookup threw reaches entryMeta()
+   * with contentRating '' — and app.js then asks the SAME question again on its
+   * own budget (app.js:5943-5947, a separate cache from ours, so a miss here is
+   * always a second request there). If OUR request failed and THAT one
+   * succeeded, visibleMetas() admits the entry on a tier it keeps to itself
+   * while the card still carries '' — and ratingAllowed('') is false for exactly
+   * one cap, 'general' (app.js:5850). So under a kids cap that single card goes
+   * back to being drawn with its position number, refusing a press
+   * (app.js:3257) and deleting itself 550ms into a hover (app.js:2423) — the
+   * whole of finding 2, for one entry.
+   *
+   * So under that cap an entry is drawn only if the card can carry the tier that
+   * admitted it. Anything else is dropped, which OVER-blocks by at most the
+   * entries whose lookup failed while app.js's retry succeeded — a narrow
+   * window, and it fails safe rather than drawing a dead control. Under every
+   * other cap ratingAllowed('') is true at all three checks, so nothing needs
+   * dropping and nothing is dropped. The header counts are recomputed from what
+   * survived (gateChapters below), so a dropped entry leaves no hole in the
+   * numbering either.
+   *
+   * A MISSING CAP IS THE KIDS CAP, not "no cap". app.js:5846 reads
+   * `state.profileCap || 'general'`, so cap() answering null — nobody connected
+   * — gates exactly like 'general' there. Mirror it here or this guard would be
+   * off by one profile state, which is the state a page load starts in.
+   *
+   * The identical helper is in calendar.js, beside the identical TIERS walk.
+   */
+  function admitted(metas, cap) {
+    const list = Array.isArray(metas) ? metas : [];
+    if (String(cap || 'general').toLowerCase() !== 'general') return list.slice();
+    return list.filter((meta) => meta && meta.contentRating);
+  }
+
   // ── the rules, all of them pure so roadmaps.test.mjs can hold them ─────────
 
   /**
@@ -531,15 +651,20 @@
   /**
    * RATED BEFORE DRAWN, and the counts in the header are recomputed from what
    * survived. A saga is a wall of real IMDb ids, so the lookup is the right tool
-   * here — this is Fire TV's own comment at RoadmapsActivity.openFranchise, and
-   * app.js's visibleMetas() is the lookup.
+   * here — this is Fire TV's own comment at RoadmapsActivity.openFranchise.
+   * resolveTiers() goes FIRST so app.js's visibleMetas() judges each entry on the
+   * tier the card will carry, rather than on an answer it keeps to itself.
    */
   async function gateChapters(detail, request) {
     const flat = [];
     for (const chapter of detail.chapters) for (const entry of chapter.items) flat.push(entry);
-    const visible = await state.services.visibleMetas(flat.map(entryMeta));
+    await resolveTiers(flat);
     if (request !== state.request) return null;
-    const allowed = new Set(visible.map((meta) => meta.id));
+    const visible = await state.services.visibleMetas(flat.map((entry) => entryMeta(entry)));
+    if (request !== state.request) return null;
+    /* Not `visible` straight into the Set — see admitted() above for the one
+       entry a kids cap can still be handed dead. */
+    const allowed = new Set(admitted(visible, state.services.cap()).map((meta) => meta.id));
     const chapters = [];
     let films = 0;
     let series = 0;
@@ -589,8 +714,18 @@
     );
   }
 
-  /** The shape app.js's buildCard() and openDetail() want. */
-  function entryMeta(entry) {
+  /** The shape app.js's buildCard() and openDetail() want.
+   *
+   * contentRating is the tier resolveTiers() found, NOT '' — see the block at
+   * the top of this file. entryCard() builds a fresh meta for every card and
+   * gateChapters() builds another set for the gate, so the tier has to come from
+   * TIERS rather than from whichever object survived the last call.
+   *
+   * `tiers` is an argument only so roadmaps.test.mjs can hand in a map without a
+   * network; production always takes the default. Note the call sites pass one
+   * entry each rather than using `.map(entryMeta)`, which would hand the array
+   * index in as the map. */
+  function entryMeta(entry, tiers = TIERS) {
     return {
       id: entry.id,
       type: entry.type,
@@ -599,7 +734,7 @@
       background: entry.backdrop || entry.poster,
       description: entry.overview,
       releaseInfo: entry.year,
-      contentRating: '',
+      contentRating: tiers.get(ratingKey(entry)) || '',
     };
   }
 
@@ -682,7 +817,8 @@
     rules: {
       normaliseCard, normaliseEntry, normaliseDetail, cardCaption, releaseYear,
       years, subline, sections, runtimeLabel, filmMinutes, stats, entryCaption,
-      orders, orderLabel, orderedChapters, dateKey,
+      orders, orderLabel, orderedChapters, dateKey, ratingKey, ratingWants,
+      entryMeta, admitted,
     },
   };
 })();

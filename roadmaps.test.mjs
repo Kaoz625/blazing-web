@@ -99,6 +99,74 @@ test('an entry caption says a runtime for a film and a season count for a show',
   assert.equal(rules.entryCaption(entry({ year: '', runtime: 0 })), '');
 });
 
+// ── what a card carries to app.js ───────────────────────────────────────────
+
+test('a card carries the tier that admitted it, not an empty string', () => {
+  /* app.js's visibleMetas() resolves a tier and keeps it in a local variable
+     (app.js:5930), but app.js re-reads meta.contentRating twice more on the same
+     card: at openDetail (app.js:3257) and 550ms into a hover or a tab-focus
+     (app.js:2423 and :2430). ratingAllowed('') is false for exactly one cap,
+     'general', which is every Kids profile — so a saga was drawn in full and then
+     refused on a press and DELETED on a hover. */
+  const tiers = new Map([['movie:tt0848228', 'teen']]);
+  assert.equal(rules.entryMeta(entry({ id: 'tt0848228' }), tiers).contentRating, 'teen');
+  // A tmdb: id is the one TMDB knew without an IMDb id. Nothing can classify it,
+  // so it stays unknown — which is what the cap already knows what to do with.
+  assert.equal(rules.entryMeta(entry({ id: 'tmdb:24428' }), tiers).contentRating, '');
+});
+
+test('an entry admitted on a tier the card cannot carry is not drawn under a kids cap', () => {
+  /* THE RESIDUAL. A FAILED lookup is deliberately not remembered (caching it
+     would pin a title to "unknown" for the session), so a `tt` entry whose
+     request threw reaches the card with contentRating ''. app.js then asks the
+     SAME question again out of its OWN cache (app.js:5943-5947) and, if that one
+     succeeds, keeps the entry on a tier it never writes back — one card, drawn
+     with its position number and dead, refusing a press (app.js:3257) and
+     deleting itself on a hover (app.js:2423). Under a kids cap an entry is
+     therefore drawn only if it can carry the tier that admitted it.
+
+     THE DISCRIMINATING PROOF FOR THIS IS IN THE BROWSER, not here.
+     roadmaps-calendar.smoke.mjs stages a /rating route that fails the first ask
+     and answers the second, and asserts "Revenge of the Sith" is absent from a
+     kids grid; measured 12 Sep 2026, that assertion fails with the guard
+     reverted and the card count goes 3 -> 4. This test is the cheap regression
+     guard beside it. */
+  const metas = [
+    { id: 'tt1', contentRating: 'general' },
+    { id: 'tt2', contentRating: '' },      // ours failed, app.js's retry admitted it
+  ];
+  assert.deepEqual(plain(rules.admitted(metas, 'general').map((m) => m.id)), ['tt1']);
+  // Above 'general' an unknown tier passes at all three of app.js's checks, so
+  // there is nothing to disagree about and nothing is dropped.
+  assert.deepEqual(plain(rules.admitted(metas, 'teen').map((m) => m.id)), ['tt1', 'tt2']);
+  assert.deepEqual(plain(rules.admitted(metas, 'adult').map((m) => m.id)), ['tt1', 'tt2']);
+  /* A MISSING CAP IS THE KIDS CAP. app.js:5846 reads `state.profileCap ||
+     'general'`, so cap() answering null gates exactly like 'general' there —
+     and null is the state a page load starts in. */
+  assert.deepEqual(plain(rules.admitted(metas, null).map((m) => m.id)), ['tt1']);
+  assert.deepEqual(plain(rules.admitted(metas, '').map((m) => m.id)), ['tt1']);
+  assert.deepEqual(plain(rules.admitted(null, 'general')), []);
+});
+
+test('only an id a ratings source can classify is asked about, and only once', () => {
+  // Asking about a tmdb: id costs a round trip to be told nothing, and asking
+  // twice about one id is the same waste. Both are the Roku's rules, from
+  // source/lib/RatingApi.brs:96-108.
+  const rows = [
+    entry({ id: 'tt0848228' }),
+    entry({ id: 'tt0848228' }),
+    entry({ id: 'tmdb:24428', type: 'series' }),
+    entry({ id: 'tt0903747', type: 'series' }),
+  ];
+  assert.deepEqual(plain(rules.ratingWants(rows, new Map())), ['movie:tt0848228', 'series:tt0903747']);
+  assert.equal(rules.ratingKey(entry({ id: 'tmdb:24428' })), '');
+  // And a tier already answered is not asked for again.
+  assert.deepEqual(
+    plain(rules.ratingWants(rows, new Map([['movie:tt0848228', 'teen']]))),
+    ['series:tt0903747'],
+  );
+});
+
 // ── the numbering, which is the whole feature ───────────────────────────────
 
 test('position numbers run continuously across chapters, not per chapter', () => {

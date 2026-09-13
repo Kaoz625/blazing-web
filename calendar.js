@@ -97,6 +97,130 @@
     return response.json();
   }
 
+  /* ── What a title is RATED, resolved HERE rather than left inside app.js ───
+   *
+   * THE HOLE THIS CLOSES. app.js's visibleMetas() (app.js:5930) resolves a tier
+   * for every meta it is handed, keeps that answer in a LOCAL VARIABLE, and
+   * returns the metas it kept without ever writing the tier onto them. This
+   * screen used to hand it `contentRating: ''` for every row, so the tier that
+   * admitted a card died inside that call — while app.js goes on to re-read
+   * meta.contentRating on the SAME card twice more: at openDetail (app.js:3257)
+   * and 550ms into a hover or a tab-focus in attachHoverTrailer (app.js:2423 and
+   * :2430). ratingAllowed('') is false for exactly one cap, 'general', which is
+   * every Kids profile — so under that cap the whole window was drawn, a press
+   * answered "This title is not available for this profile." and a hover DELETED
+   * the card out of the grid, leaving its caption behind. Resolving the tier here
+   * and writing it onto the meta means ONE value admits a card and re-admits it
+   * at every later check.
+   *
+   * ONLY A `tt` ID IS WORTH ASKING ABOUT. Every anime row is `kitsu:` or
+   * `anilist:` and every manga row is `mangadex:` (blazing-fleet/calendar.js:491
+   * and :628), and no ratings source can classify one. app.js knows that —
+   * ratingTierFor() returns '' on its first line for a non-`tt` id (app.js:5907)
+   * — but it charges the budget BEFORE it finds out (app.js:5944), and the fleet
+   * sorts the timed anime and manga rows to the FRONT of every day
+   * (blazing-fleet/calendar.js:709). A default 61-day window is roughly 430 rows
+   * against a budget of 150, so the rows that issue no request drank the budget
+   * and the recently-released `tt` films at the back of the walk were scored
+   * UNKNOWN — which passes under a teen cap. The walk below spends a unit only
+   * on an id that costs a request, and spends it once per id: a weekly series is
+   * the same id on every airing day. Both rules are the Roku's, from
+   * source/lib/RatingApi.brs:96-108, and the first web port dropped both.
+   *
+   * A SECOND COPY OF THIS LIVES IN roadmaps.js, for the same reason and with the
+   * same numbers. app.js's copy cannot be borrowed: window.BlazingCatalogue
+   * (app.js:5969) publishes visibleMetas() and not ratingTierFor(), so there is
+   * no way to ask app.js what tier it resolved.
+   */
+  /** The Roku's RatingSessionStart("calendar", 150, 20), rounded to what a
+   *  browser should have open at once. app.js:5878 carries the same pair. */
+  const RATING_BUDGET = 150;
+  const RATING_LOOKUPS = 6;
+  /** `${kind}:${id}` -> tier, for the session. A FAILED request is NOT an answer
+   *  and is not remembered here: caching it would pin a title to "unknown" for
+   *  the rest of the session, the mistake the Roku's calendar task writes down at
+   *  AddonTask.brs:438. */
+  const TIERS = new Map();
+
+  /** The key a rating answer is filed under, or '' for an id no ratings source
+   *  can classify — which is what makes a `kitsu:`/`anilist:`/`mangadex:` row
+   *  free. The `split(':')[0]` is for a Stremio episode id (tt0903747:5:14),
+   *  which is rated as its series. */
+  function ratingKey(entry) {
+    const id = String((entry && entry.id) || '').trim();
+    if (id.slice(0, 2).toLowerCase() !== 'tt') return '';
+    return `${entry.type === 'series' ? 'series' : 'movie'}:${id.split(':')[0]}`;
+  }
+
+  /** The keys this pass should ask about: classifiable ids only, once each,
+   *  never one already answered, and never more than the budget. */
+  function ratingWants(entries, known = TIERS, budget = RATING_BUDGET) {
+    const wants = [];
+    const seen = new Set();
+    for (const entry of entries || []) {
+      const key = ratingKey(entry);
+      if (!key || seen.has(key) || known.has(key)) continue;
+      seen.add(key);
+      if (wants.length >= budget) break;
+      wants.push(key);
+    }
+    return wants;
+  }
+
+  /** Fill TIERS for everything in `entries` worth asking about. Six at a time,
+   *  and a failure leaves the id unknown rather than wrong. */
+  async function resolveTiers(entries) {
+    const wants = ratingWants(entries);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < wants.length) {
+        const key = wants[cursor];
+        cursor += 1;
+        const cut = key.indexOf(':');
+        try {
+          const data = await fetchJSON(
+            `${FLEET}/rating/${key.slice(0, cut)}/${encodeURIComponent(key.slice(cut + 1))}`,
+          );
+          TIERS.set(key, String((data && data.tier) || '').toLowerCase());
+        } catch { /* see TIERS above: not an answer, so not remembered */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(RATING_LOOKUPS, wants.length) }, worker));
+  }
+
+  /**
+   * The ids that may be DRAWN, out of the metas app.js's visibleMetas() kept.
+   *
+   * THE RESIDUAL THIS CLOSES, and it is the last way the two halves can still
+   * disagree. TIERS deliberately does not remember a FAILED request (see the
+   * note on TIERS above), so a `tt` row whose lookup threw reaches entryMeta()
+   * with contentRating '' — and app.js then asks the SAME question again on its
+   * own budget (app.js:5943-5947, a separate cache from ours, so a miss here is
+   * always a second request there). If OUR request failed and THAT one
+   * succeeded, visibleMetas() admits the row on a tier it keeps to itself while
+   * the card still carries '' — and ratingAllowed('') is false for exactly one
+   * cap, 'general' (app.js:5850). So under a kids cap that single row goes back
+   * to being drawn, refusing a press (app.js:3257) and deleting itself 550ms
+   * into a hover (app.js:2423) — the whole of finding 2, for one row.
+   *
+   * So under that cap a row is drawn only if the card can carry the tier that
+   * admitted it. Anything else is dropped, which OVER-blocks by at most the
+   * rows whose lookup failed while app.js's retry succeeded — a narrow window,
+   * and it fails safe rather than drawing a dead control. Under every other cap
+   * ratingAllowed('') is true at all three checks, so nothing needs dropping and
+   * nothing is dropped.
+   *
+   * A MISSING CAP IS THE KIDS CAP, not "no cap". app.js:5846 reads
+   * `state.profileCap || 'general'`, so cap() answering null — nobody connected
+   * — gates exactly like 'general' there. Mirror it here or this guard would be
+   * off by one profile state, which is the state a page load starts in.
+   */
+  function admitted(metas, cap) {
+    const list = Array.isArray(metas) ? metas : [];
+    if (String(cap || 'general').toLowerCase() !== 'general') return list.slice();
+    return list.filter((meta) => meta && meta.contentRating);
+  }
+
   // ── the rules, all pure so calendar.test.mjs can hold them ────────────────
 
   function normaliseEntry(raw) {
@@ -208,8 +332,22 @@
   }
 
   /**
-   * "2026-08-23T14:30:00Z" -> "2:30 pm". Empty for anything that is not that
-   * shape, which is the safe answer: a missing time prints nothing at all.
+   * "2026-08-23T14:30:00Z" -> that instant on the VIEWER'S clock: "10:30 am" in
+   * New York, "11:30 pm" in Tokyo. Empty for anything that is not a full
+   * timestamp, which is the safe answer: a missing time prints nothing at all.
+   *
+   * THE VIEWER'S ZONE, NOT THE WIRE'S. This used to slice characters 11-16 out
+   * of the string and print them, which prints a UTC hour to everybody on earth.
+   * `when` is always `new Date(...).toISOString()` upstream
+   * (blazing-fleet/calendar.js:495 and :631) and the window says so in its own
+   * response — `tz: 'UTC'`, with the note "Days are bucketed in UTC. Re-bucket
+   * from each item's `when` if you need local days." Neither half of that note
+   * was honoured: an anime airing at 14:30Z printed "2:30 pm" for a New York
+   * viewer whose real airing was 10:30 am, four hours out in summer and five in
+   * winter, under a day name that WAS read locally — the two halves of one card
+   * in two different time frames. localDays() below is the note's other half.
+   * The Roku has the same defect at CalendarScreen.brs:205; this is the one
+   * client that can fix it.
    *
    * TWELVE HOUR, with the am/pm said out loud. It used to print "14:30" on the
    * Roku and Markus could not tell what he was looking at: "Are these in
@@ -219,16 +357,77 @@
    */
   function clockOf(iso) {
     const value = String(iso || '');
-    const at = value.indexOf('T');
-    if (at < 0) return '';
-    const rest = value.slice(at + 1);
-    if (rest.length < 5) return '';
-    const hh = Number(rest.slice(0, 2));
-    const mm = rest.slice(3, 5);
-    if (!Number.isFinite(hh) || !/^\d{2}$/.test(mm)) return '';
+    /* The T is still the gate and it is load-bearing: `new Date('2026-08-23')`
+       parses as UTC midnight, so without it a date that never had an hour would
+       start printing one — the "00:00 would be a lie" rule at the top of this
+       file, broken from the other end. */
+    if (value.indexOf('T') < 0) return '';
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) return '';
+    const hh = at.getHours();
+    const mm = String(at.getMinutes()).padStart(2, '0');
     const suffix = hh >= 12 ? 'pm' : 'am';
     const h12 = hh % 12 === 0 ? 12 : hh % 12;
     return `${h12}:${mm} ${suffix}`;
+  }
+
+  /** The viewer's calendar day for an instant on the wire, '' for anything that
+   *  is not one. It is todayIso() of that instant on purpose: the two have to be
+   *  the same local read or dayLabel() is comparing different frames again. */
+  function localDayOf(iso) {
+    const value = String(iso || '');
+    if (value.indexOf('T') < 0) return '';
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) return '';
+    return todayIso(at);
+  }
+
+  /**
+   * The fleet's UTC day buckets, re-bucketed into the viewer's days — the other
+   * half of the contract note quoted on clockOf above.
+   *
+   * ONLY A ROW WITH A REAL CLOCK MOVES. `exactTime:true` is anime and manga and
+   * nothing else (blazing-fleet/calendar.js:499 and :633), and those are the only
+   * rows that carry an instant. A film or a season carries a release DATE with
+   * `exactTime:false`, and its `when` is that date at midnight UTC — converting
+   * one would drag every release in the western hemisphere back a day, which is
+   * the wrong answer to a right-looking question. Without this, an airing at
+   * 2026-08-24T01:00:00Z sat in the UTC 24th, was labelled "Tomorrow" from the
+   * local date, and read "9:00 pm" on the 23rd underneath.
+   *
+   * A day the move empties stays empty and render() drops it; a local day the
+   * window never had is created, which is what the far edge of a 61-day window
+   * needs when a 23:30 airing belongs to tomorrow's UTC bucket.
+   */
+  function localDays(days) {
+    const byDate = new Map();
+    const bucket = (date, weekday) => {
+      let day = byDate.get(date);
+      if (!day) {
+        day = { date, weekday: weekday || '', items: [] };
+        byDate.set(date, day);
+      }
+      return day;
+    };
+    for (const day of days || []) bucket(day.date, day.weekday);
+    for (const day of days || []) {
+      for (const entry of day.items) {
+        const local = entry.exactTime ? localDayOf(entry.when) : '';
+        bucket(local || day.date, local ? '' : day.weekday).items.push(entry);
+      }
+    }
+    const out = [...byDate.values()];
+    /* Ascending, because orderedDays() splits future from past and then leans on
+       the fleet's own ascending order for the forward half — a day created here
+       would otherwise sit wherever the Map happened to put it. */
+    out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    /* And the fleet's one ordering rule INSIDE a day survives the move: the
+       timed rows come first (blazing-fleet/calendar.js:709). Array.prototype.sort
+       is stable, so everything else keeps the order it arrived in. */
+    for (const day of out) {
+      day.items.sort((a, b) => (a.exactTime === b.exactTime ? 0 : (a.exactTime ? -1 : 1)));
+    }
+    return out;
   }
 
   /** The second line under a card: the episode, and the time only when there
@@ -260,7 +459,18 @@
     };
   }
 
-  function entryMeta(entry) {
+  /** The shape app.js's buildCard() and openDetail() want.
+   *
+   * contentRating is the tier resolveTiers() found, NOT '' — see the block at
+   * the top of this file. entryCard() builds a fresh meta for every card and
+   * render() builds another set for the gate, so the tier has to come from
+   * TIERS rather than from whichever object survived the last call.
+   *
+   * `tiers` is an argument only so calendar.test.mjs can hand in a map without a
+   * network; production always takes the default. Note the call sites pass one
+   * entry each rather than using `.map(entryMeta)`, which would hand the array
+   * index in as the map. */
+  function entryMeta(entry, tiers = TIERS) {
     return {
       id: entry.id,
       type: entry.type,
@@ -269,7 +479,7 @@
       background: entry.poster,
       description: '',
       releaseInfo: entry.date ? entry.date.slice(0, 4) : '',
-      contentRating: '',
+      contentRating: tiers.get(ratingKey(entry)) || '',
     };
   }
 
@@ -328,7 +538,7 @@
     const today = todayIso();
     const rows = [];
     const flat = [];
-    for (const day of orderedDays(state.days, today)) {
+    for (const day of orderedDays(localDays(state.days), today)) {
       const items = filterItems(day.items, state.kind);
       if (!items.length) continue;
       rows.push({ date: day.date, items });
@@ -336,13 +546,19 @@
     }
 
     /* RATED BEFORE DRAWN, one pass for the whole window rather than one per day
-       — the budget in app.js is what stops a 60-day window turning into
-       hundreds of lookups, and a per-day call would hand each day a fresh one.
-       This is the Roku's one-session rule in AddonTask.doCalendar. */
-    const visible = await state.services.visibleMetas(flat.map(entryMeta));
+       — the budget above is what stops a 61-day window turning into hundreds of
+       lookups, and a per-day call would hand each day a fresh one. This is the
+       Roku's one-session rule in AddonTask.doCalendar. resolveTiers() goes FIRST
+       so visibleMetas() judges each row on the tier the card will carry, rather
+       than on an answer it resolves and then keeps to itself. */
+    await resolveTiers(flat);
+    if (request !== state.request) return;
+    const visible = await state.services.visibleMetas(flat.map((entry) => entryMeta(entry)));
     if (request !== state.request) return;
     state.gate = String(state.services.cap() || '');
-    const allowed = new Set(visible.map((meta) => meta.id));
+    /* Not `visible` straight into the Set — see admitted() above for the one
+       row a kids cap can still be handed dead. */
+    const allowed = new Set(admitted(visible, state.gate).map((meta) => meta.id));
 
     const sections = [];
     let total = 0;
@@ -416,7 +632,8 @@
     /** The pure rules, for calendar.test.mjs. */
     rules: {
       KINDS, normaliseEntry, normaliseDays, isoDayOf, todayIso, shiftIso,
-      orderedDays, prettyDate, dayLabel, clockOf, entryLine, filterItems,
+      orderedDays, prettyDate, dayLabel, clockOf, localDayOf, localDays,
+      entryLine, filterItems, ratingKey, ratingWants, entryMeta, admitted,
     },
   };
 })();

@@ -41,6 +41,24 @@ function load() {
 const rules = load();
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+/* Run a block in a named timezone.
+ *
+ * The clock and the day buckets are the viewer's, so a test that asserts either
+ * has to say WHOSE viewer or it only passes on the machine that wrote it. Node
+ * re-reads process.env.TZ on the next Date call, so this is a real zone change
+ * and not a stub — and the vm in load() was handed this realm's Date, so it
+ * changes zone with us. */
+const inZone = (tz, run) => {
+  const before = process.env.TZ;
+  process.env.TZ = tz;
+  try {
+    run();
+  } finally {
+    if (before === undefined) delete process.env.TZ;
+    else process.env.TZ = before;
+  }
+};
+
 const day = (date, items = []) => ({ date, weekday: '', items });
 const item = (over = {}) => rules.normaliseEntry({
   id: 'tt1', name: 'A Film', kind: 'movie', when: '2026-09-12T00:00:00Z',
@@ -132,23 +150,176 @@ test('today is read in LOCAL time, not UTC', () => {
 
 test('the clock is twelve-hour with the am/pm said out loud', () => {
   // A bare 24-hour number reads as a duration: "445, 447. I don't understand
-  // these."
-  assert.equal(rules.clockOf('2026-08-23T14:30:00Z'), '2:30 pm');
-  assert.equal(rules.clockOf('2026-08-23T00:05:00Z'), '12:05 am');
-  assert.equal(rules.clockOf('2026-08-23T12:00:00Z'), '12:00 pm');
-  assert.equal(rules.clockOf('2026-08-23T09:15:00Z'), '9:15 am');
-  assert.equal(rules.clockOf('2026-08-23'), '');
-  assert.equal(rules.clockOf(''), '');
+  // these." Read in UTC, where the wire hour and the viewer's hour are the same
+  // number, so these pin the FORMAT and the test below pins the zone.
+  inZone('UTC', () => {
+    assert.equal(rules.clockOf('2026-08-23T14:30:00Z'), '2:30 pm');
+    assert.equal(rules.clockOf('2026-08-23T00:05:00Z'), '12:05 am');
+    assert.equal(rules.clockOf('2026-08-23T12:00:00Z'), '12:00 pm');
+    assert.equal(rules.clockOf('2026-08-23T09:15:00Z'), '9:15 am');
+    assert.equal(rules.clockOf('2026-08-23'), '');
+    assert.equal(rules.clockOf(''), '');
+  });
+});
+
+test('the clock is the VIEWER\'S, not the UTC hour the fleet sent', () => {
+  /* `when` is always toISOString() upstream (blazing-fleet/calendar.js:495 and
+     :631) and the window says `tz: 'UTC'`. Printing characters 11-16 of that
+     string showed "2:30 pm" to everybody on earth for an airing that a New York
+     viewer catches at 10:30 in the morning. */
+  inZone('America/New_York', () => {
+    assert.equal(rules.clockOf('2026-08-23T14:30:00Z'), '10:30 am');
+  });
+  inZone('Asia/Tokyo', () => {
+    assert.equal(rules.clockOf('2026-08-23T14:30:00Z'), '11:30 pm');
+  });
+  // And a date with no hour in it still prints no hour, in any zone.
+  inZone('Asia/Tokyo', () => {
+    assert.equal(rules.clockOf('2026-08-23'), '');
+  });
+});
+
+test('a timed row is bucketed in the viewer\'s day, and a dated one never moves', () => {
+  /* The fleet buckets in UTC and says so: "Days are bucketed in UTC. Re-bucket
+     from each item's `when` if you need local days." An airing at 01:00Z on the
+     24th happens on the EVENING of the 23rd in New York, and used to be drawn
+     under the 24th's label with "1:00 am" beneath it — both halves wrong, in
+     different directions. The film beside it has a release DATE, not an instant,
+     so it must stay on the 24th rather than slide back with it. */
+  inZone('America/New_York', () => {
+    const days = [
+      day('2026-08-23', []),
+      day('2026-08-24', [
+        item({ id: 'tt-film', kind: 'movie', exactTime: false, when: '2026-08-24T00:00:00Z' }),
+        item({ id: 'anilist:7', kind: 'anime', exactTime: true, when: '2026-08-24T01:00:00Z', subtitle: 'Ep 12' }),
+      ]),
+    ];
+    const out = rules.localDays(days);
+    assert.deepEqual(plain(out.map((d) => d.date)), ['2026-08-23', '2026-08-24']);
+    assert.deepEqual(plain(out[0].items.map((e) => e.id)), ['anilist:7']);
+    assert.deepEqual(plain(out[1].items.map((e) => e.id)), ['tt-film']);
+    assert.equal(rules.localDayOf('2026-08-24T01:00:00Z'), '2026-08-23');
+    assert.equal(rules.localDayOf('2026-08-24'), '');
+  });
+  // In Tokyo the same airing is on the 24th already, so nothing moves at all.
+  inZone('Asia/Tokyo', () => {
+    const days = [day('2026-08-23', []), day('2026-08-24', [
+      item({ id: 'anilist:7', kind: 'anime', exactTime: true, when: '2026-08-24T01:00:00Z' }),
+    ])];
+    const out = rules.localDays(days);
+    assert.deepEqual(plain(out[1].items.map((e) => e.id)), ['anilist:7']);
+    assert.deepEqual(plain(out[0].items), []);
+  });
+});
+
+test('a day the re-bucket creates is still in the fleet\'s ascending order', () => {
+  // orderedDays() splits future from past and leans on ascending order for the
+  // forward half, so a day invented at the edge of the window cannot be left
+  // wherever the Map put it.
+  inZone('America/New_York', () => {
+    const out = rules.localDays([
+      day('2026-08-24', [item({ id: 'anilist:7', kind: 'anime', exactTime: true, when: '2026-08-24T01:00:00Z' })]),
+    ]);
+    assert.deepEqual(plain(out.map((d) => d.date)), ['2026-08-23', '2026-08-24']);
+  });
 });
 
 test('exactTime:false means no hour is printed, ever', () => {
   // Every TMDB film and TV date arrives this way. "00:00" would be a lie the
-  // viewer cannot see through.
-  const film = item({ exactTime: false, when: '2026-09-12T00:00:00Z', subtitle: 'In theaters' });
-  assert.equal(rules.entryLine(film), 'In theaters');
-  const airing = item({ kind: 'anime', exactTime: true, when: '2026-09-12T23:30:00Z', subtitle: 'Ep 12' });
-  assert.equal(rules.entryLine(airing), 'Ep 12   ·   11:30 pm');
-  assert.equal(rules.entryLine(item({ exactTime: false, subtitle: '' })), '');
+  // viewer cannot see through. In UTC, so the hour below is the FORMAT rather
+  // than the zone — the zone has its own test above.
+  inZone('UTC', () => {
+    const film = item({ exactTime: false, when: '2026-09-12T00:00:00Z', subtitle: 'In theaters' });
+    assert.equal(rules.entryLine(film), 'In theaters');
+    const airing = item({ kind: 'anime', exactTime: true, when: '2026-09-12T23:30:00Z', subtitle: 'Ep 12' });
+    assert.equal(rules.entryLine(airing), 'Ep 12   ·   11:30 pm');
+    assert.equal(rules.entryLine(item({ exactTime: false, subtitle: '' })), '');
+  });
+});
+
+// ── who gets asked what they are rated, and what the card carries ───────────
+
+test('only an id a ratings source can classify is asked about, and only once', () => {
+  /* ratingTierFor() in app.js returns '' on its first line for a non-`tt` id
+     (app.js:5907) — but it charges the budget first (app.js:5944), and the fleet
+     puts the timed anime and manga rows at the FRONT of every day
+     (blazing-fleet/calendar.js:709). So the rows that issue no request drank the
+     budget and the `tt` films at the back of the walk were never looked up. */
+  const rows = [
+    { id: 'tt1375666', type: 'movie' },
+    { id: 'tt1375666', type: 'movie' },   // the same film again, a second airing day
+    { id: 'kitsu:42', type: 'series' },
+    { id: 'anilist:7', type: 'series' },
+    { id: 'mangadex:9c3f', type: 'series' },
+    { id: 'tmdb:114461', type: 'series' },
+    { id: 'tt0903747:5:14', type: 'series' },
+  ];
+  assert.deepEqual(plain(rules.ratingWants(rows, new Map())), ['movie:tt1375666', 'series:tt0903747']);
+  assert.equal(rules.ratingKey({ id: 'kitsu:42', type: 'series' }), '');
+  assert.equal(rules.ratingKey({ id: 'mangadex:9c3f', type: 'series' }), '');
+  assert.equal(rules.ratingKey({ id: 'tt1375666', type: 'movie' }), 'movie:tt1375666');
+});
+
+test('the budget is spent on lookups, not on rows that would never make one', () => {
+  // An ordinary 61-day window is around 430 rows — ANIME_CAP 150 + MANGA_CAP 200
+  // + two pages each of film and TV (blazing-fleet/calendar.js:126-131) — against
+  // a budget of 150. The anime and the manga are the ones that cost nothing.
+  const rows = [];
+  for (let i = 0; i < 350; i += 1) rows.push({ id: `kitsu:${i}`, type: 'series' });
+  for (let i = 0; i < 80; i += 1) rows.push({ id: `tt90${String(i).padStart(4, '0')}`, type: 'movie' });
+  const wants = rules.ratingWants(rows, new Map(), 150);
+  assert.equal(wants.length, 80);
+  assert.ok(wants.every((key) => key.startsWith('movie:tt')));
+});
+
+test('a tier already answered is not asked for a second time', () => {
+  const known = new Map([['movie:tt1', 'general']]);
+  const rows = [{ id: 'tt1', type: 'movie' }, { id: 'tt2', type: 'movie' }];
+  assert.deepEqual(plain(rules.ratingWants(rows, known)), ['movie:tt2']);
+});
+
+test('a card carries the tier that admitted it, not an empty string', () => {
+  /* app.js re-reads meta.contentRating at openDetail (app.js:3257) and 550ms
+     into a hover (app.js:2423 and :2430). With '' on the meta, ratingAllowed('')
+     is false under a 'general' cap — every Kids profile — so the card was drawn,
+     refused on a press, and DELETED on a hover. */
+  const tiers = new Map([['movie:tt1375666', 'general']]);
+  assert.equal(rules.entryMeta(item({ id: 'tt1375666', kind: 'movie' }), tiers).contentRating, 'general');
+  // An id nobody can classify stays unknown, which is what the cap already knows
+  // what to do with — unknown fails closed under 'general' and passes above it.
+  assert.equal(rules.entryMeta(item({ id: 'kitsu:42', kind: 'anime' }), tiers).contentRating, '');
+});
+
+test('a row admitted on a tier the card cannot carry is not drawn under a kids cap', () => {
+  /* THE RESIDUAL. A FAILED lookup is deliberately not remembered (caching it
+     would pin a title to "unknown" for the session), so a `tt` row whose request
+     threw reaches the card with contentRating ''. app.js then asks the SAME
+     question again out of its OWN cache (app.js:5943-5947) and, if that one
+     succeeds, keeps the row on a tier it never writes back — one card, drawn and
+     dead, refusing a press (app.js:3257) and deleting itself on a hover
+     (app.js:2423). Under a kids cap a row is therefore drawn only if it can
+     carry the tier that admitted it.
+
+     THE DISCRIMINATING PROOF FOR THIS IS IN THE BROWSER, not here.
+     roadmaps-calendar.smoke.mjs stages a /rating route that fails the first ask
+     and answers the second, and asserts the row is absent; measured 12 Sep 2026,
+     that assertion fails with the guard reverted and the card count goes 3 -> 4.
+     This test is the cheap regression guard beside it. */
+  const metas = [
+    { id: 'tt1', contentRating: 'general' },
+    { id: 'tt2', contentRating: '' },      // ours failed, app.js's retry admitted it
+  ];
+  assert.deepEqual(plain(rules.admitted(metas, 'general').map((m) => m.id)), ['tt1']);
+  // Above 'general' an unknown tier passes at all three of app.js's checks, so
+  // there is nothing to disagree about and nothing is dropped.
+  assert.deepEqual(plain(rules.admitted(metas, 'teen').map((m) => m.id)), ['tt1', 'tt2']);
+  assert.deepEqual(plain(rules.admitted(metas, 'adult').map((m) => m.id)), ['tt1', 'tt2']);
+  /* A MISSING CAP IS THE KIDS CAP. app.js:5846 reads `state.profileCap ||
+     'general'`, so cap() answering null gates exactly like 'general' there —
+     and null is the state a page load starts in. */
+  assert.deepEqual(plain(rules.admitted(metas, null).map((m) => m.id)), ['tt1']);
+  assert.deepEqual(plain(rules.admitted(metas, '').map((m) => m.id)), ['tt1']);
+  assert.deepEqual(plain(rules.admitted(null, 'general')), []);
 });
 
 // ── the wire shape ──────────────────────────────────────────────────────────
