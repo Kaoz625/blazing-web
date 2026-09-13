@@ -406,6 +406,10 @@ const pendingScreen = (page) => page.evaluate(() => {
   const approve = s.calls('POST', '/pair/approve')[0];
   check('(e) Approve → POST /pair/approve {code:"K7M2PX", deviceId:"dev-1"} with the token',
     !!approve && approve.body?.code === 'K7M2PX' && approve.body?.deviceId === 'dev-1' && approve.token === 'tok', JSON.stringify(approve && approve.body));
+  // Says WHICH person approved, not only which browser. The fleet can then refuse
+  // a kids profile itself — see (f). Not the gate: profile.js:2369 explains why.
+  check('(e) and it names the approving profile: {profileId:"p1"}',
+    approve?.body?.profileId === 'p1', JSON.stringify(approve && approve.body));
   const after = await s.page.evaluate(() => ({
     question: document.getElementById('bp-approve-question')?.textContent,
     actionsHidden: document.getElementById('bp-approve-actions')?.hidden,
@@ -419,6 +423,75 @@ const pendingScreen = (page) => page.evaluate(() => {
   check('(e) Back closes the sheet and returns to the app (a profile is active)',
     (await s.page.evaluate(() => document.querySelector('.bp-layer')?.hidden)) === true);
   check('(e) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
+// ── (f) …and a CHILD holding the same link approves nothing ──────────────────
+//
+// The defect, found 13 Sep 2026. maybeShowApprover() asked only "is some profile
+// active", and selectProfile() only diverts to a PIN when the profile HAS one. A
+// kids profile with no PIN is therefore one tap away from the Approve button, and
+// approving puts a device on the WHOLE household — every television in the house.
+//
+// Two profiles are tested, not one, and that is the point of the pair. A bare
+// isKids check passes the first and fails the second. The rule is grownUp()
+// (profile.js:170): not a kid AND at least 'mature'. Teen is not grown-up.
+//
+// (e) above is the other half of this test and must keep passing: an adult profile
+// still gets the sheet. Refusing everybody would satisfy this file and break the
+// feature, so read (e) and (f) as one case.
+for (const who of [
+  { tag: 'a kids profile', profile: { id: 'kid', name: 'Sam', maxRating: 'general', hasPin: false, isKids: true } },
+  { tag: 'a teen profile', profile: { id: 'teen', name: 'Rio', maxRating: 'teen', hasPin: false } },
+]) {
+  const s = await scenario({
+    seed: { id: 'dev-1', token: 'tok' },
+    path: '/index.html?pair=K7M2PX',
+    fleet: (c) => {
+      if (c.path === '/profiles') return { status: 200, body: { profiles: [who.profile] } };
+      // Answered on purpose, so a call that should never happen cannot be mistaken
+      // for the stub refusing it. If the guard is gone, these turn green and the
+      // checks below go red — which is the signal we want.
+      if (c.path === '/pair/peek') return { status: 200, body: { model: 'Blazing Web', label: 'Blazing Web', requestedAt: new Date().toISOString() } };
+      if (c.path === '/pair/approve') return { status: 200, body: { ok: true, pairedDeviceId: 'dev-9' } };
+      return null;
+    },
+  });
+  await s.page.waitForTimeout(1500);
+  await s.page.click('.bp-profile');
+  await s.page.waitForTimeout(1200);
+
+  const seen = await s.page.evaluate(() => ({
+    approveShown: !document.getElementById('bp-approve')?.hidden,
+    layerHidden: document.querySelector('.bp-layer')?.hidden,
+    status: document.querySelector('.bp-status')?.textContent || '',
+    url: location.search,
+  }));
+  check(`(f) ${who.tag} never sees the Approve sheet`, seen.approveShown === false, JSON.stringify(seen));
+  check(`(f) ${who.tag} never asks GET /pair/peek`, s.calls('GET', '/pair/peek').length === 0, s.trail());
+  // Press Approve IF it is there. With the guard in place nothing is pressed and
+  // this proves the obvious; with the guard gone the button exists, this presses
+  // it, and the check goes red on a real POST. Without the click the assertion
+  // would pass in BOTH states and prove nothing.
+  await s.page.evaluate(() => {
+    const yes = document.getElementById('bp-approve-yes');
+    if (yes && !yes.hidden && !yes.disabled) yes.click();
+  });
+  await s.page.waitForTimeout(600);
+  check(`(f) ${who.tag} never sends POST /pair/approve`, s.calls('POST', '/pair/approve').length === 0, s.trail());
+  // Silence would be the easy wrong answer: the link would do nothing and nobody
+  // in the room would know why the television is still showing a code.
+  check(`(f) ${who.tag} is told to fetch a grown-up`, /grown-up/i.test(seen.status), JSON.stringify(seen.status));
+  // The picker is reopened so the grown-up has somewhere to tap. A closed panel
+  // turns the refusal into a dead end.
+  check(`(f) ${who.tag} lands back on the profile picker`, seen.layerHidden === false, JSON.stringify(seen));
+  // Read AFTER the click above, not from `seen`: a successful approval clears the
+  // parameter, so taking this reading late is what makes it discriminate.
+  // Keeping ?pair= is what lets a grown-up finish the job in the same visit. The
+  // matching guard is that approverDone stays unset — see profile.js:2246.
+  const url = await s.page.evaluate(() => location.search);
+  check(`(f) ${who.tag} keeps ?pair= so a grown-up can still approve`, url.includes('pair=K7M2PX'), url);
+  check(`(f) ${who.tag}: no ReferenceError/TypeError`, s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
   await s.ctx.close();
 }
 

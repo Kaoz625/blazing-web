@@ -2244,6 +2244,34 @@
     if (state.approverDone) return;
     const param = pairParam();
     if (!param.present || !state.activeProfile || !state.credentials) return;
+
+    // A KIDS PROFILE MUST NOT PUT A NEW DEVICE ON THE HOUSEHOLD.
+    //
+    // Found 13 Sep 2026. The guard above asks "is SOME profile active" and
+    // nothing else, and selectProfile() at :2581-2585 only diverts to a PIN when
+    // the profile HAS one. So a Kids profile with no PIN is selected in one tap
+    // and lands straight here. A child opening the pair link therefore got an
+    // Approve button, and approving adds a device to the whole account — every
+    // television in the house, under whatever profile is later chosen on it.
+    //
+    // grownUp() is the existing rule (:170, itself mirroring firetv
+    // ProfileGateRules.kt:121) and it is deliberately reused rather than
+    // rewritten as a bare isKids check. Approving a device is household
+    // administration, the same class of action as Stream Sources and installing
+    // a source on the Fire TV, and those already use this bar. One rule in one
+    // place is why a teen profile is also refused here without anyone having to
+    // remember a second time that teen is not grown-up.
+    //
+    // approverDone is deliberately NOT set. The pairing request is still waiting
+    // and a grown-up may pick their own profile in a moment; burning the flag
+    // here would make the approver unreachable for the rest of the session and
+    // turn a refusal into a dead end.
+    if (!grownUp(state.activeProfile)) {
+      openPanel();
+      setStatus('Ask a grown-up to approve this device — a kids profile cannot.', 'error');
+      return;
+    }
+
     state.approverDone = true;
     openPanel();
     if (!param.code) {
@@ -2343,10 +2371,26 @@
     setBusy(true);
     setStatus('Approving…', 'info');
     try {
+      // profileId is sent so the fleet can refuse a kids profile itself, and so an
+      // approval is attributable to a person rather than only to a browser.
+      //
+      // It is NOT the gate, and it must not be read as one. The credential here is
+      // the device token; profileId is self-declared, so anything holding the token
+      // can omit it or name a grown-up. The real guard for the real threat — a child
+      // tapping a tile — is maybeShowApprover() above, which never gets this far.
+      // The server check this enables is defence in depth against a second client
+      // repeating the same mistake, not a boundary.
+      //
+      // Optional on purpose. blazing-web is the only caller of /pair/approve (Roku,
+      // Fire TV and tvOS never call it — checked 13 Sep 2026), but web and fleet
+      // deploy separately, so a required field would break every approval in the
+      // window where one is live and the other is not.
+      const body = { code: state.approveCode, deviceId: state.credentials.id };
+      if (state.activeProfile && state.activeProfile.id) body.profileId = state.activeProfile.id;
       const result = await request('/pair/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Device-Token': state.credentials.token },
-        body: JSON.stringify({ code: state.approveCode, deviceId: state.credentials.id }),
+        body: JSON.stringify(body),
       });
       if (!result.ok) {
         if (result.status === 404) setStatus('No device is waiting on that code.', 'error');
