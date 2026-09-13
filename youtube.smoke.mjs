@@ -94,10 +94,20 @@ await ctx.addInitScript(() => {
 const calls = [];
 let subs = [];
 let searchAnswer = [vid(11), vid(12), vid(13)];
+let resolveCalls = 0;
+let resolveFailFirst = false;
 
 await ctx.route('https://addon.lyreosai.com/**', (route) => {
   const u = route.request().url();
   if (u.includes('/proxy/yt-resolve')) {
+    resolveCalls += 1;
+    // THE FIRST ATTEMPT IS REFUSED ON PURPOSE. See test 11 at the bottom: a
+    // single transient failure used to end the play for a real viewer, because
+    // resolve() tried exactly once. Every other test here still gets its stream,
+    // because the retry gets it on attempt 2 — which is the point.
+    if (resolveFailFirst && resolveCalls === 1) {
+      return route.fulfill({ status: 503, contentType: 'text/plain', body: 'resolver asleep' });
+    }
     return route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ url: '/proxy/hls?u=https%3A%2F%2Fexample.test%2Fx.m3u8', streamFormat: 'hls' }) });
   }
@@ -381,6 +391,32 @@ ok(embeds.ytIframes === 0,
   `${embeds.iframes} iframes total`);
 
 ok(errors.length === 0, 'nothing threw on the way through', errors.slice(0, 2).join(' ; '));
+
+// ── 11. One dropped resolve does not end the play ──────────────────────────
+// WHY THIS TEST EXISTS. The pages gate went red on 13 Sep 2026 on
+// youtube-play.smoke.mjs — "the resolver on the server did not answer" — and the
+// obvious reading was a flaky live-network test. It was not. youtube.js
+// resolve() made ONE attempt, so one dropped request is a person being told a
+// perfectly good video cannot be opened. Both ids resolved by hand in ~5s that
+// same minute.
+//
+// THIS TEST MUST GO RED ON THE OLD CODE, and it does: with a single attempt the
+// 503 below is the whole answer, the player never opens, and the status line
+// reads "the resolver on the server did not answer".
+resolveFailFirst = true;
+resolveCalls = 0;
+await page.evaluate(() => {
+  document.querySelector('#yt-rows .yt-card').click();
+});
+await page.waitForFunction(() => !document.getElementById('player').hidden, { timeout: 15000 })
+  .catch(() => {});
+const retried = await page.evaluate(() => ({
+  open: !document.getElementById('player').hidden,
+  status: (document.getElementById('yt-status').textContent || '').trim(),
+}));
+ok(retried.open, 'a resolve that fails once still plays — the second attempt gets it',
+  retried.status || `${resolveCalls} resolve calls`);
+ok(resolveCalls === 2, 'and it is exactly two attempts, not a retry loop', `${resolveCalls} calls`);
 
 await browser.close();
 server.close();

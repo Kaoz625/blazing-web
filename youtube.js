@@ -82,6 +82,25 @@
   // — this is the same 30s app.js gives the identical call.
   const RESOLVE_TIMEOUT_MS = 30000;
 
+  // ONE RETRY, AND IT IS FOR THE VIEWER, NOT FOR THE TEST.
+  //
+  // resolve() tried exactly once. The CI gate went red on 13 Sep 2026 because
+  // that one attempt did not come back, and it was easy to file that as a flaky
+  // test and move on. It is not a test problem. The same single attempt is what
+  // a person on a television gets: the resolver hiccups once and they are told
+  // the video could not be opened, on a video that is fine — measured the same
+  // day, both ids resolving in ~5s by hand while the run had just failed.
+  //
+  // ONE retry, not a loop. Two attempts turn a transient into a play; a resolver
+  // that is genuinely down still fails, twice, and still says so. A loop would
+  // hide an outage behind a spinner, and 2 x 30s is already the longest a person
+  // should be asked to wait at a poster.
+  //
+  // The pause is deliberate and short: the failures worth retrying are a dropped
+  // connection or a cold yt-dlp, and neither is helped by hammering instantly.
+  const RESOLVE_ATTEMPTS = 2;
+  const RESOLVE_RETRY_PAUSE_MS = 700;
+
   const PER_SHELF = 12;
   const SEARCH_LIMIT = 24;
   const CHANNEL_LIMIT = 30;
@@ -406,6 +425,19 @@
    */
   async function resolve(id) {
     if (!VIDEO_ID_RE.test(String(id || ''))) return null;
+    for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt += 1) {
+      const stream = await resolveOnce(id);
+      if (stream) return stream;
+      // Do not sleep after the LAST attempt — that is dead time in front of an
+      // error message the reader is already owed.
+      if (attempt < RESOLVE_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, RESOLVE_RETRY_PAUSE_MS));
+      }
+    }
+    return null;
+  }
+
+  async function resolveOnce(id) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
     try {
