@@ -11,6 +11,19 @@
  * asserts that a row EXISTS. Every assertion presses a control and then checks
  * the request that left the browser, or the value that was stored.
  *
+ * 12 Sep 2026 — the same sentence applied to this file. It drove the add-on row
+ * with a 43-character URL and the Live TV row with a 37-character one, and it
+ * seeded the account with NO stored value at all, so it sat green through a
+ * defect that silently destroyed a household's add-on list: accountSecret() was
+ * handing the account's stored value back through text(), the 160-character
+ * display-name cap, and settings.js wrote that shortened value back to the
+ * account record every approved Roku, Fire TV and Apple TV reads. A harness
+ * that reports safety it never tested is worse than no harness. The fixture is
+ * now 913 characters across two add-ons and 202 on the playlist, and the three
+ * assertions that check them are string-length assertions on the VALUE — see
+ * STORED_ADDONS and LIVE_PLAYLIST below. Measured against the pre-fix
+ * profile.js they read 160/913 (1 of 2 add-ons) and 160/202.
+ *
  *   node settings.smoke.mjs
  */
 import assert from 'node:assert/strict';
@@ -50,7 +63,60 @@ const patches = [];
 const deletes = [];
 const verifies = [];
 const secrets = [];
-let storedSecret = null;
+
+/**
+ * THE ACCOUNT'S REAL ADD-ON VALUE — long, and a two-entry list.
+ *
+ * This used to be `null`. The GET stub below therefore answered
+ * {present:false}, settings.js:551 took the `: ''` arm, and the read path never
+ * carried a value at all — so the only string these rows were ever driven with
+ * was the 43-character literal typed on the Save press further down. That is
+ * the whole reason this harness sat green through the defect it was supposed to
+ * cover: accountSecret() (profile.js:3922) used to hand the account's stored
+ * value back through text() (profile.js:265), the 160-character DISPLAY-NAME
+ * cap, and 43 characters cannot show a cut at 160.
+ *
+ * The shape is picked so no accident can save it:
+ *   · 913 characters, so a 160-character slice lands 124 characters into the
+ *     first entry's config segment and the SECOND ENTRY DISAPPEARS ENTIRELY;
+ *   · two comma-separated entries, because settings.js:563 says in its own
+ *     words that "A comma-separated list is legal here and is how the house
+ *     adds more than one source at once", and firetv AddonConfig.kt:20-40
+ *     documents the account locker holding exactly that list with no length
+ *     cap of its own — so another client writes the full value that this
+ *     browser reads;
+ *   · NO comma inside either entry, so normalizeUrl (settings.js:562-576)
+ *     splits it into two parts that each parse as https and the list survives
+ *     validation on the way back out.
+ *
+ * MEASURED here before writing this: `new URL()` accepts the 160-character
+ * TRUNCATION too — it comes out as a single valid
+ * `https://mediafusion.elfhosted.com/D-eeee…` — so normalizeUrl passes the
+ * shortened list straight through to the PUT at settings.js:586. Nothing
+ * downstream catches the loss, which is why the assertions below have to be on
+ * the string itself.
+ *
+ * The lengths are not invented. Real manifest URLs on this fleet measure 413
+ * (mediafusion), 510 (comet), 941 (cometnet) and 1856 characters, and the
+ * 1856-character one is itself a three-entry comma-separated list.
+ */
+const STORED_ADDONS = [
+  `https://mediafusion.elfhosted.com/D-${'e'.repeat(360)}/manifest.json`,
+  `https://comet.elfhosted.com/${'c'.repeat(460)}/manifest.json`,
+].join(',');
+
+/**
+ * The OTHER half of the same defect: a 202-character Xtream get.php link.
+ *
+ * addLiveSource (profile.js:3948) ran `source.url` through the same
+ * display-name cap, and a cut at 160 lands inside the token run below — so a
+ * dead playlist was POSTed to /device/live/sources as a real source while
+ * settings.js:691 reported "Playlist added — it will appear in Live TV
+ * shortly." The token is a run of 't'; nothing in this file is a credential.
+ */
+const LIVE_PLAYLIST = `https://tv.example.test:8080/get.php?username=house&token=${'t'.repeat(120)}&type=m3u_plus&output=ts`;
+
+let storedSecret = STORED_ADDONS;
 
 let browser;
 try {
@@ -182,10 +248,55 @@ try {
   );
   ok(secrets.some((entry) => entry.method === 'GET'),
     'B13: a grown-up profile is shown the add-on field and it reads the account value');
+
+  // Every Save below leaves the note reading "Saved on your account.", so the
+  // note cannot tell the second press from the first and waiting on it is a
+  // race — the same race the PATCH comment at the PIN pad further down
+  // describes. Wait on the request list instead: the route handler pushes into
+  // `secrets` before it fulfils, so a PUT is in this array strictly before the
+  // browser's own promise can resolve.
+  const untilPuts = async (count) => {
+    for (let tick = 0; tick < 160; tick += 1) {
+      if (secrets.filter((entry) => entry.method === 'PUT').length >= count) return;
+      await page.waitForTimeout(50);
+    }
+  };
+
+  /* ── Finding 1, READ half: the account value has to arrive WHOLE ───────── */
+  // The barrier above this line is load-bearing. renderAddonForm sets the note
+  // to "Loading the add-on for your account…" synchronously during render, and
+  // only the GET's .then puts "follows your account" back (settings.js:551-557),
+  // so the waitForFunction cannot fall through before the answer landed.
+  //
+  // This is the assertion that goes red the moment profile.js:3922 is put back
+  // through text(): a 913-character list would read as 160 characters here,
+  // with the whole second add-on gone, while every other row on this screen
+  // stayed green.
+  const loadedAddon = await page.locator('#settings-addon-url').inputValue();
+  ok(loadedAddon === STORED_ADDONS,
+    'B13: the account\'s two-entry add-on list reaches the field WHOLE, not capped at a display name\'s 160',
+    `(${loadedAddon.length} of ${STORED_ADDONS.length} chars, ${loadedAddon.split(',').length} of 2 entries)`);
+
+  /* ── Finding 1, WRITE-BACK half: and Save puts the same list back ──────── */
+  // Press Save WITHOUT touching the field. That is the read-modify-write the
+  // defect destroyed a household on: settings.js:551 loads the value into the
+  // field, :578 reads that field back through normalizeUrl and :586 PUTs it to
+  // /account/secret/stremio_addon_url — the record settings.js's own note calls
+  // the one that "follows your account on every approved device". A shortened
+  // value passes normalizeUrl, so only the string length proves it.
+  await page.locator('#settings-addon-save').click();
+  await untilPuts(1);
+  const roundTrip = secrets.filter((entry) => entry.method === 'PUT')[0];
+  const roundTripValue = roundTrip ? JSON.parse(roundTrip.body).value : '';
+  ok(Boolean(roundTrip) && roundTripValue === STORED_ADDONS,
+    'and pressing Save without editing PUTs that list back unchanged — the household keeps both add-ons',
+    `(${roundTripValue.length} of ${STORED_ADDONS.length} chars)`);
+  await page.waitForFunction(() => (document.getElementById('settings-addon-note')?.textContent || '').includes('Saved on your account'), null, { timeout: 8000 });
+
   await page.locator('#settings-addon-url').fill('https://addon.example.test/manifest.json');
   await page.locator('#settings-addon-save').click();
-  await page.waitForFunction(() => (document.getElementById('settings-addon-note')?.textContent || '').includes('Saved on your account'), null, { timeout: 8000 });
-  const put = secrets.find((entry) => entry.method === 'PUT');
+  await untilPuts(2);
+  const put = secrets.filter((entry) => entry.method === 'PUT')[1];
   ok(Boolean(put) && JSON.parse(put.body).value === 'https://addon.example.test/manifest.json',
     'Save and sync PUTs the account secret every client reads', put ? put.body : 'no PUT');
 
@@ -194,15 +305,26 @@ try {
   await page.waitForTimeout(200);
   ok((await page.locator('#settings-addon-note').innerText()).includes('valid HTTPS'),
     'an http:// add-on is refused before it is sent', await page.locator('#settings-addon-note').innerText());
-  ok(secrets.filter((entry) => entry.method === 'PUT').length === 1, 'and nothing left the browser for it');
+  ok(secrets.filter((entry) => entry.method === 'PUT').length === 2,
+    'and nothing left the browser for it', `(${secrets.filter((entry) => entry.method === 'PUT').length} PUTs, both of them deliberate)`);
 
   // A Live TV playlist is the OTHER way to change where content comes from,
   // and it is behind the same gate.
-  await page.locator('#settings-live-url').fill('https://playlist.example.test/list.m3u');
+  // The link is 202 characters on purpose — see LIVE_PLAYLIST at the top. The
+  // 37-character literal this used to fill could not show the cut either.
+  await page.locator('#settings-live-url').fill(LIVE_PLAYLIST);
   await page.locator('#settings-live-add').click();
   await page.waitForFunction(() => (document.getElementById('settings-live-note')?.textContent || '').includes('Playlist added'), null, { timeout: 8000 });
   const live = secrets.find((entry) => entry.method === 'LIVE');
-  ok(Boolean(live) && JSON.parse(live.body).kind === 'm3u', 'Add playlist POSTs the household playlist', live ? live.body : 'no POST');
+  const liveBody = live ? JSON.parse(live.body) : {};
+  ok(Boolean(live) && liveBody.kind === 'm3u', 'Add playlist POSTs the household playlist', live ? live.body : 'no POST');
+  // Finding 1, Live TV half — the guard on profile.js:3948. A link cut at 160
+  // lands inside the token, so the POST would carry a playlist that can never
+  // resolve while the note said "Playlist added — it will appear in Live TV
+  // shortly." (settings.js:691). Nothing else on this screen would go red.
+  ok(liveBody.url === LIVE_PLAYLIST,
+    'and the playlist URL survives the POST WHOLE — a token cut in half is a source that silently never loads',
+    `(${String(liveBody.url || '').length} of ${LIVE_PLAYLIST.length} chars)`);
 
   /* ── B28 / B3 / B1: the parental sheet ─────────────────────────────────── */
   // Reached from Settings, which is the route the row promises. It opens the
@@ -257,8 +379,26 @@ try {
   await page.locator('#bp-parental-pin').click();
   await page.waitForSelector('.bp-pin:not([hidden])', { timeout: 8000 });
   for (const digit of ['1', '2', '3', '4']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
+  // SAME RACE AS THE PATCH ABOVE, and the same fix. `waitForSelector` on
+  // `.bp-pin strong` is not a barrier here: that element is ALREADY on screen
+  // saying "Sam" when Verify is pressed, so the wait returns at once and the
+  // read below can land before the POST /verify round trip has swapped the pad
+  // to its newpin stage (profile.js:1537 sets the heading, :1547 the button
+  // label). MEASURED 12 Sep 2026: identical code in this block passed on one
+  // run and read "Sam" on the next.
+  //
+  // So wait for the heading to CHANGE, and then assert what it changed TO. The
+  // wait names no expected text, so it cannot pass the assertion for free — a
+  // pad that advanced to the wrong stage still goes red here.
+  const firstPadHeading = await page.locator('.bp-pin strong').innerText();
   await page.locator('.bp-pin .bp-verify').click();
-  await page.waitForSelector('.bp-pin:not([hidden]) strong', { timeout: 8000 });
+  await page.waitForFunction(
+    (before) => {
+      const node = document.querySelector('.bp-pin:not([hidden]) strong');
+      return Boolean(node) && node.textContent.trim() !== before;
+    },
+    firstPadHeading.trim(), { timeout: 8000 },
+  );
   ok((await page.locator('.bp-pin strong').innerText()).includes('New PIN'),
     'B3: the second pad asks for the NEW PIN and says so', await page.locator('.bp-pin strong').innerText());
   ok((await page.locator('.bp-pin .bp-verify').innerText()).trim() === 'Save', 'and its button says Save, not Verify');

@@ -254,8 +254,44 @@
     return node;
   }
 
+  /**
+   * A DISPLAY NAME, trimmed and capped at 160 characters.
+   *
+   * The cap is a layout rule: a profile name, an avatar or a label longer than
+   * that is a broken row, not a name. It is NOT a sanitiser and it must never
+   * be put in front of a value the account stores — see fullText() below, and
+   * the data loss it exists to stop.
+   */
   function text(value, fallback = '') {
     return typeof value === 'string' && value.trim() ? value.trim().slice(0, 160) : fallback;
+  }
+
+  /**
+   * The same trim as text(), with NO length cap — for a value that is not a
+   * display name: a manifest URL, a playlist URL, a secret the account keeps.
+   *
+   * Running a stored value through the 160-character display cap is silent
+   * DATA LOSS, because the read path feeds a write-back. settings.js loads the
+   * account's add-on value into the field the viewer edits (settings.js:551
+   * and :553) and PUTs whatever that field holds straight back
+   * (settings.js:578 and :586), onto the record its own note calls "This
+   * add-on follows your account on every approved device". Nothing downstream
+   * catches a shortened value: normalizeUrl (settings.js:562) only asks that
+   * each comma-separated part parse as https, and a URL cut mid-path still
+   * does both.
+   *
+   * There is no cap here that is both safe and useful, so there is none.
+   * Measured across this fleet, real add-on manifest URLs run to 413
+   * (mediafusion), 510 (comet), 941 (cometnet) and 1856 characters, and the
+   * 1856-character one is itself a three-entry comma-separated list — firetv
+   * AddonConfig.kt:20-40 documents in its own header that the locker
+   * legitimately holds a LIST, and that client applies no length cap at all.
+   * So the full-length value is already written by another client, and a cap
+   * on this side only decides how much of it this browser destroys on the next
+   * save. Length belongs to the server, never to the way in to a write-back.
+   */
+  function fullText(value, fallback = '') {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   }
 
   function profileFrom(value) {
@@ -3879,7 +3915,11 @@
         : 'The account server refused that.') };
     }
     const answer = result.body || {};
-    return { ok: true, present: answer.present === true, value: text(answer.value) };
+    // fullText, NOT text: settings.js reads this straight into the field the
+    // viewer edits and PUTs the field back, so a value shortened here is a
+    // value shortened on the account record every approved device reads. A
+    // configured add-on list is routinely far longer than a display name.
+    return { ok: true, present: answer.present === true, value: fullText(answer.value) };
   }
 
   /**
@@ -3901,7 +3941,11 @@
       return { ok: false, error: `This profile's rating limit hides Sources.` };
     }
     const source = payload && typeof payload === 'object' ? payload : {};
-    const url = text(source.url);
+    // fullText for the URL, text for the name: an Xtream or M3U link carries a
+    // token and a query string and runs well past 160 characters, and a link
+    // cut short is POSTed as a real source while settings.js reports "Playlist
+    // added". The name IS a display name, so it keeps the cap.
+    const url = fullText(source.url);
     if (!url) return { ok: false, error: 'Enter a playlist URL first.' };
     const body = { kind: source.kind === 'xtream' ? 'xtream' : 'm3u', name: text(source.name, 'My Playlist'), url };
     if (source.username) body.username = String(source.username);
@@ -3954,6 +3998,17 @@
     },
     /** The pure parental rules, for profile-parental.test.mjs. */
     rules: Object.freeze({ RATINGS, KIDS_CAP, ratingAllowed, canDelete, newProfileFields, raising, grownUp, avatarChange }),
+    /**
+     * The two string helpers, for profile-parental.test.mjs.
+     *
+     * Published for the same reason `rules` is: accountSecret() and
+     * addLiveSource() cannot be reached without an approved device credential,
+     * so a test cannot get at them, and the 160-character cap slipped into the
+     * add-on read path exactly because nothing outside a browser could see it.
+     * The contract is one line and it is worth pinning: text() caps a display
+     * name, fullText() caps nothing.
+     */
+    strings: Object.freeze({ text, fullText }),
   };
 
   if (document.readyState === 'loading') {

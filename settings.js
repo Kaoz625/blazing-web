@@ -26,6 +26,12 @@
  *   GET/PUT/DELETE /account/secret/stremio_addon_url  — the household's add-on
  *       list. GET answers {present, value}; PUT takes {value}. Reached through
  *       window.BlazingProfile.accountSecret(), which owns the device credential.
+ *       This field is a READ-MODIFY-WRITE: the GET fills the input and the PUT
+ *       sends whatever the input then holds, so the value must arrive WHOLE.
+ *       profile.js uses fullText() rather than its 160-character display-name
+ *       text() for exactly this reason — real manifest URLs measured in this
+ *       fleet run to 1856 characters, and a value shortened on the way in is a
+ *       value destroyed on the account the next time anyone presses Save.
  *   POST /device/live/sources {kind,name,url,username,password}  — the same
  *       route firetv LiveClient.kt:228 posts to.
  *
@@ -539,6 +545,9 @@
             'Could not read the add-on for your account.', 'error');
           return;
         }
+        // Verbatim, and it has to stay verbatim: the Save handler below reads
+        // this same field back and PUTs it, so anything lost between the wire
+        // and this line is lost on the account record too.
         state.addonValue = result.present ? String(result.value || '') : '';
         const live = document.getElementById('settings-addon-url');
         if (live) live.value = state.addonValue;

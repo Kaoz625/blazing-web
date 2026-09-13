@@ -48,10 +48,12 @@ function load() {
     CustomEvent, URL, console, fetch: async () => { throw new Error('no network in this test'); },
     AbortController, Intl, Date, encodeURIComponent, navigator: { userAgent: 'test' },
   });
-  return window.BlazingProfile.rules;
+  return window.BlazingProfile;
 }
 
-const rules = load();
+const api = load();
+const rules = api.rules;
+const strings = api.strings;
 /* The vm is a separate realm, so an object built in there has a different
    Object.prototype and deepStrictEqual refuses it on identity alone. Same
    round-trip stream-preferences.test.mjs uses for the same reason. */
@@ -105,4 +107,33 @@ test('avatarChange still only names a picture that actually changed', () => {
   assert.equal(rules.avatarChange('🦊', '🐯'), '🐯');
   assert.equal(rules.avatarChange('', '🐯'), '🐯');
   assert.equal(rules.avatarChange('🦊', '   '), null);
+});
+
+test('a URL is not a display name, so the add-on and playlist payloads are never shortened', () => {
+  // text()'s 160-character cap is a layout rule for a profile name. It was
+  // also sitting on the account's add-on value, and that value is a
+  // READ-MODIFY-WRITE: settings.js loads it into the field the viewer edits
+  // (settings.js:551) and PUTs whatever that field holds back (settings.js:586),
+  // so every "Save and sync" rewrote the household's add-on list with whatever
+  // survived the slice — on the record every approved Roku, Fire TV and Apple
+  // TV reads, under the words "Saved on your account."
+  //
+  // A two-entry list of the shape this fleet actually stores. Neither entry
+  // carries an inner comma, so settings.js's normalizeUrl parses the truncated
+  // string as perfectly valid https and the loss is silent.
+  const mediafusion = `https://mediafusion.elfhosted.com/D-${'e'.repeat(360)}/manifest.json`;
+  const comet = `https://comet.elfhosted.com/${'c'.repeat(460)}/manifest.json`;
+  const list = `${mediafusion},${comet}`;
+  assert.ok(list.length > 700, 'measured values in this fleet run to 1856 characters');
+
+  assert.equal(strings.fullText(list), list, 'every character of the stored list comes back');
+  assert.deepEqual(strings.fullText(list).split(','), [mediafusion, comet], 'both add-ons survive the read');
+  assert.equal(strings.fullText('  https://a.test/manifest.json  '), 'https://a.test/manifest.json', 'it still trims');
+  assert.equal(strings.fullText(''), '', 'an empty value is still empty');
+  assert.equal(strings.fullText(null, 'default'), 'default', 'and the fallback still works');
+
+  // The cap has to stay exactly where it belongs: text() has many correct
+  // callers, and every one of them is naming something a person reads.
+  assert.equal(strings.text('x'.repeat(400)).length, 160, 'a display name is still capped at 160');
+  assert.equal(strings.text(list).length, 160, 'and text() is still the wrong helper for a URL');
 });
