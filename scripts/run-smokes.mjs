@@ -146,6 +146,21 @@ if (!suites.length) {
 // output is captured and replayed under its own heading. A PASSING suite's
 // output is still printed: these harnesses report counts (rows, cards, chips)
 // that are worth reading even when they are green.
+// A SUITE THAT HANGS MUST NOT HANG THE GATE. Measured 12 Sep 2026:
+// youtube.smoke.mjs sat for 47 minutes with a live headless Comet attached and
+// this runner waited on it for ever, because `close` is the only thing it
+// listened for. pages.yml gives the whole gate `timeout-minutes: 30`, so in CI
+// that run is killed from outside: the job goes red with no per-suite verdict,
+// no tally, and no name for the suite that stopped — and because `deploy`
+// needs `gate`, the live site silently stops following main. blazing-web had
+// seven commits that could not reach Pages for exactly this reason.
+//
+// 240s is far above any real suite here (the slowest measured are tens of
+// seconds) and 38 x 240s is still inside the 30-minute job only if everything
+// hangs, which is the case this exists to REPORT rather than to survive.
+// SMOKE_TIMEOUT_MS overrides it for a deliberately slow run.
+const SUITE_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS) || 240_000;
+
 function run(file) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -155,23 +170,49 @@ function run(file) {
       // so a local run behaves the same as a CI one.
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // ITS OWN PROCESS GROUP, so the timeout below can kill the BROWSER too.
+      // Every harness here launches a headless Comet; killing only the node
+      // process orphans it. Measured the same day: the 47-minute hang left its
+      // Comet (and its gpu and network helpers) running after the runner was
+      // killed, and a second stray from an earlier run was still up beside it.
+      // Those hold a scratch profile directory and a CDP port each.
+      detached: true,
     });
 
     let out = '';
+    let timedOut = false;
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });
 
+    // Negative pid = the whole group. SIGKILL rather than SIGTERM: a hung
+    // playwright action does not unwind, and a browser asked politely to stop
+    // can take its time. There is nothing to clean up that outliving the run
+    // would help.
+    const killTree = () => {
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      out += `\n\nTIMEOUT  killed after ${(SUITE_TIMEOUT_MS / 1000).toFixed(0)}s — this suite hangs.\n`;
+      killTree();
+    }, SUITE_TIMEOUT_MS);
+
     child.on('error', (err) => {
+      clearTimeout(timer);
       resolve({ file, code: 1, ms: Date.now() - started, out: `${out}\ncould not start node: ${err.message}` });
     });
 
     // A suite killed by a signal reports code null. That is a failure, and it
     // must not be read as 0.
     child.on('close', (code, signal) => {
+      clearTimeout(timer);
       resolve({
         file,
         code: code === null ? 1 : code,
         signal,
+        timedOut,
         ms: Date.now() - started,
         out,
       });
@@ -188,7 +229,7 @@ for (const file of suites) {
   const r = await run(file);
   results.push(r);
   const secs = (r.ms / 1000).toFixed(1);
-  const verdict = r.code === 0 ? 'PASS' : 'FAIL';
+  const verdict = r.code === 0 ? 'PASS' : (r.timedOut ? 'TIMEOUT' : 'FAIL');
   console.log(`----- ${verdict}  ${file}  (${secs}s${r.signal ? `, killed by ${r.signal}` : ''})`);
   process.stdout.write(r.out.endsWith('\n') || r.out === '' ? r.out : `${r.out}\n`);
   console.log('');
