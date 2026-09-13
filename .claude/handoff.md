@@ -1,61 +1,58 @@
-# blazing-web handoff — 13 Sep 2026
+# blazing-web — handoff, 13 Sep 2026 14:35
 
-Working on: parity audit blocking tier — B2 (Stream Sources screen) plus the
-  YouTube resolve path.
-Last action: pushed 92704d2. Gate green, deployed, live files verified by sha256.
-Next step: nothing is pending in this repo. The next parity work is the
-  major/minor recheck, which Markus approved — see "Next" below.
-Key files: sources.js, sources.smoke.mjs, youtube.js, youtube-play.smoke.mjs,
-  scripts/run-smokes.mjs
-Blockers: none in this repo. mac1 itself needs a reboot (load average 1003).
+Working on: closing the two live access-control holes from the audit, and the
+two-day YouTube "flaky test".
 
-## What landed today
+Last action: pushed 3 commits. Repo is clean, ahead=0.
 
-759a123  B2: a read-only Stream Sources screen in the browser
-9690167  resolve() retries once — one dropped request used to end the play
-92704d2  the resolver failure now says WHICH failure it was
+| repo | sha | what |
+|---|---|---|
+| blazing-web | 3526c50 | a kids profile cannot approve a device |
+| blazing-web | 94fde88 | YouTube 429 waits for the window |
+| blazing-web | (latest) | parity recheck report |
+| blazing-fleet | 82abc63 | /pair/approve refuses a kid, server side |
 
-All three are live. Verified by sha256 against https://kaoz625.github.io/blazing-web:
-sources.js, youtube.js, index.html, styles.css, app.js all IDENTICAL to local.
+## What landed
 
-Full suite 47/47. MIN_SUITES is 39 and 39 *.smoke.mjs exist.
+1. **DEFECT 2 closed.** `maybeShowApprover()` asked only "is SOME profile
+   active", and `selectProfile()` only asks for a PIN if the profile HAS one. A
+   kids profile with no PIN was one tap from Approve, and approving puts a
+   device on the WHOLE household. Fixed with the existing `grownUp()` helper
+   (profile.js:170) so a teen is refused too. Proven red:
+   `(f) a kids profile never sees the Approve sheet — {"approveShown":true,...}`
+2. **YouTube 429.** resolve() reads Retry-After and waits up to 3s instead of
+   retrying 700ms into the same 60-second bucket.
+3. **Parity recheck.** docs/parity-recheck-2026-09-13.md — 134 items, 98 OPEN,
+   28 PARTIAL, 8 CLOSED, 0 overturned.
 
-## Why those 7 commits never deployed — CORRECTED 13 Sep 2026
+## Next step
 
-They were never PUSHED. That is the whole reason.
+```bash
+cd /Users/markususche/Desktop/blazing-web && node gate.smoke.mjs
+```
 
-This section used to say a hanging suite hung the gate. That was wrong, and it
-was a guess written as a fact. `gh run list --workflow pages` shows the 11 Sep
-run at 719183c succeeded and deployed. No CI run was ever killed by a hang.
+Then pick up the trivial parity items from the report. M4 is the cheapest real
+defect (firetv DetailActivity.kt:879-881).
 
-The per-suite timeout added in cca1c58 is still worth having — a suite really
-did hang for 47 minutes locally — but it fixed a risk, not this outage. The
-commit message on cca1c58 carries the same false claim and cannot be edited now
-that it is pushed; this note is the correction of record.
+## Key files
+- profile.js:2246 (the guard), :2369 (profileId on the wire)
+- gate.smoke.mjs (f) — the kids/teen cases
+- youtube.js resolve()
+- docs/parity-recheck-2026-09-13.md
 
-## The resolver, and what is still NOT known
+## Blockers
+- **The addon is NOT deployed.** blazing f6d89deb adds Retry-After to
+  Access-Control-Expose-Headers. Until Coolify redeploys services/addon, the
+  browser cannot read the header at all and the YouTube fix runs at half effect.
+- **profile-flow.smoke.mjs failed once inside the 47-harness suite run.** It is
+  green alone, three runs in a row (122/0). The runner's per-test detail was
+  truncated so the reason is NOT known. Watch it on the next full run.
 
-Measured timeline:
-  05:23  CI resolve OK
-  07:18  CI resolve FAILED (1 attempt)
-  10:10  CI resolve FAILED (2 attempts — the retry was already in)
-  10:29  CI resolve OK, HTTP 200 after 3948ms
-
-So it was a WINDOW of about three hours in which addon.lyreosai.com would not
-answer the GitHub runner, while answering this machine in ~4s throughout (four
-cold ids, 200, 178/180 rate-limit tokens left). The retry did NOT fix it; the
-resolver coming back is what made the gate green. THE CAUSE IS STILL UNKNOWN.
-
-Do not shorten this into "youtube-play is flaky". Next time it goes red the
-harness prints the status and the timing of every resolve attempt, so a 403, a
-429, a timeout and a TLS failure will look different. Read that first.
-
-## Next — approved by Markus
-
-Recheck the 106 major + 28 minor parity items before fixing any of them. The
-blocking tier was 85% stale (17 of 20 already fixed), so the same is likely
-here. Batch by client, not one agent per item: an agent that has loaded the Roku
-tree can check ten Roku items nearly as cheaply as one. File:line evidence
-required, or it does not count. Source list:
-/Users/markususche/Desktop/blazing-shots/AUDIT-parity-2026-09-11.md and its
-banner points at RECHECK-blocking-2026-09-13.md.
+## Still open from the audit, NOT verified by me
+- DEFECT 3 — Roku deep link may walk over the profile gate. I started reading
+  `roku channels/components/MainScene.brs` onLaunchArgs (~line 305-760). The
+  `action=details` branch at :679 calls `openDetails()` directly and its own
+  comment says "No PIN bypass is offered here on purpose" — so it may already be
+  handled. NOT CONFIRMED either way.
+- DEFECT 4 — latent; firetv DetailActivity.kt:191 has no gate at its door.
+- DEFECT 5 — structural; no server-side rating gate on the addon video routes.
