@@ -88,6 +88,20 @@ const VIEWS = [
   { id: 'education', heading: true },
   { id: 'roadmaps', heading: true },
   { id: 'admin', heading: true },
+  // B2. `true`, not 'Stream Sources', for the same reason as YouTube, Live TV
+  // and Settings: a string heading also joins the `titles` set counted at the
+  // end, and that count is the BROWSE routes plus the book/audio room. Stream
+  // Sources is neither.
+  //
+  // IT IS COUNTED HERE EVEN THOUGH THE ROW IS GATED. sources.js hides the
+  // drawer button from a capped or Kids profile with the `hidden` attribute
+  // rather than by removing the node, precisely so `.drawer-nav [data-view]`
+  // stays the same length whoever is watching — a count that moves with the
+  // profile is a count that goes red for the wrong reason. The fixture profile
+  // below is rated 'adult' and is not a Kids profile, so the row is visible and
+  // its view really opens; sources.smoke.mjs is where the capped half is
+  // proven.
+  { id: 'sources', heading: true },
   // `true`, not 'Settings', for the same reason as YouTube and Live TV above:
   // a string heading also joins the `titles` set counted at the end, and that
   // count is the BROWSE routes plus the book/audio room. Settings is neither.
@@ -144,6 +158,21 @@ await ctx.route('https://fleet.lyreosai.com/**', (route) => {
 });
 await ctx.route('https://upscale.lyreosai.com/**', (route) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+// B2: Stream Sources reads the Stremio add-on directory off Cinemeta. Stubbed
+// for the same reason every other origin here is — this file walks every
+// destination and must not depend on the live internet to do it. Two add-ons is
+// enough to prove the view is not empty; sources.smoke.mjs is where the feed's
+// real shape is exercised.
+await ctx.route('https://v3-cinemeta.strem.io/**', (route) => route.fulfill({
+  status: 200,
+  contentType: 'application/json',
+  body: JSON.stringify({ addons: [
+    { transportUrl: 'https://one.example.test/manifest.json',
+      manifest: { name: 'One', description: 'A source.', types: ['movie'], resources: ['stream'] } },
+    { transportUrl: 'https://two.example.test/manifest.json',
+      manifest: { name: 'Two', description: 'Another.', types: ['series'], resources: [{ name: 'catalog' }] } },
+  ] }),
+}));
 
 const page = await ctx.newPage();
 const errors = [];

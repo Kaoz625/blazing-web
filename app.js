@@ -2037,6 +2037,16 @@ function showRoute(route, mediaOptions = {}) {
   // codec skips, auto-next and the add-on source were unreachable from a
   // browser while all three televisions had a screen for them.
   const settingsView = $('#settings-view');
+  // Stream Sources (sources.js), B2. Same self-contained-module shape again.
+  // The Roku, the Fire TV and the Apple TV all have this screen and 'sources'
+  // was not a route this function knew — measured at 2d04285, where
+  // `grep -c 'data-view="sources"' index.html` answered 0 and `grep -rn
+  // addon_catalog` over the repo answered nothing — so the add-on directory and
+  // the aggregator's own statement of what it queries were unreachable from a
+  // browser. It is READ-ONLY on purpose — a browser installs
+  // neither a Stremio add-on nor a Kodi one — and the module owns B13's
+  // parental gate, so this line only flips visibility.
+  const sourcesView = $('#sources-view');
   // B25 / B12. Roadmaps has had a <section> since the first build and nothing
   // behind it; Calendar had neither. Both are the self-contained-module shape
   // again — roadmaps.js and calendar.js own their fetch, their state and their
@@ -2052,6 +2062,7 @@ function showRoute(route, mediaOptions = {}) {
   if (youtubeView) youtubeView.hidden = route !== 'youtube';
   if (livetvView) livetvView.hidden = route !== 'livetv';
   if (settingsView) settingsView.hidden = route !== 'settings';
+  if (sourcesView) sourcesView.hidden = route !== 'sources';
   if (calendarView) calendarView.hidden = route !== 'calendar';
 
   // The 'stories', 'podcasts' and 'family' routes were here and are gone. They
@@ -2079,6 +2090,12 @@ function showRoute(route, mediaOptions = {}) {
   // with the profile, so a screen built once would be stale the moment somebody
   // switched profiles on another tab.
   if (route === 'settings') window.BlazingSettings && window.BlazingSettings.mount();
+  // Mounted on every visit for the same reason Settings is, and for one more:
+  // B13's gate is re-checked inside render(), so walking into this route by
+  // hand under a capped profile reaches the refusal rather than the directory.
+  // The two feeds are fetched ONCE — a revisit costs a re-render and nothing on
+  // the wire.
+  if (route === 'sources') window.BlazingSources && window.BlazingSources.mount();
   // Mounted on every visit for the same reason Settings is: both screens are
   // filtered by the connected profile's rating cap, and a cap can change in
   // another tab while this one is looking at something else. Neither module

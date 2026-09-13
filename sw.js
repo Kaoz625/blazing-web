@@ -119,7 +119,17 @@
 // fills, plus a brand-new Calendar chip pointing at a #calendar-view whose
 // module was never loaded — two destinations drawn and dead, which is precisely
 // what this audit is about.
-const CACHE = 'blazing-shell-v38';
+// v39: B2 — the read-only Stream Sources screen the browser did not have at
+// all, while all three televisions do. sources.js is A NEW FILE, the same trap
+// as v22's caps.js, v34's reader, v35's settings.js, v37's lists.js and v38's
+// roadmaps/calendar: an installed PWA holding v38 has no entry for it. It would
+// get the new index.html, whose drawer now carries a Stream Sources row
+// pointing at a #sources-view whose #sources-host nothing ever fills — one more
+// destination drawn and dead, which is precisely what this audit is about. It
+// is also a GATE bump: sources.js is what hides that row from a capped or Kids
+// profile, so a shell that serves the new markup without it would show the row
+// to everybody.
+const CACHE = 'blazing-shell-v39';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -157,6 +167,12 @@ const SHELL = [
   // Settings chip, open a view whose host never fills, and read as a dead
   // screen. Same reason the book reader is in this list.
   './settings.js',
+  // The read-only Stream Sources screen. A NEW FILE — see the v39 note on CACHE
+  // above. It must be served BESIDE the new settings.js, not instead of it:
+  // sources.js reads B13's parental rule out of window.BlazingSettings.core, so
+  // a shell holding one without the other has a Stream Sources view whose gate
+  // can never open.
+  './sources.js',
   './manga.js',
   './anime-room.js',
   './tv-comics-reader.js',

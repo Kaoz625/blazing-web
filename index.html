@@ -225,6 +225,23 @@
         <button type="button" data-view="trailers">Trailers</button>
         <button type="button" data-view="requests">Requests</button>
         <button type="button" data-view="admin">Admin</button>
+        <!-- STREAM SOURCES (B2). LAST BEFORE SETTINGS, which is exactly where
+             both televisions put it — tvOS NavBar.swift:144 `drawerOrder`, and
+             the Roku's own fillDrawer. Not a .topnav chip: it is not in the
+             canonical eleven and it is not on either TV's bar either.
+
+             `hidden` IN THE MARKUP IS THE FAIL-CLOSED DEFAULT, not a mistake.
+             This row is behind B13's parental rule (settings.js:330-333
+             `grownUp`), and sources.js reveals it only once a grown-up profile
+             has been broadcast. Shipping it visible and hiding it a tick later
+             would show a capped profile the row for one frame; shipping it
+             hidden can only ever fail the safe way.
+
+             It stays IN the drawer markup for every profile because
+             navparity.smoke.mjs counts `.drawer-nav [data-view]` against its own
+             list of destinations — a drawer whose LENGTH depends on who is
+             watching is a count that goes red for the wrong reason. -->
+        <button type="button" data-view="sources" hidden>Stream Sources</button>
         <!-- SETTINGS. Not in the canonical eleven, so it is not a .topnav chip;
              it belongs here with Admin, which is the other household-level
              screen. This is the ONLY way into it, so deleting this button
@@ -909,6 +926,32 @@
          value ("Minimum quality: 1080p") and a label in markup is a label that
          drifts from what is stored. That is the same decision Fire TV's
          rebuildPlaybackForm and Roku's buildButtons both make. -->
+    <!-- STREAM SOURCES (B2). The Roku, the Fire TV and the Apple TV all have
+         this screen and the browser had none: `grep -c 'data-view="sources"'`
+         answered 0 and `grep -rn addon_catalog` found nothing in the whole
+         repo, so no directory fetch existed here at all.
+
+         NOT the add-on box on Settings. That one (settings.js:507-630) is a
+         free-text field doing a read-modify-write on the household's own
+         account secret — a WRITE box for one URL. This is a READ-ONLY VIEW of
+         the Stremio directory and of what the aggregator says it queries, and
+         it is read-only because there is nothing here for a browser to write:
+         it can install neither a Stremio add-on (that registry is per-Roku) nor
+         a Kodi add-on (Python, on the server). sources.js's header carries the
+         audit ruling this follows, word for word.
+
+         Empty like #settings-host, and for the same reason: every line on this
+         screen comes off a live feed, and a line written in markup is a line
+         that drifts from what was actually fetched. -->
+    <section id="sources-view" class="view" hidden>
+      <div class="page-heading">
+        <p class="eyebrow">Stream Sources</p>
+        <h1>Stream Sources</h1>
+        <p>Where a stream in this browser comes from, and the add-on directory behind it.</p>
+      </div>
+      <div id="sources-host" class="sources-host"></div>
+    </section>
+
     <section id="settings-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Settings</p>
@@ -1110,5 +1153,17 @@
        window.BlazingSettings undefined — the exact failure the book reader
        comment in sw.js describes. It is in that list. -->
   <script src="./settings.js" defer></script>
+  <!-- Stream Sources (B2). AFTER settings.js, and the order is load-bearing:
+       sources.js does not keep its own copy of B13's parental rule, it reads
+       window.BlazingSettings.core.grownUp — one rule, so the two screens can
+       never disagree about who may see a source list. Both are `defer`, so they
+       run in document order and settings.js has published `core` before this
+       file's IIFE starts. A missing BlazingSettings is treated as a NO, so even
+       a half-updated install fails closed rather than open.
+
+       Same service-worker requirement as settings.js above: it is in sw.js's
+       SHELL list, or an installed PWA reaches the new index.html, addresses
+       #sources-host and finds window.BlazingSources undefined. -->
+  <script src="./sources.js" defer></script>
 </body>
 </html>

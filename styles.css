@@ -824,6 +824,50 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .settings-about { display: grid; grid-template-columns: minmax(0, 9rem) minmax(0, 1fr); gap: 6px 16px; margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); }
 .settings-about dt { font-weight: 700; }
 .settings-about dd { margin: 0; overflow-wrap: anywhere; }
+
+/* STREAM SOURCES (B2). The list on the left and the detail panel on the right,
+   which is tvOS's StreamSourcesView layout (a 900pt ScrollView beside an 800pt
+   panel) at browser proportions. It collapses to one column at 900px, where the
+   panel follows the list instead of sitting beside it.
+
+   .sources-row reuses .settings-row's metrics on purpose — same border, same
+   radius, same 52px floor, same hover and focus treatment — because a row here
+   and a row on Settings are the same control to a hand and to dpad.js, which
+   moves focus by GEOMETRY. It is NOT .settings-row itself: this one lays its
+   name and its meta out on one line with the meta pushed right, which is the
+   Roku's own `name + Chr(9) + RowMeta` shape.
+
+   READ-ONLY, SO THERE IS NO CONTROL STYLE HERE. No input, no switch, no primary
+   button — sources.js draws none, and a style for one would be the first step
+   back towards the thing the audit forbade. */
+.sources-host { max-width: 1240px; margin: 0 auto; padding: 0 20px 64px; }
+.sources-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 28px; align-items: start; margin-top: 18px; }
+.sources-list { min-width: 0; }
+.sources-eyebrow { margin: 0; color: var(--quiet); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .13em; text-transform: uppercase; }
+.sources-list-heading { margin: 26px 0 4px; }
+.sources-card { margin: 0; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 20px; background: var(--surface); }
+.sources-card-title { margin: 10px 0 0; font-size: 20px; font-weight: 800; }
+.sources-card-base { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.sources-card-copy { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
+.sources-card-meta { margin: 10px 0 0; color: var(--quiet); font-size: var(--fs-body); }
+.sources-row { display: flex; align-items: baseline; gap: 14px; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--muted); background: var(--surface); font-size: var(--fs-body); text-align: left; transition: border-color var(--transition), background var(--transition), color var(--transition); }
+.sources-row:hover, .sources-row:focus-visible, .sources-row[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--surface-focus); outline: none; }
+.sources-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.sources-row-meta { flex: 0 0 auto; color: var(--quiet); font-size: var(--fs-caption); white-space: nowrap; }
+.sources-detail { position: sticky; top: 96px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 22px; background: var(--surface); }
+.sources-detail-title { margin: 0; font-size: 22px; font-weight: 800; }
+.sources-detail-meta { margin: 8px 0 0; color: var(--quiet); font-size: var(--fs-body); }
+.sources-detail-copy { margin: 12px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
+.sources-footer { margin-top: 22px; border-top: 1px solid rgba(255,255,255,.10); padding-top: 16px; }
+.sources-footer-line { margin: 0 0 10px; color: var(--quiet); font-size: var(--fs-body); line-height: 1.5; }
+.sources-footer-line:last-child { margin-bottom: 0; }
+.sources-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.45; }
+.sources-note[data-tone="error"] { color: #ff8a8f; }
+@media (max-width: 900px) {
+  .sources-layout { grid-template-columns: minmax(0, 1fr); }
+  /* Not sticky in one column: it would pin the panel over the list it describes. */
+  .sources-detail { position: static; }
+}
 .result-row { margin-bottom: 29px; }
 
 /* ── B22: the Library's three saved-title sections ────────

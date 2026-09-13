@@ -81,7 +81,15 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Calendar the browser did not have at all. Same rule as every raise above:
 // this number goes up when a suite lands, so a deleted suite is a failure
 // rather than a quieter run.
-const MIN_SUITES = 38;
+//
+// Raised 38 -> 39 when sources.smoke.mjs landed with B2: the read-only Stream
+// Sources screen, which the Roku, the Fire TV and the Apple TV all have and the
+// browser had not. Same rule as every raise above: this number is the real
+// count, always. Counted on disk before writing it — `ls *.smoke.mjs | wc -l`
+// answered 39 — rather than by adding one to what was here, which is how a
+// floor drifts behind its own rule (see the 6 Sep note above, where it had
+// fallen seven suites behind).
+const MIN_SUITES = 39;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
@@ -152,8 +160,16 @@ if (!suites.length) {
 // listened for. pages.yml gives the whole gate `timeout-minutes: 30`, so in CI
 // that run is killed from outside: the job goes red with no per-suite verdict,
 // no tally, and no name for the suite that stopped — and because `deploy`
-// needs `gate`, the live site silently stops following main. blazing-web had
-// seven commits that could not reach Pages for exactly this reason.
+// needs `gate`, the live site silently stops following main.
+//
+// CORRECTION, 13 Sep 2026. The sentence that stood here claimed blazing-web had
+// seven commits that could not reach Pages "for exactly this reason". That was
+// a guess presented as a cause, and it is wrong. `gh run list --workflow pages`
+// shows the 11 Sep run at 719183c SUCCEEDED and deployed. Those commits never
+// reached Pages because they were never PUSHED — they sat in the local repo.
+// No CI run was ever killed by a hang. The 47-minute hang above is measured and
+// real; what it caused was not. The timeout below is still worth having, on its
+// own merit, for the day a suite does hang in CI.
 //
 // 240s is far above any real suite here (the slowest measured are tens of
 // seconds) and 38 x 240s is still inside the 30-minute job only if everything
