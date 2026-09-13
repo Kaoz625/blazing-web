@@ -96,17 +96,41 @@ let subs = [];
 let searchAnswer = [vid(11), vid(12), vid(13)];
 let resolveCalls = 0;
 let resolveFailFirst = false;
+// Rate-limit mode. 0 = off. When on, the first `resolveRateLimitCalls` calls are
+// refused with a real 429 carrying Retry-After, exactly as the addon does.
+let resolveRateLimitSecs = 0;
+let resolveRateLimitCalls = 0;
+// Arrival time of every resolve call. Test 12 needs the GAP between two calls,
+// not just the count: the old code also retried twice, so a count alone cannot
+// tell "waited the 700ms it always waited" from "read Retry-After and obeyed it".
+let resolveStamps = [];
 
 await ctx.route('https://addon.lyreosai.com/**', (route) => {
   const u = route.request().url();
   if (u.includes('/proxy/yt-resolve')) {
     resolveCalls += 1;
+    resolveStamps.push(Date.now());
     // THE FIRST ATTEMPT IS REFUSED ON PURPOSE. See test 11 at the bottom: a
     // single transient failure used to end the play for a real viewer, because
     // resolve() tried exactly once. Every other test here still gets its stream,
     // because the retry gets it on attempt 2 — which is the point.
     if (resolveFailFirst && resolveCalls === 1) {
       return route.fulfill({ status: 503, contentType: 'text/plain', body: 'resolver asleep' });
+    }
+    if (resolveRateLimitSecs > 0 && resolveCalls <= resolveRateLimitCalls) {
+      // Access-Control-Expose-Headers is NOT decoration here. Without it the
+      // page cannot read Retry-After at all, which is the server-side half of
+      // this bug (services/addon/lib/security.js EXPOSED_RESPONSE_HEADERS).
+      return route.fulfill({
+        status: 429,
+        contentType: 'text/plain',
+        headers: {
+          'Retry-After': String(resolveRateLimitSecs),
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Expose-Headers': 'Retry-After',
+        },
+        body: 'Too many requests',
+      });
     }
     return route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ url: '/proxy/hls?u=https%3A%2F%2Fexample.test%2Fx.m3u8', streamFormat: 'hls' }) });
@@ -417,6 +441,95 @@ const retried = await page.evaluate(() => ({
 ok(retried.open, 'a resolve that fails once still plays — the second attempt gets it',
   retried.status || `${resolveCalls} resolve calls`);
 ok(resolveCalls === 2, 'and it is exactly two attempts, not a retry loop', `${resolveCalls} calls`);
+
+
+// 12 + 13. A 429 IS NOT A NON-ANSWER.
+//
+// Measured from the CI instrumentation on 13 Sep 2026, which is the reason the
+// instrumentation was added — before it, every failure arrived as the same null:
+//
+//     RESOLVE ATTEMPTS
+//       HTTP 429  after 148ms
+//       HTTP 429  after 881ms
+//
+// That was our OWN limiter: 180 requests per 60 seconds per IP, and 47 harnesses
+// share one GitHub runner IP. The retry from test 11 could never help, because it
+// waits 700 ms against a 60 SECOND window — both attempts land in the same bucket.
+//
+// So two behaviours have to hold, and they pull in opposite directions:
+//   12. a SHORT Retry-After is honoured — wait exactly that long, then play.
+//   13. a LONG Retry-After is not sat through — stop after one attempt and say
+//       the true thing, instead of freezing on a poster to be refused again.
+resolveFailFirst = false;
+
+// Test 11 leaves the player OPEN. Without closing it first, "the player is open"
+// is already true before this test presses anything, so the wait below returns
+// instantly and the assertion reads the state from the previous test rather than
+// this one. That is how the first version of test 12 saw 1 call instead of 2.
+const closePlayer = async () => {
+  await page.evaluate(() => {
+    const p = document.getElementById('player');
+    if (p && !p.hidden) p.hidden = true;
+    const s = document.getElementById('yt-status');
+    if (s) s.textContent = '';
+  });
+};
+await closePlayer();
+
+// 12 — Retry-After of 2s is inside the budget, so it waits THAT LONG and plays.
+//
+// Two seconds, not one, and the gap is asserted. That is what makes this test
+// mean something: the old code retried twice as well, on a fixed 700 ms pause,
+// so counting calls cannot tell the two apart. Measuring the gap can.
+resolveRateLimitSecs = 2;
+resolveRateLimitCalls = 1;
+resolveCalls = 0;
+resolveStamps = [];
+await page.evaluate(() => { document.querySelector('#yt-rows .yt-card').click(); });
+await page.waitForFunction(() => !document.getElementById('player').hidden, { timeout: 20000 })
+  .catch(() => {});
+const waited = await page.evaluate(() => ({
+  open: !document.getElementById('player').hidden,
+  status: (document.getElementById('yt-status').textContent || '').trim(),
+}));
+ok(waited.open, 'a short Retry-After is honoured and the video plays',
+  waited.status || `${resolveCalls} resolve calls`);
+ok(resolveCalls === 2, 'and it tried again, exactly once', `${resolveCalls} calls`);
+const gap = resolveStamps.length >= 2 ? resolveStamps[1] - resolveStamps[0] : 0;
+ok(gap >= 1800,
+  'and the wait was the 2s the server ASKED for, not the fixed 700ms pause',
+  `${gap}ms between attempts`);
+
+// Same reason, before 13.
+await closePlayer();
+
+// 13 — Retry-After of 45s is beyond the budget. One attempt, then the truth.
+resolveRateLimitSecs = 45;
+resolveRateLimitCalls = 9;
+resolveCalls = 0;
+resolveStamps = [];
+await page.evaluate(() => { document.querySelector('#yt-rows .yt-card').click(); });
+// NOT "status is non-empty". "Getting the video…" is non-empty, so that wait
+// fires while the resolve is still in flight and the assertion then reads the
+// in-progress message instead of the outcome. Wait for a SETTLED status.
+await page.waitForFunction(
+  () => {
+    const t = (document.getElementById('yt-status').textContent || '').trim();
+    return t.length > 0 && !/getting the video/i.test(t);
+  },
+  { timeout: 15000 },
+).catch(() => {});
+const refused = await page.evaluate(() => ({
+  open: !document.getElementById('player').hidden,
+  status: (document.getElementById('yt-status').textContent || '').trim(),
+}));
+ok(!refused.open, 'a long Retry-After does not open a player', refused.status);
+ok(/too many requests/i.test(refused.status),
+  'and it says TOO MANY REQUESTS, not "the resolver did not answer"', refused.status);
+ok(/45 second/i.test(refused.status),
+  'and it tells the person how long to wait, read off Retry-After', refused.status);
+ok(resolveCalls === 1,
+  'and it does not sit through a 45s window to be refused a second time', `${resolveCalls} calls`);
 
 await browser.close();
 server.close();

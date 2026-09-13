@@ -101,6 +101,39 @@
   const RESOLVE_ATTEMPTS = 2;
   const RESOLVE_RETRY_PAUSE_MS = 700;
 
+  // A 429 IS NOT A NON-ANSWER, AND RETRYING IT ON THE PAUSE ABOVE IS USELESS.
+  //
+  // Measured 13 Sep 2026 from the CI instrumentation, which is the whole reason
+  // that instrumentation exists — before it, every failure looked the same:
+  //
+  //     RESOLVE ATTEMPTS
+  //       HTTP 429  after 148ms
+  //       HTTP 429  after 881ms
+  //
+  // Both attempts refused, 148 ms apart. 148 ms is far too fast to have reached
+  // YouTube, because it never left our building: services/addon/lib/security.js:26
+  // sets 180 requests per 60 SECONDS per IP, and server.js:1178 applies it to
+  // every route, this one included.
+  //
+  // So the retry added above could never have helped here. It waits 700 ms
+  // against a 60 second window, so both attempts land in the same bucket and
+  // both are refused. That is not a flaky test and it is not an outage — it is
+  // arithmetic, and it was reported as an unexplained intermittent failure for
+  // two days because a 429 and a dropped connection both arrived as `null`.
+  //
+  // The server already says how long to wait. security.js:713 sets Retry-After
+  // to the seconds left in the window. This code ignored it completely. Now:
+  //
+  //   Retry-After within the budget below -> wait exactly that long, then retry.
+  //   Retry-After beyond it               -> stop NOW. Sitting on a poster for
+  //                                          fifty seconds to be refused again
+  //                                          is worse than being told the truth
+  //                                          immediately.
+  //
+  // Three seconds is the budget because it is about the longest extra wait that
+  // still reads as "loading" rather than "frozen" on a television.
+  const RESOLVE_RATELIMIT_MAX_WAIT_MS = 3000;
+
   const PER_SHELF = 12;
   const SEARCH_LIMIT = 24;
   const CHANNEL_LIMIT = 30;
@@ -423,18 +456,30 @@
    * Returns null on any failure; the caller says so on screen. See the header of
    * this file for why every one of these query parameters is load-bearing.
    */
+  // Returns { stream } on success, or { failure, retryAfterMs } — never a bare
+  // null. The caller needs to know WHICH failure it was to say anything true
+  // about it, and collapsing them into null is what hid the rate limit.
   async function resolve(id) {
-    if (!VIDEO_ID_RE.test(String(id || ''))) return null;
+    if (!VIDEO_ID_RE.test(String(id || ''))) return { failure: 'badid' };
+    let last = { failure: 'noanswer' };
     for (let attempt = 1; attempt <= RESOLVE_ATTEMPTS; attempt += 1) {
-      const stream = await resolveOnce(id);
-      if (stream) return stream;
+      last = await resolveOnce(id);
+      if (last.stream) return last;
+
       // Do not sleep after the LAST attempt — that is dead time in front of an
       // error message the reader is already owed.
-      if (attempt < RESOLVE_ATTEMPTS) {
+      if (attempt >= RESOLVE_ATTEMPTS) break;
+
+      if (last.failure === 'ratelimited') {
+        // Waiting less than the window the server named guarantees a second
+        // refusal. Either wait it out properly or stop and say so.
+        if (!(last.retryAfterMs > 0) || last.retryAfterMs > RESOLVE_RATELIMIT_MAX_WAIT_MS) break;
+        await new Promise((r) => setTimeout(r, last.retryAfterMs));
+      } else {
         await new Promise((r) => setTimeout(r, RESOLVE_RETRY_PAUSE_MS));
       }
     }
-    return null;
+    return last;
   }
 
   async function resolveOnce(id) {
@@ -445,17 +490,31 @@
         `${ADDON_BASE}/proxy/yt-resolve?id=${encodeURIComponent(id)}&json=1&via=proxy`,
         { mode: 'cors', credentials: 'omit', signal: controller.signal },
       );
-      if (!res.ok) return null;
+      if (res.status === 429) {
+        // Retry-After is in seconds, and the server always sets it on this path
+        // (security.js:700 and :713). Treat a missing or junk value as "unknown"
+        // rather than zero — zero would read as "retry immediately", which is
+        // the one thing that is certainly wrong against a window limiter.
+        const header = res.headers && res.headers.get ? res.headers.get('Retry-After') : null;
+        const seconds = Number(header);
+        return {
+          failure: 'ratelimited',
+          retryAfterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 0,
+        };
+      }
+      if (!res.ok) return { failure: 'noanswer' };
       const data = await res.json();
       // The proxied form comes back as a PATH, not an absolute URL, so the addon
       // does not have to know which hostname it is being served under.
       const raw = data && data.url;
       const absolute = (typeof raw === 'string' && raw.startsWith('/')) ? `${ADDON_BASE}${raw}` : raw;
       const url = safeHttpsUrl(absolute);
-      if (!url) return null;
-      return { url, streamFormat: (data && data.streamFormat) || '' };
+      if (!url) return { failure: 'noanswer' };
+      return { stream: { url, streamFormat: (data && data.streamFormat) || '' } };
     } catch {
-      return null;
+      // A timeout (the abort above) and a dropped connection land here and are
+      // the same thing to a viewer: nothing came back.
+      return { failure: 'noanswer' };
     } finally {
       clearTimeout(timer);
     }
@@ -464,13 +523,27 @@
   async function play(video) {
     const generation = state.generation;
     setStatus('Getting the video…');
-    const stream = await resolve(video.id);
+    const result = await resolve(video.id);
     if (generation !== state.generation) return;
+    const stream = result && result.stream;
     if (!stream) {
       // Name the piece that failed. "Cannot play" alone has sent people hunting
       // for a dead video when the video was fine and the resolver was down.
-      setStatus('That video could not be opened — the resolver on the server did not answer.');
-      telemetry('play_failed', { id: video.id, from: 'youtube' });
+      //
+      // And name the RIGHT piece. Saying "the resolver did not answer" when it
+      // answered 429 is not a smaller lie than saying nothing — it points at an
+      // outage that is not happening and hides the one fact that helps, which is
+      // that waiting a moment fixes it.
+      const failure = (result && result.failure) || 'noanswer';
+      if (failure === 'ratelimited') {
+        const secs = Math.ceil(((result && result.retryAfterMs) || 0) / 1000);
+        setStatus(secs > 0
+          ? `Too many requests just now. Wait about ${secs} second${secs === 1 ? '' : 's'} and press play again.`
+          : 'Too many requests just now. Wait a moment and press play again.');
+      } else {
+        setStatus('That video could not be opened — the resolver on the server did not answer.');
+      }
+      telemetry('play_failed', { id: video.id, from: 'youtube', failure });
       return;
     }
     setStatus('');
