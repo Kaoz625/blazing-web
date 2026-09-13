@@ -279,17 +279,55 @@ for (const key of wanted) {
   check(`the "${key}" chip opens #${CHIP_VIEW[key]}`, shown);
 }
 
-// The canonical entries that are still LEFT OUT. If someone adds a chip for one
-// of these before building its view, this fails — which is the point.
-// 'livetv' came OFF this list the day #livetv-view was built. 'live' stays as a
-// near-miss key nobody should introduce, and Adult and Settings are the two
-// canonical destinations still genuinely missing — Adult deliberately, until it
-// has a gate, because a chip that opens an ungated adult section is worse than
-// no chip at all.
-for (const key of ['live', 'adult', 'settings']) {
+// SETTINGS CAME OFF THIS LIST, the same way 'livetv' did the day #livetv-view
+// was built, and the guard is what noticed. aa512b0 ("A browser could set a
+// picture and nothing else — now it has Settings and parental controls") added
+// BOTH #settings-view (index.html:912) and the drawer button (index.html:233)
+// and left this list alone, so the run went red on `no "settings" chip until it
+// has a view` — correctly. That is this loop working, not a flake: a
+// destination existed and its view was never proven to open.
+//
+// It is asserted BELOW rather than simply deleted. Dropping a key off this list
+// removes the only coverage it had, which would turn a red run into no run at
+// all; the positive check is what replaces it.
+//
+// 'live' stays as a near-miss key nobody should introduce, and Adult stays
+// deliberately — until it has a gate, because a chip that opens an ungated
+// adult section is worse than no chip at all.
+for (const key of ['live', 'adult']) {
   check(`no "${key}" chip until it has a view`,
     (await page.locator(`[data-view="${key}"]`).count()) === 0);
 }
+
+// Settings is a DRAWER destination and not one of the canonical ten in the bar,
+// so it is checked the way Podcasts is above and not through CHIP_VIEW — that
+// loop clicks `.topnav [data-view=...]`, which does not exist for this one.
+check('Settings has its destination in the drawer',
+  (await page.locator('.drawer-nav [data-view="settings"]').count()) === 1);
+check('and it is NOT in the top bar — it is not one of the canonical ten',
+  (await page.locator('.topnav [data-view="settings"]').count()) === 0);
+// evaluate().click() rather than a locator press, for the same reason the
+// CHIP_VIEW loop uses one: the drawer is closed, so the button is not hittable,
+// and this is a routing check rather than a check that the drawer opens.
+//
+// THE NULL CHECK IS NOT DEFENSIVE PADDING. Measured while proving this guard
+// bites: with the drawer button deleted, a bare
+// `document.querySelector(...).click()` throws on null INSIDE evaluate, the
+// harness dies there, and the run ends with one FAIL printed, no routing
+// verdict and no tally. A guard that takes the report down with it is worse
+// than the stale list it replaced — the run that goes red must still say what
+// it found. So the click is a no-op when the button is gone, and the routing
+// check below reports false on its own.
+await page.evaluate(() => {
+  const b = document.querySelector('.drawer-nav [data-view="settings"]');
+  if (b) b.click();
+});
+await page.waitForTimeout(250);
+check('the Settings destination opens #settings-view',
+  await page.evaluate(() => {
+    const s = document.getElementById('settings-view');
+    return Boolean(s) && !s.hidden && s.getBoundingClientRect().height > 0;
+  }));
 check('Shows reads "TV Shows", as it does on all three TVs',
   (await page.locator('[data-view="shows"]').first().innerText()).trim().includes('TV Shows'));
 
