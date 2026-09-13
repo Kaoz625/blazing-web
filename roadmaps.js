@@ -55,6 +55,11 @@
     request: 0,
     gate: '',           // the cap the rows on screen were filtered against
     services: null,
+    /* The entry cards the last pass of this roadmap drew, id -> [wrapper], so a
+       re-render MOVES them instead of building new ones. `nodesKey` is the
+       `${slug}|${cap}` they were built for — see the block above entryCard. */
+    nodes: new Map(),
+    nodesKey: '',
   };
 
   // ── small helpers, the same shapes games.js and anime-room.js use ──────────
@@ -703,15 +708,29 @@
 
     if (!gated.chapters.length) {
       chapters.replaceChildren();
+      /* Nothing survived, so there is nothing worth holding on to — and holding
+         it would keep a whole detached grid alive for a screen that is empty. */
+      state.nodes = new Map();
+      state.nodesKey = '';
       detailStatus.textContent = raw.chapters.length
         ? 'Nothing in this roadmap is available for this profile.'
         : 'This roadmap has nothing in it yet.';
       return;
     }
     detailStatus.textContent = '';
+    /* The cards the last pass drew, to be moved into the new order rather than
+       rebuilt — see the block above entryCard for what rebuilding costs and why
+       the cap is half of the key. `keep` becomes the pool for the next pass, so
+       anything this order did not use is simply dropped. */
+    const key = `${gated.slug}|${state.gate}`;
+    const pool = state.nodesKey === key ? state.nodes : new Map();
+    const keep = new Map();
     chapters.replaceChildren(
-      ...sections(orderedChapters(gated.chapters, mode)).map(chapterSection),
+      ...sections(orderedChapters(gated.chapters, mode))
+        .map((section) => chapterSection(section, pool, keep)),
     );
+    state.nodesKey = key;
+    state.nodes = keep;
   }
 
   /** The shape app.js's buildCard() and openDetail() want.
@@ -738,22 +757,97 @@
     };
   }
 
-  function chapterSection(section) {
+  function chapterSection(section, pool, keep) {
     const host = node('section', 'roadmap-chapter');
     host.append(node('h2', 'row-title', section.name));
     host.append(node('p', 'roadmap-chapter-sub', subline(section)));
     const grid = node('div', 'search-results');
     section.items.forEach((entry, offset) => {
-      grid.append(entryCard(entry, section.startAt + offset));
+      grid.append(entryCard(entry, section.startAt + offset, pool, keep));
     });
     host.append(grid);
     return host;
   }
 
-  function entryCard(entry, position) {
+  /* ── A RE-RENDER MOVES THE CARDS. IT DOES NOT BUILD NEW ONES ───────────────
+   *
+   * WHAT REBUILDING COSTS, measured rather than reasoned. The order button
+   * re-renders, and `chapters.replaceChildren(...)` (renderDetail below) threw
+   * away every card and asked buildCard() for a new one — which means a new
+   * `<img class="card-image">` per entry (app.js:2497-2503) carrying the same
+   * poster URL as the one just discarded. Whether a NEW element for an image
+   * the page already has costs a request is then the BROWSER's decision, not
+   * ours, and the two browsers this repo runs on disagree.
+   *
+   * MEASURED 13 Sep 2026, one press of #roadmap-order in
+   * roadmaps-calendar.smoke.mjs, counting every request that left the page:
+   *     Comet 151 (local)      0 requests                      63 ok / 0 FAIL
+   *     Playwright chromium    1 request, /art.png             62 ok / 1 FAIL
+   * That is the whole of "changing the order costs nothing on the wire" passing
+   * here and failing on CI — comet.mjs:130 hands CI chromium and this Mac
+   * Comet. The fixture's art is served by route.fulfill with no Cache-Control
+   * and no validator, so nothing about it is heuristically fresh and a fresh
+   * element is entitled to ask again; a real poster CDN would usually answer
+   * from cache, which makes this a cost that appears on exactly the devices
+   * with the least to spare.
+   *
+   * AND IT IS NOT THE RATING LOOKUPS, which is the obvious suspect now that
+   * resolveTiers() runs on every render. Checked: the same harness at 1e437c9,
+   * before any of the tier work existed, fails this same line under chromium
+   * with the same single /art.png. TIERS answers from the map on the second
+   * pass, so a reorder asks the fleet for nothing.
+   *
+   * SO THE CARDS ARE KEPT AND MOVED, which is worth having on its own: a saga
+   * runs to a few hundred cards, and rebuilding all of them to show the SAME
+   * titles in another order re-decodes every poster and flashes the grid.
+   * Moving a node keeps its listeners with it — including app.js's hover
+   * trailer (app.js:2423) — so nothing is re-attached either.
+   *
+   * A LIST PER ID, NOT ONE NODE PER ID: a franchise may list the same title in
+   * two chapters, and one element cannot be in two places — appending it twice
+   * would silently move it and leave the first slot empty. Taking from a list
+   * and building when the list runs out draws a repeated id as many times as
+   * the order asks for it.
+   *
+   * THE POOL IS KEYED ON THE CAP as well as the slug (renderDetail below). A
+   * card carries the tier that admitted it (see entryMeta), and a tier that was
+   * unknown when the card was built stays unknown on that card for as long as
+   * it is re-used — harmless under every cap but 'general', which is the one
+   * cap that refuses an unknown tier (app.js:5850). A cap change therefore
+   * starts from nothing rather than re-using what the old cap drew.
+   */
+
+  /** A wrapper this roadmap drew earlier for `entry`, or null.
+   *
+   *  A wrapper whose card is GONE is not handed back: app.js removes the card
+   *  outright when a rating check refuses it (app.js:2423/2430), and re-using
+   *  the husk would put a card back on the screen that app.js has just taken
+   *  off it. The test is for the position span, which is a child of the card
+   *  (buildEntryCard below) and so leaves with it — and it is also the one node
+   *  entryCard has to write to. */
+  function spareEntry(pool, entry) {
+    const list = pool.get(entry.id);
+    while (list && list.length) {
+      const wrap = list.shift();
+      if (wrap.querySelector('.roadmap-pos')) return wrap;
+    }
+    return null;
+  }
+
+  function entryCard(entry, position, pool, keep) {
+    const wrap = spareEntry(pool, entry) || buildEntryCard(entry);
+    /* The position is the ONE thing that differs between two orders of the same
+       title — it is a place in the watch order, not a property of the film. */
+    wrap.querySelector('.roadmap-pos').textContent = String(position);
+    const drawn = keep.get(entry.id);
+    if (drawn) drawn.push(wrap); else keep.set(entry.id, [wrap]);
+    return wrap;
+  }
+
+  function buildEntryCard(entry) {
     const wrap = node('div', 'roadmap-entry');
     const card = state.services.buildCard(entryMeta(entry));
-    const pos = node('span', 'roadmap-pos', String(position));
+    const pos = node('span', 'roadmap-pos', '');
     card.append(pos);
     if (!entry.playable) {
       /* The card says so before a press does: dimmed, and inert. Nothing tries

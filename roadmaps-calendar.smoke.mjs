@@ -314,7 +314,37 @@ try {
     'a tmdb: entry is shown, dimmed and cannot be pressed', `(${JSON.stringify(saga.dimmed)})`);
   ok(!saga.chapters.some((c) => c.titles.includes('Adult Special')), 'the title above the cap is not on the screen');
 
-  // The order button is a real control: it re-sorts, and the wire is untouched.
+  /* The order button is a real control: it re-sorts, and the wire is untouched.
+     `seen` is EVERY request that left the page, art included, and that is the
+     point rather than an oversight: a reorder shows the same titles in another
+     sequence, so neither the fleet nor the art CDN should hear about it. It
+     caught exactly that — the screen used to rebuild every card, and a rebuilt
+     card is a new <img> for a poster the page already had. Whether that costs a
+     request is the browser's call: MEASURED 13 Sep 2026 on the unfixed
+     roadmaps.js, Comet said 0 and CI's chromium said 1 (/art.png), which is the
+     shape of every comet.mjs:130 split in this repo. The failure prints the
+     paths because a bare count sent the first reader hunting through the rating
+     lookups, which were never involved. */
+  /* THE POSTERS ARE SETTLED FIRST, and without this the count is a coin toss.
+     buildCard() marks card art `loading="lazy"` (app.js:2498), so a poster is
+     not fetched when its card is built but whenever the browser decides the
+     card is near enough the viewport — and this fixture's grid runs ~180px past
+     the fold at 1440x980. A request that belongs to the FIRST render can
+     therefore start AFTER the baseline is taken and be counted as though the
+     press had caused it. MEASURED 13 Sep 2026 on the FIXED roadmaps.js,
+     chromium over three identical runs: 0, 1 (/art.png), 0 — the same line
+     passing and failing with nothing changed between runs. Walking to the
+     bottom and back starts every one of them, and `img.complete` stays false
+     until a lazy image has really loaded, so past this wait the only thing that
+     can arrive is a request a press really caused. */
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('#roadmap-chapters img.card-image')].every((img) => img.complete),
+    null, { timeout: 8000 },
+  ).catch(() => {});
+  await page.waitForTimeout(300);
   const before = seen.length;
   await page.locator('#roadmap-order').click();
   await page.waitForTimeout(300);
@@ -331,7 +361,8 @@ try {
     'release order is one flat section', `(${release.chapters.map((c) => c.name).join(' / ')})`);
   ok(release.chapters[0].titles.join(' | ') === 'A New Hope | The Phantom Menace | Revenge of the Sith | Andor | Ahsoka',
     'and it really is in date order', `(${release.chapters[0].titles.join(' | ')})`);
-  ok(seen.length === before, 'changing the order costs nothing on the wire', `(${seen.length - before} requests)`);
+  ok(seen.length === before, 'changing the order costs nothing on the wire',
+    `(${seen.length - before} requests${seen.length > before ? ' ' + JSON.stringify(seen.slice(before)) : ''})`);
 
   await page.locator('#roadmap-order').click();
   await page.waitForTimeout(300);
@@ -353,6 +384,21 @@ try {
   await page.locator('#roadmap-order').click();
   await page.waitForTimeout(300);
   ok(await page.locator('#roadmap-order').textContent() === 'Saga order', 'the order button wraps back round');
+  /* And the whole cycle, not just the first press. "Films first" is the stop
+     that matters here: it is the only order that draws TWO sections, so the
+     cards have to move into a grid they were not built in and then back out of
+     it again. A screen that kept its cards for a flat re-sort and quietly
+     rebuilt them for a split one would pass the single-press line above and
+     still cost a viewer every poster.
+
+     AND BOTH LINES STILL GO RED ON THE OLD CODE, which is the point of settling
+     the posters rather than simply widening what counts. MEASURED 13 Sep 2026,
+     this file exactly as it stands against `git show 2da6590:roadmaps.js` — the
+     version that rebuilt every card — under chromium, three runs: 1 request on
+     the first press and 3 across the cycle, identical every time. The same
+     three runs on the fixed roadmaps.js: 0 and 0. */
+  ok(seen.length === before, 'and neither does the rest of the cycle, split sections and all',
+    `(${seen.length - before} requests${seen.length > before ? ' ' + JSON.stringify(seen.slice(before)) : ''})`);
 
   // A films-only roadmap must not offer an order that would sort nothing.
   await page.locator('#roadmap-back').click();

@@ -55,11 +55,16 @@ const reply = (route, body, status = 200) =>
 // container.
 // An init script runs at document-start, where `document.documentElement` does
 // not exist yet and `observe()` on it throws — taking the rest of this function
-// with it and leaving two empty arrays that look like a real result. Hence the
-// DOMContentLoaded wrapper.
+// with it and leaving every recorder below empty, which looks like a real
+// result. Hence the DOMContentLoaded wrapper, which also means #video and
+// #player are already in the document by the time the two observers below
+// attach to them.
 const RECORD_TOASTS = () => {
   window.__toasts = [];
   window.__srcs = [];
+  // Set the moment #player is RAISED, and never cleared. Scenario 1's wait
+  // explains why the harness cannot ask "is the player down?" on its own.
+  window.__playerOpened = false;
   const start = () => {
     // BY NODE IDENTITY, because ensureToastHost() RE-PARENTS the whole toast
     // host into whichever dialog is open — so an unexpired toast is added to
@@ -78,14 +83,73 @@ const RECORD_TOASTS = () => {
     new MutationObserver((records) => {
       for (const record of records) record.addedNodes.forEach(seen);
     }).observe(document.documentElement, { childList: true, subtree: true });
-    // Which url the element was pointed at, each time it changed. setInterval
-    // rather than requestAnimationFrame: rAF does not run while the tab is
-    // considered hidden, and a missed src is a missed assertion.
-    setInterval(() => {
-      const video = document.querySelector('#video');
-      const src = video && video.getAttribute('src');
-      if (src && window.__srcs[window.__srcs.length - 1] !== src) window.__srcs.push(src);
-    }, 25);
+    // WHICH URL THE ELEMENT WAS POINTED AT, each time it changed — read from
+    // the attribute mutation itself, never SAMPLED on a timer.
+    //
+    // This was a 25ms setInterval, and that is half of why this suite was red
+    // on every CI push while passing here. Nothing in the product is slow on
+    // this fixture: a source is a 404 fulfilled by Playwright's own route
+    // handler (see the cdn.example.test branch below), so the `error` event
+    // comes back at memory speed and the next src replaces the last almost at
+    // once. MEASURED on this fixture, ms from the click:
+    //
+    //   Comet, macOS        dead-1 138  dead-2 174  dead-3 200   gaps 36/26ms
+    //   chromium, CI branch dead-1 212  dead-2 ~225 dead-3 237   gaps ~13/12ms
+    //
+    // A 25ms sampler cannot see a value that lives 13ms, and it did not — the
+    // CI-branch run recorded dead-1 and dead-3 and dropped dead-2 whole. That
+    // is also the TimeoutError scenario 2 died on: it waits for
+    // `__srcs.length >= 2` and on that run only ever reached 1. The product
+    // attached all three, in order, both times. The recorder was simply slower
+    // than the thing it was recording, and how much slower is a property of
+    // the host — so the old comment's reason for setInterval over rAF was
+    // right and its conclusion was still a sampler.
+    //
+    // An attribute MutationObserver has no window to miss: `video.src = url`
+    // in attachSource() (app.js) reflects straight to the attribute, so every
+    // assignment queues its own record. #video is static markup — index.html
+    // line 1038, inside the #player section — so it is already there at
+    // DOMContentLoaded and can be observed directly rather than through the
+    // document, which would also pick up every card poster's `src`.
+    //
+    // AND IT READS THE RECORDS, not the live element. An observer callback is
+    // one call per BATCH, so a callback that only re-read `video.src` would
+    // see the newest value and lose any that changed earlier in the same
+    // batch — the identical hole the 25ms sampler had, just narrower. With
+    // `attributeOldValue` every record carries the value that was there BEFORE
+    // it, so the batch's oldValues plus the element's current value reconstruct
+    // the whole sequence however the records happen to be grouped.
+    const video = document.querySelector('#video');
+    if (video) {
+      // closePlayer() ends the walk with removeAttribute('src'), and the first
+      // record's oldValue is the empty state before any attempt. Neither is an
+      // attempt, so an empty value is never an entry.
+      const takeSrc = (src) => {
+        if (src && window.__srcs[window.__srcs.length - 1] !== src) window.__srcs.push(src);
+      };
+      takeSrc(video.getAttribute('src'));
+      new MutationObserver((records) => {
+        for (const record of records) takeSrc(record.oldValue);
+        takeSrc(video.getAttribute('src'));
+      }).observe(video, { attributes: true, attributeFilter: ['src'], attributeOldValue: true });
+    }
+    // WAS THE PLAYER EVER RAISED. openPlayer() clears `hidden` on #player
+    // before it attaches a source, and closePlayer() puts it back.
+    //
+    // Read from the attribute's own mutation rather than by polling
+    // `player.hidden`, because on the CI branch the whole walk — open, three
+    // dead sources, close — measured 212ms to 251ms from the click, and an
+    // observer callback that re-read the live element could easily find it
+    // already hidden again and record nothing. `oldValue !== null` means the
+    // attribute WAS present and this record removed it, which is the open.
+    const playerSection = document.querySelector('#player');
+    if (playerSection) {
+      new MutationObserver((records) => {
+        for (const record of records) if (record.oldValue !== null) window.__playerOpened = true;
+      }).observe(playerSection, {
+        attributes: true, attributeFilter: ['hidden'], attributeOldValue: true,
+      });
+    }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
@@ -145,8 +209,35 @@ async function fixture() {
   await page.click('#detail-play');
 
   // The walk ends by putting the detail sheet — the source list — back up.
+  //
+  // `__playerOpened` IS LOAD-BEARING, and it is the other half of why this
+  // suite was CI-only red. Without it this predicate is ALSO TRUE THE INSTANT
+  // PLAY IS PRESSED: #player starts hidden and #detail-dialog is open, which
+  // is precisely the state openTitle() just finished waiting for. So the end
+  // state and the start state are the same three facts, and whether this is a
+  // real wait or an instant false pass comes down to one question — did
+  // openPlayer() run before Playwright could install the predicate? That is
+  // decided by the HOST, not by the product. MEASURED on this fixture, ms from
+  // the click:
+  //
+  //   Comet, macOS         #player already up when click() returned at +98,
+  //                        so the predicate was false and really resolved at
+  //                        +424, when the walk ended.
+  //   chromium, CI branch  #player still down when click() returned at +149,
+  //                        so the predicate matched the START state and
+  //                        resolved at +155 — and the first source was not
+  //                        attached until +212.
+  //
+  // Those 57ms are the whole of the CI failure. All six assertions below read
+  // a recorder nothing had written to yet and came back empty, on runs where
+  // the product did every single thing they ask for: playSelected()'s chain
+  // (fetchFullMeta, then resolveStreams, then BlazingCaps.probe) simply lands
+  // a little later there than it does here. The flag can only go up when
+  // #player is genuinely raised, so the start state cannot satisfy this any
+  // more on any host.
   await page.waitForFunction(
-    () => document.querySelector('#player').hidden
+    () => window.__playerOpened
+      && document.querySelector('#player').hidden
       && document.querySelector('#detail-dialog')?.hasAttribute('open'),
     null, { timeout: 45000 },
   );
