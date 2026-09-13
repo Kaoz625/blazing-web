@@ -156,7 +156,21 @@
   }
 
   /** Newest first, deduplicated by id. The Roku sorts here too (FleetNewestFirst);
-   *  the fleet stores insertion order and does not sort. */
+   *  the fleet stores insertion order and does not sort.
+   *
+   *  THE CAP COMES AFTER THE SORT, and the order of those two steps is the
+   *  whole of this function. Wire order is OLDEST first — blazing-fleet
+   *  profiles.js:748 says so in its own words ("Order is insertion order") and
+   *  addToList appends with `[...items, entry]` at :795 — and the server puts no
+   *  cap on a list at all, so a household saving across the Roku and the Fire
+   *  Stick can hand this more than MAX_ITEMS rows. Capping inside the walk kept
+   *  the 200 OLDEST and threw the newest away before the sort could ever see
+   *  them: a title saved last week was missing from the Library, its detail
+   *  sheet drew "+ Watchlist" instead of "in watchlist", and pressing that
+   *  upserted a row the next refresh() dropped again — the fleet's upsert KEEPS
+   *  the original addedAt, so a re-saved title stays past index 200 for ever.
+   *  The Roku has no cap here at all (Fleet.brs FleetEntries), so the browser
+   *  was the only client silently losing rows. */
   function parseList(rawArray) {
     if (!Array.isArray(rawArray)) return [];
     const seen = new Set();
@@ -166,9 +180,9 @@
       if (!item || seen.has(item.id)) continue;
       seen.add(item.id);
       items.push(item);
-      if (items.length >= MAX_ITEMS) break;
     }
-    return items.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+    items.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+    return items.slice(0, MAX_ITEMS);
   }
 
   /**

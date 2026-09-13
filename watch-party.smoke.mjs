@@ -329,7 +329,43 @@ const WITH_TURN = {
   check('two ticks of the same state do not toggle it back',
     (await page.evaluate(() => document.querySelector('#video').paused)) === false);
 
-  // 5. Close the film while still in the party. The panel must OFFER it back —
+  // 5. THE PARTY DRIVES ITS OWN FILM AND NOTHING ELSE. #video is app.js's one
+  //    player and the sync clock deliberately outlives a close (step 6 asserts
+  //    exactly that), so a guest who goes and opens something else while still
+  //    in the room used to have THAT film seeked and paused to a stranger's
+  //    playhead inside two seconds. The unrelated film is opened through
+  //    window.BlazingPlayer.open, which is the same public surface a detail
+  //    sheet, youtube.js and livetv.js all open the player through.
+  room.position = 600;
+  room.state = 'playing';
+  await page.evaluate(() => window.BlazingPlayer.open('Some Other Film', 'https://cdn.example.test/other.webm'));
+  await page.waitForFunction(() => {
+    const v = document.querySelector('#video');
+    return v.getAttribute('src') === 'https://cdn.example.test/other.webm'
+      && v.readyState >= 1 && v.currentTime > 0 && v.paused === false;
+  }, null, { timeout: 20000 });
+  // Three ticks of the two-second clock, plus slack for the fetch.
+  await page.waitForTimeout(7000);
+  const unrelated = await page.evaluate(() => ({
+    src: document.querySelector('#video').getAttribute('src'),
+    at: document.querySelector('#video').currentTime,
+  }));
+  check('a film the party is not watching is never seeked to the host',
+    unrelated.at < 60, `at ${unrelated.at.toFixed(1)}s with the host at 600s`);
+  check('and it is still the film the viewer opened',
+    unrelated.src === 'https://cdn.example.test/other.webm', unrelated.src);
+  // The pause half of the same hole: the host's play state must not be applied
+  // to it either.
+  room.state = 'paused';
+  await page.waitForTimeout(5000);
+  check('and the host pausing does not pause it',
+    (await page.evaluate(() => document.querySelector('#video').paused)) === false);
+  check('the panel says which film it is not driving',
+    /not syncing/i.test(await page.locator('.wp-sync-text').textContent()),
+    await page.locator('.wp-sync-text').textContent());
+  room.state = 'playing';
+
+  // 6. Close the film while still in the party. The panel must OFFER it back —
   //    a control that is drawn and does nothing is the exact defect this item
   //    is about, so the button is asserted by pressing it, not by existing.
   await page.click('#player-close');
@@ -348,7 +384,7 @@ const WITH_TURN = {
     (await page.evaluate(() => !document.querySelector('#player').hidden
       && document.querySelector('#video').getAttribute('src'))) === 'https://cdn.example.test/party.webm');
 
-  // 6. Leaving stops the corrections and NOTHING else. Roku says the same thing
+  // 7. Leaving stops the corrections and NOTHING else. Roku says the same thing
   //    out loud on the same action: "Left the watch party - carry on watching."
   await page.click('.wp-head-leave');
   await page.waitForTimeout(3000);

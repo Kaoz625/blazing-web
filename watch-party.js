@@ -68,6 +68,12 @@
   const REACTIONS = ['👍', '😂', '😮', '❤️', '🎉'];
   const TOAST_LIFETIME_MS = 1700;
   const MAX_CHAT_ROWS = 200;
+  // The title the panel opens the room's film under, and the ONLY identity
+  // app.js hands back: playerStatus() (app.js:5052-5064) publishes open, ready,
+  // position, duration, paused and title — no stream url and no content id. So
+  // this string is half of how reconcile() tells the party's film from a film
+  // the viewer opened for themselves; see the note there.
+  const PARTY_PLAYER_TITLE = 'Watch Party';
 
   const CODE_KEY = 'blazing-web-party-code-v1';
   const PEER_KEY = 'blazing-web-party-peer-v1';
@@ -200,6 +206,11 @@
     syncTimer: 0,
     /** What the room is playing, as last read from /party/:code/state. */
     roomStream: null,
+    /** The room stream url this panel actually opened in app.js's one player,
+     *  or null when it did not open one. reconcile() corrects the playhead only
+     *  while this still equals state.roomStream.url — the player is shared with
+     *  the whole app and the sync clock outlives #player-close. */
+    openedStreamUrl: null,
     /** A joiner with no playhead of its own must not be "corrected" against
      *  one that does not exist. Set once this browser's film actually moves. */
     guestStarted: false,
@@ -448,6 +459,7 @@
     state.wsAttempt = 0;
     state.intentionalClose = false;
     state.roomStream = null;
+    state.openedStreamUrl = null;
     state.guestStarted = false;
     ui.headCode.textContent = code;
     ui.chatList.replaceChildren();
@@ -480,6 +492,7 @@
     state.code = null;
     state.discoveredCode = null;
     state.roomStream = null;
+    state.openedStreamUrl = null;
     state.guestStarted = false;
     hidePanelAndChip();
     updateLaunchButton();
@@ -494,6 +507,7 @@
     removeStorage(CODE_KEY);
     state.code = null;
     state.roomStream = null;
+    state.openedStreamUrl = null;
     state.guestStarted = false;
     updateLaunchButton();
     // Roku's own wording for the same moment, and for the same reason: the
@@ -597,6 +611,35 @@
   }
 
   /**
+   * Is the film on screen the one this panel opened for the room?
+   *
+   * THE PARTY MAY DRIVE ITS OWN STREAM AND NOTHING ELSE. Two things have to
+   * agree, and both are compared as NON-EMPTY strings on purpose: an absent url
+   * matching an absent url, or an empty title matching an empty title, is two
+   * unknowns rather than a match, and that is precisely how a guard like this
+   * gets talked into seizing whatever happens to be open.
+   *
+   *   1. the url this panel opened is still the url the room is playing — so a
+   *      host who switched films does not have this browser corrected against a
+   *      position belonging to a different film;
+   *   2. the player still carries the title it was opened under, which is what
+   *      catches a close-and-reopen that fell between two ticks, where
+   *      `openedStreamUrl` on its own would still look current.
+   *
+   * What (2) costs: a viewer who finds the room's film themselves and starts it
+   * from its own detail sheet is NOT synced. app.js's status() publishes no url
+   * and no content id (app.js:5052), so there is nothing this module could
+   * compare to recognise its own stream under somebody else's title. The
+   * panel's own play button is the supported way in and it is one press.
+   */
+  function drivingRoomStream(status) {
+    const wanted = (state.roomStream && state.roomStream.url) || '';
+    const opened = state.openedStreamUrl || '';
+    return Boolean(wanted) && opened === wanted
+      && String((status && status.title) || '') === PARTY_PLAYER_TITLE;
+  }
+
+  /**
    * Bring this browser back into step with the host.
    *
    * ORDER MATTERS, and it is the Apple TV's order: the seek is decided against
@@ -611,8 +654,26 @@
     if (!status) {
       // Nothing is playing here. The room is still live and the chat still
       // works; the panel offers the film instead of driving one.
+      // The player is closed, so whatever opens in it next was not opened by
+      // this panel — drop the claim with it.
       state.guestStarted = false;
+      state.openedStreamUrl = null;
       renderSync('');
+      return;
+    }
+    if (!drivingRoomStream(status)) {
+      // SOMETHING ELSE IS ON. #video is app.js's ONE player and this panel does
+      // not own it: the viewer can press #player-close and open another film,
+      // a YouTube clip (youtube.js:452) or a live channel (livetv.js:954) while
+      // the party runs on, and the clock is deliberately kept alive through
+      // that so the panel can offer the room's film back — watch-party.smoke.mjs
+      // step 6 asserts exactly that behaviour. Without this test the next tick
+      // read whatever was open, armed guestStarted from its position, and
+      // stepped and paused an unrelated film to the host's playhead within two
+      // seconds. Touch nothing, and say which it is rather than sitting there
+      // claiming to be "in step with the host".
+      state.guestStarted = false;
+      renderSync('You are watching something else — the party is not syncing it.');
       return;
     }
     if (!status.ready) {
@@ -688,9 +749,16 @@
   function playRoomStream() {
     const api = playerApi();
     if (!api || typeof api.open !== 'function' || !state.roomStream) return;
+    const url = state.roomStream.url;
     state.guestStarted = false;
-    api.open('Watch Party', state.roomStream.url);
+    api.open(PARTY_PLAYER_TITLE, url);
     const status = playerState();
+    // CLAIM THE PLAYER ONLY WHEN IT REALLY OPENED. open() returns nothing and
+    // refuses in silence on a url safeHttpsUrl() rejects (app.js:4885-4886),
+    // so this status read is the only proof there is that the party's film is
+    // on screen. Claiming it blind would hand reconcile() the right to step and
+    // pause whatever the viewer opens next.
+    state.openedStreamUrl = status ? url : null;
     renderSync(status ? 'Starting the film…'
       : 'The party is playing something this browser cannot open.');
   }
