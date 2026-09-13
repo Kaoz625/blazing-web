@@ -1,81 +1,61 @@
 # blazing-web handoff — 13 Sep 2026
 
-Working on: finishing the 7 unpushed commits that could never deploy, plus the
-5 confirmed defects an adversarial review found in them.
+Working on: parity audit blocking tier — B2 (Stream Sources screen) plus the
+  YouTube resolve path.
+Last action: pushed 92704d2. Gate green, deployed, live files verified by sha256.
+Next step: nothing is pending in this repo. The next parity work is the
+  major/minor recheck, which Markus approved — see "Next" below.
+Key files: sources.js, sources.smoke.mjs, youtube.js, youtube-play.smoke.mjs,
+  scripts/run-smokes.mjs
+Blockers: none in this repo. mac1 itself needs a reboot (load average 1003).
 
-Last action: committed 5 changes (tree clean, 12 commits unpushed). NOT PUSHED —
-a push to main publishes the live public site, and that needs Markus.
+## What landed today
 
-## STATE
+759a123  B2: a read-only Stream Sources screen in the browser
+9690167  resolve() retries once — one dropped request used to end the play
+92704d2  the resolver failure now says WHICH failure it was
 
-| repo | sha | state |
-|---|---|---|
-| blazing-web | 47ed7cf | clean, 12 unpushed |
-| roku channels | 7ae48ea | clean, pushed |
-| firetv | 186b51d | clean, pushed |
-| blazing-tvos | e337a47 | clean, pushed |
-| printing-press | 893b69f | clean, pushed |
-| 3d prints | 7fe60b7 | clean, pushed |
+All three are live. Verified by sha256 against https://kaoz625.github.io/blazing-web:
+sources.js, youtube.js, index.html, styles.css, app.js all IDENTICAL to local.
 
-## Next step
+Full suite 47/47. MIN_SUITES is 39 and 39 *.smoke.mjs exist.
 
-```bash
-cd /Users/markususche/Desktop/blazing-web && git push
-```
+## Why those 7 commits never deployed — CORRECTED 13 Sep 2026
 
-ONLY after Markus says yes. pages.yml publishes https://kaoz625.github.io/blazing-web/
-on every push to main. The switch IS thrown (build_type=workflow, verified via
-gh api), so the 23-check gate runs FIRST and a red gate leaves the live site on
-the last good commit. It is gated, but it is still a public deploy.
+They were never PUSHED. That is the whole reason.
 
-## Why those 7 commits never deployed
+This section used to say a hanging suite hung the gate. That was wrong, and it
+was a guess written as a fact. `gh run list --workflow pages` shows the 11 Sep
+run at 719183c succeeded and deployed. No CI run was ever killed by a hang.
 
-scripts/run-smokes.mjs had no per-suite timeout. One hanging suite hung the
-whole gate; CI killed the job at 30 min with no tally and no name, `deploy`
-needs `gate`, so the site silently stopped following main. Fixed in cca1c58.
+The per-suite timeout added in cca1c58 is still worth having — a suite really
+did hang for 47 minutes locally — but it fixed a risk, not this outage. The
+commit message on cca1c58 carries the same false claim and cannot be edited now
+that it is pushed; this note is the correction of record.
 
-## THE OPEN ONE — intermittent hang, root cause unknown
+## The resolver, and what is still NOT known
 
-A random suite hangs in a full run. Different one each time. Every one of them
-passes alone:
+Measured timeline:
+  05:23  CI resolve OK
+  07:18  CI resolve FAILED (1 attempt)
+  10:10  CI resolve FAILED (2 attempts — the retry was already in)
+  10:29  CI resolve OK, HTTP 200 after 3948ms
 
-| run | conditions | hung |
-|---|---|---|
-| 1 | 26 agents running concurrently | youtube.smoke.mjs, 47 min |
-| 2 | near-clean | none |
-| 3 | clean, no agents | profile-flow.smoke.mjs, hit the 240s cap |
+So it was a WINDOW of about three hours in which addon.lyreosai.com would not
+answer the GitHub runner, while answering this machine in ~4s throughout (four
+cold ids, 200, 178/180 rate-limit tokens left). The retry did NOT fix it; the
+resolver coming back is what made the gate green. THE CAUSE IS STILL UNKNOWN.
 
-  youtube.smoke.mjs    alone: 42 passed 0 failed, 24.0s
-  profile-flow         alone: 122 passed 0 failed, 43.8s
-  youtube-play         alone: 15 passed 0 failed, real decoded bytes
+Do not shorten this into "youtube-play is flaky". Next time it goes red the
+harness prints the status and the timing of every resolve attempt, so a 403, a
+429, a timeout and a TLS failure will look different. Read that first.
 
-NOT a leak. Sampled every 20s through a clean run: comets=0 at every sample,
-free+inactive memory flat 9.7-10.5 GB. An earlier note of mine claiming leaked
-browsers was wrong and is retracted in the team chat.
+## Next — approved by Markus
 
-Heavy agent load makes it much likelier but is not the whole story, because run
-3 was clean. DO NOT run the browser suite and a big agent fan-out together on
-mac1 — that much is measured.
-
-## Last full run
-
-45/46. The one TIMEOUT was the intermittent hang above, not a defect. The two
-failures in the run before it are both fixed: search.smoke.mjs (stale guard,
-47ed7cf) and youtube-play (transient live resolver, passes now).
-
-## Traps
-
-- youtube-play.smoke.mjs is a LIVE test inside the deploy gate — it hits the
-  real fleet and the real addon and decodes a real stream. It failed once
-  tonight with "the resolver on the server did not answer" and passed on retry.
-  It WILL flake the gate again.
-- A guard must be watched going RED on broken code. Three separate tests
-  written this session passed on the defective code and were caught only
-  because a second agent rebuilt the broken tree and ran them.
-- A guard must not CRASH when it fails. Two of them threw on a null element and
-  ended the run with no tally, which reads as a much smaller failure than it is.
-- GitHub runners are UTC. Any timezone fixture that only separates right from
-  wrong outside UTC is decoration in CI.
-
-Blockers: the push decision, and the Vender Resale question (research/ is
-served on the public storefront — see ~/.claude-team/chat/vender-resale.md).
+Recheck the 106 major + 28 minor parity items before fixing any of them. The
+blocking tier was 85% stale (17 of 20 already fixed), so the same is likely
+here. Batch by client, not one agent per item: an agent that has loaded the Roku
+tree can check ten Roku items nearly as cheaply as one. File:line evidence
+required, or it does not count. Source list:
+/Users/markususche/Desktop/blazing-shots/AUDIT-parity-2026-09-11.md and its
+banner points at RECHECK-blocking-2026-09-13.md.
