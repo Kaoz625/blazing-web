@@ -111,6 +111,31 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)));
 
+// WHAT ACTUALLY HAPPENED TO THE RESOLVE, rather than only that it failed.
+//
+// This suite told the deploy gate "the resolver on the server did not answer"
+// three times on 13 Sep 2026 and could not say whether that was a 403, a 429, a
+// TLS failure, a DNS failure or a timeout. Those have four different fixes, and
+// without the difference the honest options were to guess or to weaken the test.
+// Meanwhile the same resolver answered every hand-made request from a developer
+// machine in about 4 seconds, cold, with 178 of 180 rate-limit tokens left — so
+// the interesting question was never "is it up", it was "what does it say to
+// THIS client, from THIS network".
+//
+// Recorded from the page's own requests, so it is the real cross-origin call
+// with the real origin header, not a node-side approximation of it.
+const resolveLog = [];
+page.on('response', async (res) => {
+  if (!res.url().includes('/proxy/yt-resolve')) return;
+  resolveLog.push(`HTTP ${res.status()} ${res.statusText()} after ${Date.now() - startedAt}ms`);
+});
+page.on('requestfailed', (req) => {
+  if (!req.url().includes('/proxy/yt-resolve')) return;
+  const f = req.failure();
+  resolveLog.push(`NETWORK FAILURE ${(f && f.errorText) || 'unknown'} after ${Date.now() - startedAt}ms`);
+});
+let startedAt = Date.now();
+
 await page.goto(base + '/index.html', { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(1800);
 const tile = page.locator('.bp-profile').first();
@@ -173,19 +198,35 @@ if (!picked) {
 }
 
 // Click the CARD, not a function. The point is the path a viewer takes.
+startedAt = Date.now();
 await page.evaluate((id) => {
   document.querySelector(`#yt-rows .yt-card[data-video-id="${id}"]`).click();
 }, picked.id);
 
-// The resolver spawns yt-dlp, which has to solve YouTube's player JS. 30s is the
-// timeout youtube.js itself allows.
-await page.waitForFunction(() => !document.getElementById('player').hidden, { timeout: 45_000 })
+// The resolver spawns yt-dlp, which has to solve YouTube's player JS.
+//
+// 75s, AND IT MUST STAY ABOVE youtube.js's OWN BUDGET. That file now makes TWO
+// resolve attempts of RESOLVE_TIMEOUT_MS (30s) with a 700ms pause, so its worst
+// case is 60.7s. This wait was 45s, which was fine for one attempt and became a
+// trap the moment the retry landed: a slow-but-successful second attempt would
+// return at ~61s to a harness that had already given up at 45s, and the suite
+// would report "the resolver did not answer" about a resolve that answered.
+//
+// The rule, if youtube.js changes again: this number is RESOLVE_ATTEMPTS x
+// RESOLVE_TIMEOUT_MS + the pauses, plus headroom. Never below it.
+await page.waitForFunction(() => !document.getElementById('player').hidden, { timeout: 75_000 })
   .catch(() => {});
 const opened = await page.evaluate(() => ({
   playerOpen: !document.getElementById('player').hidden,
   title: (document.getElementById('player-title').textContent || '').trim(),
   status: (document.getElementById('yt-status').textContent || '').trim(),
 }));
+if (resolveLog.length) {
+  console.log('\n  RESOLVE ATTEMPTS');
+  for (const line of resolveLog) console.log(`    ${line}`);
+} else {
+  console.log('\n  RESOLVE ATTEMPTS\n    none reached the network at all');
+}
 ok(opened.playerOpen, 'the app player opened on the card press', opened.status || opened.title);
 
 // ── the measurement ────────────────────────────────────────────────────────
