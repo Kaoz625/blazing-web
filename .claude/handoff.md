@@ -1,50 +1,81 @@
-# blazing-web handoff — 11 Sep 2026
+# blazing-web handoff — 13 Sep 2026
 
-Working on: DebridStream 3.7 item 12, director filmography, on all four
-clients. This file covers the web half.
+Working on: finishing the 7 unpushed commits that could never deploy, plus the
+5 confirmed defects an adversarial review found in them.
 
-Last action: committed and pushed `ed22ea2`. The web detail dialog had NO
-crew at all — no director, no cast, no companies. It now shows
-"Directed by <name>" as a real `<button>`, and pressing it opens a
-filmography dialog over the sheet. 36/36 smoke suites pass.
+Last action: committed 5 changes (tree clean, 12 commits unpushed). NOT PUSHED —
+a push to main publishes the live public site, and that needs Markus.
 
-Next step:
+## STATE
+
+| repo | sha | state |
+|---|---|---|
+| blazing-web | 47ed7cf | clean, 12 unpushed |
+| roku channels | 7ae48ea | clean, pushed |
+| firetv | 186b51d | clean, pushed |
+| blazing-tvos | e337a47 | clean, pushed |
+| printing-press | 893b69f | clean, pushed |
+| 3d prints | 7fe60b7 | clean, pushed |
+
+## Next step
+
 ```bash
-cd /Users/markususche/Desktop/blazing-web && node director-filmography.smoke.mjs
+cd /Users/markususche/Desktop/blazing-web && git push
 ```
-Then deploy to **Cloudflare Pages** (never Vercel) and open a film in a real
-browser to confirm the dialog stacks correctly on a phone width.
 
-Key files:
-- `app.js` — `renderCrew`, `openPerson`, `personCard`, `openResolvedTitle`, `closePerson`
-- `index.html` — `#detail-crew`, and the `#person-dialog` block
-- `styles.css` — `.detail-crew`, `.detail-crew-name`, `.person-card-slot`
-- `director-filmography.smoke.mjs` (new), `scripts/run-smokes.mjs` floor 32 → 33
+ONLY after Markus says yes. pages.yml publishes https://kaoz625.github.io/blazing-web/
+on every push to main. The switch IS thrown (build_type=workflow, verified via
+gh api), so the 23-check gate runs FIRST and a red gate leaves the live site on
+the last good commit. It is gated, but it is still a public deploy.
+
+## Why those 7 commits never deployed
+
+scripts/run-smokes.mjs had no per-suite timeout. One hanging suite hung the
+whole gate; CI killed the job at 30 min with no tally and no name, `deploy`
+needs `gate`, so the site silently stopped following main. Fixed in cca1c58.
+
+## THE OPEN ONE — intermittent hang, root cause unknown
+
+A random suite hangs in a full run. Different one each time. Every one of them
+passes alone:
+
+| run | conditions | hung |
+|---|---|---|
+| 1 | 26 agents running concurrently | youtube.smoke.mjs, 47 min |
+| 2 | near-clean | none |
+| 3 | clean, no agents | profile-flow.smoke.mjs, hit the 240s cap |
+
+  youtube.smoke.mjs    alone: 42 passed 0 failed, 24.0s
+  profile-flow         alone: 122 passed 0 failed, 43.8s
+  youtube-play         alone: 15 passed 0 failed, real decoded bytes
+
+NOT a leak. Sampled every 20s through a clean run: comets=0 at every sample,
+free+inactive memory flat 9.7-10.5 GB. An earlier note of mine claiming leaked
+browsers was wrong and is retracted in the team chat.
+
+Heavy agent load makes it much likelier but is not the whole story, because run
+3 was clean. DO NOT run the browser suite and a big agent fan-out together on
+mac1 — that much is measured.
+
+## Last full run
+
+45/46. The one TIMEOUT was the intermittent hang above, not a defect. The two
+failures in the run before it are both fixed: search.smoke.mjs (stale guard,
+47ed7cf) and youtube-play (transient live resolver, passes now).
 
 ## Traps
 
-- **`role=director` is load-bearing.** TMDB splits `combined_credits` into
-  `cast` and `crew`; a director's own films are ONLY in `crew`. The smoke test
-  is negative-controlled on exactly this: drop the role and it reddens with
-  `actual: '', expected: 'director'`.
-- **The person payload keys a title's kind as `mediaType`, not `type`.**
-  Reading `type` files every credit as a movie.
-- **`personCard` wraps the card on purpose.** `buildCard` attaches its own
-  click handler to the card, and a capture listener added to that SAME element
-  does not reliably run first — at the target phase capture and bubble
-  listeners fire in registration order. A listener on an ANCESTOR always wins
-  the capture phase. That wrapper is what makes the tmdb: interception correct
-  rather than usually correct.
-- **The credits carry `tmdb:` ids and nothing downstream can open one.** The
-  fleet sends them deliberately (`blazing-fleet/richmeta.js` measured it), so
-  the resolve is on the click, one call for the card that was picked.
+- youtube-play.smoke.mjs is a LIVE test inside the deploy gate — it hits the
+  real fleet and the real addon and decodes a real stream. It failed once
+  tonight with "the resolver on the server did not answer" and passed on retry.
+  It WILL flake the gate again.
+- A guard must be watched going RED on broken code. Three separate tests
+  written this session passed on the defective code and were caught only
+  because a second agent rebuilt the broken tree and ran them.
+- A guard must not CRASH when it fails. Two of them threw on a null element and
+  ended the run with no tally, which reads as a much smaller failure than it is.
+- GitHub runners are UTC. Any timezone fixture that only separates right from
+  wrong outside UTC is decoration in CI.
 
-## What web still does NOT have that the televisions do
-
-Named here because it is the real remaining parity gap and it is bigger than
-this item: the detail dialog still has **no cast row, no production
-companies, no reviews, and no "More like this"**. Fire TV and the Roku have
-all four from `GET /meta/rich`, which this client now calls for the crew and
-throws the rest of away.
-
-Blockers: none.
+Blockers: the push decision, and the Vender Resale question (research/ is
+served on the public storefront — see ~/.claude-team/chat/vender-resale.md).
