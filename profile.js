@@ -720,6 +720,10 @@
     BUSY_CONTROLS.forEach((key) => {
       if (ui[key]) ui[key].disabled = busy;
     });
+    // pinLength(), not a hard 4: the owner pad — the only pad that still has
+    // this button — wants seven, and the old literal left it disabled after
+    // every setBusy(false) until renderPin() happened to run again.
+    if (ui.verify) ui.verify.disabled = busy || state.pinDigits.length !== pinLength();
     // The pencil and the icon tiles are in this list for the same reason the
     // profile tiles are: they are built by renderProfileList()/showIconPicker()
     // rather than held in `ui`, so setBusy() cannot reach them by key.
@@ -1404,7 +1408,7 @@
     }
     state.padPurpose = 'unlock';
     state.padAfter = onUnlocked;
-    openParentalPad(profile, 'Enter this profile’s PIN, then select Verify.');
+    openParentalPad(profile, 'Enter this profile’s PIN. The last digit checks it.');
   }
 
   /** Collect four digits to SET. Nothing is sent to /verify — there is nothing
@@ -1412,7 +1416,7 @@
   function collectNewPin(onChosen) {
     state.padPurpose = 'newpin';
     state.padAfter = onChosen;
-    openParentalPad(state.parentalProfile, 'Enter four digits for the new PIN, then select Save.');
+    openParentalPad(state.parentalProfile, 'Enter four digits for the new PIN. The last digit saves it.');
   }
 
   function openParentalPad(profile, message) {
@@ -1545,6 +1549,13 @@
       ui.dots.appendChild(dot);
     }
     ui.dots.setAttribute('aria-label', `${state.pinDigits.length} of ${length} digits entered`);
+    // The button exists for the owner pad only — everywhere else the last digit
+    // submits. Driven from here, not from openOwnerPin(), because every route
+    // into and out of owner mode already ends in renderPin().
+    if (ui.verify) {
+      ui.verify.hidden = !state.ownerMode;
+      ui.verify.disabled = state.busy || state.pinDigits.length !== length;
+    }
     ui.clear.disabled = state.busy || state.pinDigits.length === 0;
     ui.delete.disabled = state.busy || state.pinDigits.length === 0;
   }
@@ -1570,7 +1581,7 @@
     hideAllScreens();
     setPanelView('');
     ui.pin.hidden = false;
-    setStatus('Enter four digits, then select Verify. A failed check uses one server attempt.', 'info');
+    setStatus('Enter four digits. The last digit checks them, and a failed check uses one server attempt.', 'info');
     window.setTimeout(() => ui.digitButtons[0]?.focus(), 0);
   }
 
@@ -2644,12 +2655,23 @@
     if (state.busy || !/^\d$/.test(digit) || state.pinDigits.length >= pinLength()) return;
     state.pinDigits.push(digit);
     renderPin();
-    // THE LAST DIGIT SUBMITS, which is what all three televisions do — Roku
-    // PinPad.brs:214, Fire TV PinActivity.kt:150, tvOS RootView.swift:2719-2722.
-    // pinLength(), not a hard 4: the owner pad wants seven. verifyPin() decides
-    // which of the three jobs this is, so a set-PIN pad saves here rather than
-    // checking anything, the same way Fire TV's setMode branch does.
-    if (state.pinDigits.length === pinLength()) verifyPin();
+    // THE LAST DIGIT SUBMITS on the FOUR-digit pad, which is what all three
+    // televisions do — Roku PinPad.brs:214, Fire TV PinActivity.kt:150, tvOS
+    // RootView.swift:2719-2722. verifyPin() decides which of the three jobs it
+    // is, so a set-PIN pad saves here rather than checking anything, the same
+    // way Fire TV's setMode branch does.
+    //
+    // NOT THE OWNER PAD, and this is deliberate — it was written as
+    // `=== pinLength()` and that was wrong twice over:
+    //   * the seventh digit fired POST /devices/self-approve by itself, so
+    //     pinpad.smoke.mjs, which types EIGHT digits to prove the pad stops at
+    //     seven, saw the pad clear itself and read 0 dots instead of 7;
+    //   * self-approve is rate limited to a handful of tries an HOUR, so one
+    //     mistyped digit spent a real attempt and a few typos locked the owner
+    //     out of their own browser for an hour.
+    // The owner pad has no television to match anyway — no TV self-approves —
+    // so it keeps the explicit button below.
+    if (!state.ownerMode && state.pinDigits.length === pinLength()) verifyPin();
   }
 
   function deleteDigit() {
@@ -3683,10 +3705,21 @@
     ui.delete.type = 'button';
     ui.delete.setAttribute('aria-label', 'Delete last digit');
     pad.append(ui.clear, zero, ui.delete);
-    // NO Verify button. The last digit submits (see addDigit), which is the
-    // only route through on all three televisions, so a button here would be a
-    // second one the TVs do not have.
-    ui.pin.append(pinTop, ui.dots, pad);
+    // No Verify button ON THE FOUR-DIGIT PAD. The last digit submits there (see
+    // addDigit), which is the only route through on all three televisions, so a
+    // button would be a second one the TVs do not have.
+    //
+    // The SEVEN-digit owner pad keeps it, and renderPin() is what shows it. That
+    // pad approves this browser against a rate limit measured in tries per hour,
+    // so submitting on a keystroke would spend an attempt on every typo. No
+    // television has this screen, so nothing is out of parity by keeping it.
+    const pinActions = element('div', 'bp-pin-actions');
+    ui.verify = element('button', 'bp-verify', 'Verify');
+    ui.verify.type = 'button';
+    ui.verify.disabled = true;
+    ui.verify.hidden = true;
+    pinActions.appendChild(ui.verify);
+    ui.pin.append(pinTop, ui.dots, pad, pinActions);
 
     const footer = element('div', 'bp-footer');
     ui.refresh = element('button', 'bp-refresh', 'Refresh profiles');
@@ -3795,6 +3828,7 @@
     ui.clear.addEventListener('click', clearPinEntry);
     ui.delete.addEventListener('click', deleteDigit);
     ui.digitButtons.forEach((button) => button.addEventListener('click', () => addDigit(button.dataset.digit || '')));
+    ui.verify.addEventListener('click', verifyPin);
     document.addEventListener('keydown', (event) => {
       if (ui.layer.hidden || state.busy) return;
       if (event.key === 'Tab') {
