@@ -142,7 +142,16 @@
 // bump is the only thing that reaches it. Every earlier note here is about a
 // NEW FILE; this one is the reminder that a changed file can matter just as
 // much when a security decision moved into it.
-const CACHE = 'blazing-shell-v40';
+// v41: the other half of that same gate, in app.js again and no new file again.
+// A capped profile no longer receives the embed url — it arrives sealed in a
+// signed token — so the old playback fallback was handing the server one of our
+// own urls to scrape and getting a 404 back every time. MEASURED against the
+// live addon: forwarding the token answers 200 with a direct media url, the old
+// form answers 404 "Could not resolve embed". A v40 shell therefore still has
+// the gate, but has lost its safety net: when a source dies mid-play there is
+// nothing behind it, and that reads to the viewer as a dead film rather than a
+// dead link.
+const CACHE = 'blazing-shell-v41';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

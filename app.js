@@ -4497,11 +4497,45 @@ function clearPlayerWatchdog() {
   }
 }
 
+/**
+ * The query for the fallback resolve, built from the row URL that just failed.
+ *
+ * A row we failed on is one of OUR urls, not the embed page. Handing the whole
+ * thing to /proxy/resolve as `?url=` asks the server to go and scrape itself,
+ * so the fallback has to unwrap it and forward what it carries.
+ *
+ * Since the parental gate moved server-side, a capped profile never receives
+ * the embed url at all: an embed row arrives as
+ * /proxy/resolve/redirect?t=<signed token>, with the embed url AND the cap
+ * sealed inside one token so the cap cannot be stripped by editing the query.
+ * /proxy/resolve accepts that same `?t=` and answers the same JSON, after
+ * checking the same cap - so forwarding the token keeps the gate intact and
+ * costs the viewer nothing.
+ *
+ * An uncapped row is still /proxy/resolve/redirect?url=<embed>; forward the
+ * embed. Anything else (a debrid link, a direct file) goes as it always did.
+ */
+function resolveQuery(url) {
+  try {
+    const parsed = new URL(url, API_BASE);
+    if (parsed.pathname === '/proxy/resolve/redirect') {
+      const token = parsed.searchParams.get('t');
+      if (token) return `t=${encodeURIComponent(token)}`;
+      const embed = parsed.searchParams.get('url');
+      if (embed) return `url=${encodeURIComponent(embed)}`;
+    }
+  } catch {
+    // Not a URL this browser can parse. Fall through to the plain form, which
+    // is what every build before the gate did with every row.
+  }
+  return `url=${encodeURIComponent(url)}`;
+}
+
 async function resolveViaProxy(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT);
   try {
-    const response = await fetch(`${API_BASE}/proxy/resolve?url=${encodeURIComponent(url)}`, {
+    const response = await fetch(`${API_BASE}/proxy/resolve?${resolveQuery(url)}`, {
       mode: 'cors',
       credentials: 'omit',
       signal: controller.signal,

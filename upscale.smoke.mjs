@@ -25,7 +25,11 @@ import { prepareProfile, selectProfile } from './scripts/profile-fixture.mjs';
 //  10. PLAYBACK: only when that URL fails does /proxy/resolve run, and its URL
 //      is then played;
 //  11. PLAYBACK: a resolver that never answers ends in a visible error, not a
-//      permanent spinner.
+//      permanent spinner;
+//  12. PLAYBACK: a CAPPED row -- /proxy/resolve/redirect?t=<signed token> --
+//      falls back by forwarding the TOKEN, never the whole row url;
+//  13. PLAYBACK: an UNCAPPED row -- /proxy/resolve/redirect?url=<embed> --
+//      falls back by forwarding the EMBED, never the whole row url.
 import { launchBrowser } from './comet.mjs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
@@ -61,9 +65,9 @@ const check = (name, cond, extra = '') => {
 
 const browser = await launchBrowser();
 
-async function openApp({ statusReply, requestReply, resolveReply, streams, streamHang } = {}) {
+async function openApp({ statusReply, requestReply, resolveReply, streams, streamHang, resolveWantsUnwrapped } = {}) {
   const ctx = await browser.newContext();
-  const seen = { status: [], request: [], resolve: [], all: [] };
+  const seen = { status: [], request: [], resolve: [], redirect: [], all: [] };
 
   await ctx.route('**://**/*', async (route) => {
     const req = route.request();
@@ -104,9 +108,33 @@ async function openApp({ statusReply, requestReply, resolveReply, streams, strea
     }
 
     // --- add-on -----------------------------------------------------------
+    // The row a real add-on hands out for an embed site is itself a
+    // /proxy/resolve/redirect url, and the <video> loads it FIRST. Answering
+    // JSON makes the element error, which is exactly what arms the fallback.
+    //
+    // It is kept in its own bucket, and matched BEFORE the branch below, so
+    // that `seen.resolve` counts only the fallback call. Folding the two
+    // together would make scenarios 12 and 13 assert against the row they are
+    // supposed to prove was unwrapped.
+    if (url.includes('/proxy/resolve/redirect')) {
+      seen.redirect.push(url);
+      return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'Not found' }) });
+    }
     if (url.includes('/proxy/resolve')) {
       seen.resolve.push(url);
-      const reply = resolveReply || { status: 404, body: { error: 'Not found' } };
+      let reply = resolveReply || { status: 404, body: { error: 'Not found' } };
+      // MODEL THE REAL SERVER, not a resolver that says yes to anything.
+      // /proxy/resolve fetches whatever ?url= names and scrapes it for a media
+      // link. Handed one of our OWN /proxy/resolve/redirect urls it finds no
+      // media and answers 404 -- measured against the live add-on on
+      // 14 Sep 2026. A mock that answered 200 regardless would let the broken
+      // fallback of scenarios 12 and 13 look like it still played the film.
+      if (resolveWantsUnwrapped) {
+        const asked = new URL(url).searchParams.get('url') || '';
+        if (asked.includes('/proxy/resolve/redirect')) {
+          reply = { status: 404, body: { error: 'Could not resolve embed' } };
+        }
+      }
       if (reply.hang) return;
       return route.fulfill({ status: reply.status, contentType: 'application/json', body: JSON.stringify(reply.body) });
     }
@@ -366,6 +394,50 @@ const readToasts = (page) => page.evaluate(() => Array.from(document.querySelect
   }));
   check('a dead resolver shows a visible failure', state.msg.length > 0, state.msg);
   check('the spinner is not left turning forever', state.spinning === false);
+  await ctx.close();
+}
+
+// === 12 & 13: the fallback unwraps our own row instead of resending it =====
+//
+// WHY THIS EXISTS. Since the parental gate moved server-side, an embed row for
+// a CAPPED profile arrives as /proxy/resolve/redirect?t=<signed token>, with
+// the embed url and the cap sealed inside one token so the cap cannot be
+// stripped by editing the query. The fallback used to resend that whole row as
+// ?url=, which asks the add-on to go and scrape ITSELF.
+//
+// MEASURED against the live add-on, 14 Sep 2026, same token both ways:
+//   /proxy/resolve?t=<token>            -> 200 {"url":"https://...tapecontent..."}
+//   /proxy/resolve?url=<whole row url>  -> 404 {"error":"Could not resolve embed"}
+//
+// So the safety net was not merely wasteful, it was dead for every capped
+// viewer, and a source dying mid-film read as a dead film. Nothing failed: the
+// suite was green, because no case ever played a row that was one of our own
+// urls. These two are that case.
+for (const [n, label, rowQuery, want, TOKEN_OR_EMBED] of [
+  [12, 'a capped row forwards its TOKEN', 't', 't=', 'v1.abc+def/ghi='],
+  [13, 'an uncapped row forwards its EMBED', 'url', 'url=', 'https://embed.example.test/e/xyz789'],
+]) {
+  const ROW = `https://addon.lyreosai.com/proxy/resolve/redirect?${rowQuery}=${encodeURIComponent(TOKEN_OR_EMBED)}`;
+  const { ctx, page, seen } = await openApp({
+    streams: [{ name: '1080p', title: 'test', url: ROW }],
+    resolveReply: { status: 200, body: { url: RESOLVED_URL } },
+    resolveWantsUnwrapped: true,
+  });
+  await page.waitForSelector('.stream-row', { timeout: 8000 });
+  await page.click('.stream-row');
+  await page.waitForFunction(() => !document.querySelector('#player').hidden, null, { timeout: 5000 });
+  await page.waitForFunction(
+    (v) => document.querySelector('#video').getAttribute('src') === v,
+    RESOLVED_URL,
+    { timeout: 20000 }
+  ).catch(() => {});
+  const asked = seen.resolve[0] || '';
+  check(`${n}: the row itself was tried first`, seen.redirect.length === 1, String(seen.redirect.length));
+  check(`${n}: ${label} — the resolver was reached`, seen.resolve.length === 1, String(seen.resolve.length));
+  check(`${n}: ${label} — it carries ${want}${'' }`, asked.includes(`${want}${encodeURIComponent(TOKEN_OR_EMBED)}`), asked);
+  check(`${n}: ${label} — the whole row url is NOT resent`, !asked.includes(encodeURIComponent(ROW)), asked);
+  const src = await page.evaluate(() => document.querySelector('#video').getAttribute('src'));
+  check(`${n}: ${label} — the resolved url is what plays`, src === RESOLVED_URL, String(src));
   await ctx.close();
 }
 
