@@ -214,13 +214,91 @@ await page.evaluate((id) => {
 //
 // The rule, if youtube.js changes again: this number is RESOLVE_ATTEMPTS x
 // RESOLVE_TIMEOUT_MS + the pauses, plus headroom. Never below it.
-await page.waitForFunction(() => !document.getElementById('player').hidden, { timeout: 75_000 })
-  .catch(() => {});
-const opened = await page.evaluate(() => ({
-  playerOpen: !document.getElementById('player').hidden,
-  title: (document.getElementById('player-title').textContent || '').trim(),
-  status: (document.getElementById('yt-status').textContent || '').trim(),
-}));
+const PRESS_WAIT_MS = 75_000;
+const pressPlay = async () => {
+  // Returns as soon as EITHER the player opens or the app says it was rate
+  // limited — not on the player alone. A 429 lands in about 150ms and never
+  // opens the player, so waiting the full 75s for it would cost 75s per attempt:
+  // two retries would then run past the runner's 240s per-suite timeout and this
+  // fix would fail the gate a different way, which is not a fix.
+  await page.waitForFunction(() => !document.getElementById('player').hidden
+      || /too many requests/i.test(document.getElementById('yt-status').textContent || ''),
+    { timeout: PRESS_WAIT_MS }).catch(() => {});
+  return page.evaluate(() => ({
+    playerOpen: !document.getElementById('player').hidden,
+    title: (document.getElementById('player-title').textContent || '').trim(),
+    status: (document.getElementById('yt-status').textContent || '').trim(),
+  }));
+};
+
+let opened = await pressPlay();
+
+// A 429 IS NOT A FAILURE OF THIS APP, AND WAITING IS WHAT THE APP ASKS FOR.
+//
+// This suite drives the LIVE fleet on purpose — a mocked resolver cannot prove a
+// video decodes — and the resolver is rate limited. So the run's verdict
+// depended on how recently anything else had touched /proxy/yt-resolve. Measured
+// 14 Sep 2026 in CI: `HTTP 429 after 157ms`, 46/47 suites green, the whole gate
+// red, and because `deploy` needs `gate`, Pages quietly stopped following main
+// for two commits.
+//
+// The app is not wrong to stop: auto-retrying into a rate limiter is how a
+// limiter turns into an outage. It tells the viewer "Wait about 22 seconds and
+// press play again", and a viewer would. So does this now — the server names the
+// number, so it is READ rather than guessed, and a limiter whose window changes
+// does not need this file edited. Anything that is not a rate-limit message
+// falls straight through and still fails, which is the point.
+// youtube.js has TWO wordings for this, and matching only the first would leave
+// the other failing exactly as before. It names the seconds when the server sent
+// a retryAfterMs and says "Wait a moment" when it did not, so the trigger is the
+// sentence they share and the number is read only when it is there.
+// AND THE WHOLE LOOP LIVES INSIDE ONE WALL-CLOCK BUDGET, because waiting is
+// only the right answer while there is still time to wait in.
+//
+// scripts/run-smokes.mjs:178 kills a suite at SUITE_TIMEOUT_MS — 240s — with a
+// bare SIGKILL of the process group. A SIGKILL takes the RESOLVE ATTEMPTS block
+// below with it, and that block is the only thing that tells a 429 from a 403
+// from a resolver that never answered. So an unbudgeted retry does not just
+// risk the gate, it trades a red-but-DIAGNOSABLE run for a red-and-SILENT one:
+// "TIMEOUT killed after 240s — this suite hangs", about a suite that does not
+// hang. That is strictly worse than the failure this change exists to fix.
+//
+// The ceiling without a budget, all read from this file: two sleeps of up to
+// 62s (a 60s limiter window + 2) and three presses of up to 75s, plus the ~33s
+// decode block = about 387s. Over 240 with room to spare.
+//
+// So before each sleep, check that the sleep AND the press it pays for AND the
+// measurement that has to follow all still fit. process.uptime() is the right
+// clock: it counts from this process's start, which is the same instant the
+// runner started its timer.
+const RATE_LIMIT_RETRIES = 2;
+const RATE_LIMIT_FALLBACK_S = 30;
+const SUITE_BUDGET_MS = Number(process.env.SMOKE_TIMEOUT_MS) || 240_000;
+// What still has to happen after the last press: the 30s decode deadline, its
+// 3s climb re-read, and teardown. Rounded up, because being early costs one
+// retry and being late costs the whole report.
+const TAIL_MS = 40_000;
+for (let attempt = 1; !opened.playerOpen && attempt <= RATE_LIMIT_RETRIES; attempt += 1) {
+  const status = opened.status || '';
+  if (!/too many requests/i.test(status)) break;
+  const named = /wait about (\d+) second/i.exec(status);
+  const asked = named ? Number(named[1]) : RATE_LIMIT_FALLBACK_S;
+  const secs = Math.min(90, asked + 2);
+  const spentMs = process.uptime() * 1000;
+  const needMs = secs * 1000 + PRESS_WAIT_MS + TAIL_MS;
+  if (spentMs + needMs > SUITE_BUDGET_MS) {
+    console.log(`\n  RATE LIMITED — the app asked for ${secs}s, but this suite is ${(spentMs / 1000).toFixed(0)}s into a ${(SUITE_BUDGET_MS / 1000).toFixed(0)}s budget and one more press could need ${(needMs / 1000).toFixed(0)}s.`);
+    console.log('  Not waiting: a report that arrives is worth more than a retry that gets SIGKILLed mid-flight.');
+    break;
+  }
+  console.log(`\n  RATE LIMITED — the app asked for ${named ? `${asked}s` : 'a moment'}; waiting ${secs}s and pressing play again (${attempt}/${RATE_LIMIT_RETRIES})`);
+  await new Promise((r) => setTimeout(r, secs * 1000));
+  startedAt = Date.now();
+  await page.evaluate((id) => {
+    document.querySelector(`#yt-rows .yt-card[data-video-id="${id}"]`).click();
+  }, picked.id);
+  opened = await pressPlay();
+}
 if (resolveLog.length) {
   console.log('\n  RESOLVE ATTEMPTS');
   for (const line of resolveLog) console.log(`    ${line}`);
