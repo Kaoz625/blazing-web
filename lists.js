@@ -44,9 +44,6 @@
   const MIGRATED_KEY = 'blazing-lists-migrated-v1:';
   const CHANGED = 'blazing-lists-changed';
   const TIMEOUT_MS = 12000;
-  /* One title's worth of fields is small; a runaway list is not. The old
-     readList() capped at 100 for the same reason. */
-  const MAX_ITEMS = 200;
 
   const WATCHLIST = 'watchlist';
   const COLLECTION = 'collection';
@@ -158,19 +155,18 @@
   /** Newest first, deduplicated by id. The Roku sorts here too (FleetNewestFirst);
    *  the fleet stores insertion order and does not sort.
    *
-   *  THE CAP COMES AFTER THE SORT, and the order of those two steps is the
-   *  whole of this function. Wire order is OLDEST first — blazing-fleet
-   *  profiles.js:748 says so in its own words ("Order is insertion order") and
-   *  addToList appends with `[...items, entry]` at :795 — and the server puts no
-   *  cap on a list at all, so a household saving across the Roku and the Fire
-   *  Stick can hand this more than MAX_ITEMS rows. Capping inside the walk kept
-   *  the 200 OLDEST and threw the newest away before the sort could ever see
-   *  them: a title saved last week was missing from the Library, its detail
-   *  sheet drew "+ Watchlist" instead of "in watchlist", and pressing that
-   *  upserted a row the next refresh() dropped again — the fleet's upsert KEEPS
-   *  the original addedAt, so a re-saved title stays past index 200 for ever.
-   *  The Roku has no cap here at all (Fleet.brs FleetEntries), so the browser
-   *  was the only client silently losing rows. */
+   *  THERE IS NO CAP, because no other client caps a saved list and the server
+   *  does not either. Wire order is OLDEST first — blazing-fleet profiles.js:748
+   *  says so in its own words ("Order is insertion order") and addToList appends
+   *  with `[...items, entry]` at :795 — so a household saving across the Roku
+   *  and the Fire Stick can hand this a long list, and the browser used to be
+   *  the only client that silently dropped its tail: a title past the cap was
+   *  missing from the Library, its detail sheet drew "+ Watchlist" instead of
+   *  "in watchlist", and pressing that upserted a row the next refresh() dropped
+   *  again — the fleet's upsert KEEPS the original addedAt, so a re-saved title
+   *  stayed past the cap for ever. The Roku walks every row (Fleet.brs
+   *  FleetEntries) and so does Fire TV (ListsClient.kt parseSnapshot); this now
+   *  matches them. */
   function parseList(rawArray) {
     if (!Array.isArray(rawArray)) return [];
     const seen = new Set();
@@ -182,7 +178,7 @@
       items.push(item);
     }
     items.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
-    return items.slice(0, MAX_ITEMS);
+    return items;
   }
 
   /**
@@ -387,8 +383,7 @@
     }
     const pending = (Array.isArray(legacy) ? legacy : [])
       .map(toWireItem)
-      .filter((item) => item.id)
-      .slice(0, MAX_ITEMS);
+      .filter((item) => item.id);
     let moved = false;
     let complete = true;
     for (const item of pending) {

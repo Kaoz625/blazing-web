@@ -240,7 +240,6 @@ try {
       check(await page.locator('.bp-layer').isVisible() && await page.locator('.bp-close').isHidden(), 'new-pin: Back from PIN cannot reopen the old session');
       await page.locator('.bp-profile:not(.bp-profile-add)').first().click();
       for (let digit = 0; digit < 4; digit++) await page.locator('.bp-digit[data-digit="1"]').click();
-      await page.locator('.bp-pin .bp-verify').click();
     }
     await page.waitForFunction(() => window.__profileSelections.length === 2);
     const selection = await page.evaluate(() => window.__profileSelections.at(-1));

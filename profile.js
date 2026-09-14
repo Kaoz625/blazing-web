@@ -720,10 +720,6 @@
     BUSY_CONTROLS.forEach((key) => {
       if (ui[key]) ui[key].disabled = busy;
     });
-    // pinLength(), not a hard 4: in owner mode the pad wants seven, and the old
-    // literal left Verify disabled after every setBusy(false) until renderPin()
-    // happened to run again.
-    if (ui.verify) ui.verify.disabled = busy || state.pinDigits.length !== pinLength();
     // The pencil and the icon tiles are in this list for the same reason the
     // profile tiles are: they are built by renderProfileList()/showIconPicker()
     // rather than held in `ui`, so setBusy() cannot reach them by key.
@@ -1541,10 +1537,6 @@
     // lie on the parental pad too — Back there returns to the sheet the pad was
     // opened from, with nothing changed.
     ui.back.textContent = (state.ownerMode || state.padPurpose) ? 'Back' : 'Choose another profile';
-    // Setting a PIN is not a check of anything, so the button must not claim to
-    // verify one. Roku's KeyboardDialog says "Save" on the same screen
-    // (MainScene.brs:5107-5120) and this matches it.
-    ui.verify.textContent = state.padPurpose === 'newpin' ? 'Save' : 'Verify';
     ui.dots.replaceChildren();
     for (let index = 0; index < length; index += 1) {
       const dot = element('span', 'bp-dot');
@@ -1553,7 +1545,6 @@
       ui.dots.appendChild(dot);
     }
     ui.dots.setAttribute('aria-label', `${state.pinDigits.length} of ${length} digits entered`);
-    ui.verify.disabled = state.busy || state.pinDigits.length !== length;
     ui.clear.disabled = state.busy || state.pinDigits.length === 0;
     ui.delete.disabled = state.busy || state.pinDigits.length === 0;
   }
@@ -1719,8 +1710,12 @@
     hideAllScreens();
     setPanelView('profiles');
     ui.profiles.hidden = false;
-    ui.kicker.textContent = 'Blazing Stream';
-    ui.heading.textContent = 'Who is watching?';
+    // THE AGREED PAIR: a play mark plus the wordmark, over "Choose a Profile".
+    // Copied verbatim from the two clients that already carry it — Fire TV
+    // ProfileGateActivity.kt:822/:830 ("▶  BLAZING STREAM", two spaces) and
+    // tvOS RootView.swift:1931-1940.
+    ui.kicker.textContent = '▶  BLAZING STREAM';
+    ui.heading.textContent = 'Choose a Profile';
     ui.copy.textContent = state.profiles.length ? 'Pick up where you left off.' : 'Add your first profile to start watching.';
     if (ui.signOut) ui.signOut.hidden = !state.credentials;
     renderProfileList();
@@ -2649,6 +2644,12 @@
     if (state.busy || !/^\d$/.test(digit) || state.pinDigits.length >= pinLength()) return;
     state.pinDigits.push(digit);
     renderPin();
+    // THE LAST DIGIT SUBMITS, which is what all three televisions do — Roku
+    // PinPad.brs:214, Fire TV PinActivity.kt:150, tvOS RootView.swift:2719-2722.
+    // pinLength(), not a hard 4: the owner pad wants seven. verifyPin() decides
+    // which of the three jobs this is, so a set-PIN pad saves here rather than
+    // checking anything, the same way Fire TV's setMode branch does.
+    if (state.pinDigits.length === pinLength()) verifyPin();
   }
 
   function deleteDigit() {
@@ -3416,7 +3417,7 @@
     ui.close.type = 'button';
     const kicker = element('p', 'bp-kicker', 'Profiles');
     ui.kicker = kicker;
-    const heading = element('h2', 'bp-heading', 'Who is watching?');
+    const heading = element('h2', 'bp-heading', 'Choose a Profile');
     heading.id = 'bp-heading';
     ui.heading = heading;
     // Two lines, because the panel is now two different things: a gate on first
@@ -3676,16 +3677,16 @@
     zero.dataset.digit = '0';
     zero.setAttribute('aria-label', 'Digit 0');
     ui.digitButtons.push(zero);
-    ui.delete = element('button', 'bp-action', 'Delete');
+    // "⌫" and "Clear", the vocabulary tvOS uses (RootView.swift:2683). The
+    // glyph carries no text, so the aria-label below is what a reader hears.
+    ui.delete = element('button', 'bp-action', '⌫');
     ui.delete.type = 'button';
     ui.delete.setAttribute('aria-label', 'Delete last digit');
     pad.append(ui.clear, zero, ui.delete);
-    const pinActions = element('div', 'bp-pin-actions');
-    ui.verify = element('button', 'bp-verify', 'Verify');
-    ui.verify.type = 'button';
-    ui.verify.disabled = true;
-    pinActions.appendChild(ui.verify);
-    ui.pin.append(pinTop, ui.dots, pad, pinActions);
+    // NO Verify button. The last digit submits (see addDigit), which is the
+    // only route through on all three televisions, so a button here would be a
+    // second one the TVs do not have.
+    ui.pin.append(pinTop, ui.dots, pad);
 
     const footer = element('div', 'bp-footer');
     ui.refresh = element('button', 'bp-refresh', 'Refresh profiles');
@@ -3794,7 +3795,6 @@
     ui.clear.addEventListener('click', clearPinEntry);
     ui.delete.addEventListener('click', deleteDigit);
     ui.digitButtons.forEach((button) => button.addEventListener('click', () => addDigit(button.dataset.digit || '')));
-    ui.verify.addEventListener('click', verifyPin);
     document.addEventListener('keydown', (event) => {
       if (ui.layer.hidden || state.busy) return;
       if (event.key === 'Tab') {

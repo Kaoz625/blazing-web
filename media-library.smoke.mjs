@@ -87,7 +87,7 @@ try {
   const faults=[];page.on('pageerror',error=>faults.push(error.message));
   async function choose(name,pin=false){
     await page.getByRole('button',{name:`Choose ${name}${pin?', PIN required':''}`,exact:true}).click();
-    if(pin){for(let n=0;n<4;n++)await page.locator('.bp-digit[data-digit="1"]').click();await page.locator('.bp-pin .bp-verify').click();}
+    if(pin){for(let n=0;n<4;n++)await page.locator('.bp-digit[data-digit="1"]').click();}
     await page.locator('.bp-layer').waitFor({state:'hidden'});
   }
   async function profile(name,pin=false){await page.locator('.bp-connect').click();await choose(name,pin);}

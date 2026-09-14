@@ -5386,6 +5386,11 @@ function startSync(meta) {
   stopSync();
   syncInterval = setInterval(() => {
     if (!video.duration || video.paused) return;
+    // THE FIRST TEN SECONDS ARE NOT A VIEWING. Opening a title and closing it
+    // again must not put it in Continue Watching. Fire TV draws the same line
+    // (PlayerActivity.kt:1023 `if (pos < 10_000) return`) and so does tvOS
+    // (RootView.swift:876 `position >= 10`); currentTime is in seconds here.
+    if (video.currentTime < 10) return;
     const profileId = state.profileId;
     if (!profileId) return;
     fetch(`${API_BASE}/api/sync/progress`, {

@@ -346,7 +346,6 @@ try {
   ok((await page.locator('.bp-pin strong').innerText()).includes('Sam'),
     'B28: raising the rating limit asks for that profile\'s PIN first');
   for (const digit of ['1', '2', '3', '4']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
-  await page.locator('.bp-pin .bp-verify').click();
   // WAIT FOR THE LABEL, not for the sheet. The sheet comes back the instant the
   // PIN is accepted; the PATCH goes out after that, and its echo is what
   // redraws the row. Checking the request list on the sheet alone is a race —
@@ -364,7 +363,6 @@ try {
   await page.locator('#bp-parental-adult').click();
   await page.waitForSelector('.bp-pin:not([hidden])', { timeout: 8000 });
   for (const digit of ['1', '2', '3', '4']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
-  await page.locator('.bp-pin .bp-verify').click();
   await page.waitForFunction(
     () => (document.getElementById('bp-parental-adult')?.textContent || '').includes('ON'),
     null, { timeout: 8000 },
@@ -378,20 +376,21 @@ try {
   const verifiesBefore = verifies.length;
   await page.locator('#bp-parental-pin').click();
   await page.waitForSelector('.bp-pin:not([hidden])', { timeout: 8000 });
-  for (const digit of ['1', '2', '3', '4']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
   // SAME RACE AS THE PATCH ABOVE, and the same fix. `waitForSelector` on
   // `.bp-pin strong` is not a barrier here: that element is ALREADY on screen
-  // saying "Sam" when Verify is pressed, so the wait returns at once and the
-  // read below can land before the POST /verify round trip has swapped the pad
-  // to its newpin stage (profile.js:1537 sets the heading, :1547 the button
-  // label). MEASURED 12 Sep 2026: identical code in this block passed on one
-  // run and read "Sam" on the next.
+  // saying "Sam" when the last digit goes in, so the wait returns at once and
+  // the read below can land before the POST /verify round trip has swapped the
+  // pad to its newpin stage (renderPin sets the heading). MEASURED 12 Sep 2026:
+  // identical code in this block passed on one run and read "Sam" on the next.
   //
   // So wait for the heading to CHANGE, and then assert what it changed TO. The
   // wait names no expected text, so it cannot pass the assertion for free — a
   // pad that advanced to the wrong stage still goes red here.
+  //
+  // READ IT BEFORE THE DIGITS: the fourth digit submits the pad on its own now
+  // (profile.js addDigit), so there is no press after it to read at.
   const firstPadHeading = await page.locator('.bp-pin strong').innerText();
-  await page.locator('.bp-pin .bp-verify').click();
+  for (const digit of ['1', '2', '3', '4']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
   await page.waitForFunction(
     (before) => {
       const node = document.querySelector('.bp-pin:not([hidden]) strong');
@@ -401,9 +400,7 @@ try {
   );
   ok((await page.locator('.bp-pin strong').innerText()).includes('New PIN'),
     'B3: the second pad asks for the NEW PIN and says so', await page.locator('.bp-pin strong').innerText());
-  ok((await page.locator('.bp-pin .bp-verify').innerText()).trim() === 'Save', 'and its button says Save, not Verify');
   for (const digit of ['9', '8', '7', '6'] ) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
-  await page.locator('.bp-pin .bp-verify').click();
   await page.waitForFunction(
     () => (document.getElementById('bp-parental-note')?.textContent || '') === 'Saved.',
     null, { timeout: 8000 },
@@ -416,7 +413,6 @@ try {
   await page.locator('#bp-parental-pin-remove').click();
   await page.waitForSelector('.bp-pin:not([hidden])', { timeout: 8000 });
   for (const digit of ['9', '8', '7', '6']) await page.locator(`.bp-digit[data-digit="${digit}"]`).click();
-  await page.locator('.bp-pin .bp-verify').click();
   await page.waitForFunction(
     () => (document.getElementById('bp-parental-pin')?.textContent || '').trim() === 'Set PIN',
     null, { timeout: 8000 },
