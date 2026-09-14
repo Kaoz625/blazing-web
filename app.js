@@ -4207,6 +4207,11 @@ async function resolveStreams(meta, contentId = meta.id) {
     || { profileId: state.profileId, audio: 'english', subtitles: 'english' };
   if (!state.profileId || preferences.profileId !== state.profileId) throw new Error('Choose a profile first.');
   const query = window.BlazingStreamPreferences?.query() || 'audio=en&sub=en';
+  // The viewer's rating cap rides ALONGSIDE the language preferences, never
+  // instead of them — see streamCapParameter() for why the addon needs it and
+  // why an absent `cap` still means today's behaviour.
+  const cap = streamCapParameter();
+  const search = cap ? `${query}${query ? '&' : ''}cap=${cap}` : query;
   // THE SOURCE SEARCH GETS 30s, NOT THE 20s EVERY OTHER CALL GETS. This is the
   // one request on the page that fans out across every configured addon before
   // it can answer, and 20s was cutting it off mid-answer: measured live on the
@@ -4218,7 +4223,7 @@ async function resolveStreams(meta, contentId = meta.id) {
   // keeps FETCH_TIMEOUT — a catalog row that hangs should give up early, since
   // Home draws the rows that did answer.
   const data = await fetchJSON(
-    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${query}`,
+    `${API_BASE}/stream/${encodeURIComponent(meta.type)}/${encodeURIComponent(contentId)}.json?${search}`,
     { timeoutMs: STREAM_SEARCH_TIMEOUT }
   );
   // `refused` is the addon telling us WHICH hosts had this title and why none
@@ -5871,6 +5876,46 @@ function ratingAllowed(tier) {
   const tierIndex = RATINGS.indexOf(String(tier || '').toLowerCase());
   if (tierIndex < 0) return String(cap).toLowerCase() !== 'general';
   return tierIndex <= capIndex;
+}
+
+/**
+ * The tier the ADDON is told to enforce, or '' to send no `cap` at all.
+ *
+ * WHY THE SERVER HAS TO BE TOLD. Everything above this line is a drawing rule:
+ * ratingAllowed() decides which cards appear, and that is all it has ever
+ * decided. Nothing stopped anything that could reach a /play/<id> URL — a
+ * shared link, a modified client, a plain curl — from fetching 18+ video with
+ * no check whatsoever, because the cap never left the browser. The addon now
+ * stamps this tier onto the playback capability it mints and refuses the fetch
+ * when the title is rated above it, so the cap has to travel WITH the request.
+ *
+ * AN ABSENT `cap` MEANS "UNCAPPED" ON THE SERVER, which is exactly today's
+ * behaviour, so this is safe to ship before the server half lands. That is why
+ * nobody-connected returns '' rather than a guess: it is the one honest
+ * "there is no cap to enforce".
+ *
+ * THE EFFECTIVE VALUE, NEVER THE STORED ONE, and there are two steps to that:
+ *   - profile.js:307 already flattens effectiveMaxRating over maxRating before
+ *     it broadcasts, so state.profileCap is the clamped field, not the raw one.
+ *   - a Kids profile is pinned to 'general' here for the same reason
+ *     mangaAllowedNow() tests both flags: isKids and the cap are INDEPENDENT
+ *     fields (see state.profileIsKids), so a Kids profile carrying a mature cap
+ *     walks straight through a cap-only check.
+ *
+ * Lowercased and checked against RATINGS because the wire contract is those
+ * four names and nothing else — the same four every other client knows. An
+ * unrecognised tier caps at 'general', which is the rule restoreProfileSession()
+ * already applies to a stored cap: unknown is never a reason to guess upward.
+ */
+function streamCapParameter() {
+  if (!state.profileId) return '';
+  if (state.profileIsKids) return 'general';
+  const cap = String(state.profileCap || '').toLowerCase();
+  // A connected profile with NO cap is the same unknown ratingAllowed() already
+  // reads as the strictest tier (`state.profileCap || 'general'`). It must not
+  // become "uncapped" the moment it goes on the wire.
+  if (!cap) return 'general';
+  return RATINGS.includes(cap) ? cap : 'general';
 }
 
 /* ── What a title is RATED, for screens whose items carry no certification ───

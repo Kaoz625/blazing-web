@@ -26,6 +26,13 @@
  * So this suite does not check that a variable got set. It checks the four
  * things a restore is FOR, and it checks the two cases a restore must refuse.
  *
+ * SCENARIO 4 IS HERE FOR THE SAME REASON, one layer along. A restore is the
+ * path that decides who is watching WITHOUT a click, so it is also the path
+ * that decides which rating cap goes on the wire — and since DEFECT 5 the
+ * addon enforces that cap server-side. A restore that revives the viewer but
+ * not their cap would look identical on screen and hand a child an adult
+ * playback capability.
+ *
  *   node profile-restore.smoke.mjs
  */
 import { launchBrowser } from './comet.mjs';
@@ -186,6 +193,14 @@ try {
     ok(Boolean(streamCall), 'a source request actually went out');
     ok(Boolean(streamCall && /audio=/.test(streamCall.search)),
       'and it carried the viewer\'s language preferences', streamCall ? streamCall.search : 'no call');
+    // DEFECT 5. The cap used to stay in the browser, so anything that could
+    // reach a /play/<id> URL fetched 18+ video with no check at all. It now
+    // rides on the stream request, and the addon stamps it onto the capability
+    // it mints. This adult viewer must say so out loud, and the language
+    // preferences beside it must survive untouched.
+    ok(streamCall?.search
+      && new URLSearchParams(streamCall.search).get('cap') === 'adult',
+    'an ADULT viewer sends cap=adult on the stream request', streamCall ? streamCall.search : 'no call');
 
     // ── books search ───────────────────────────────────────────────────────
     // The detail dialog is modal and intercepts every pointer event, so it has
@@ -243,6 +258,52 @@ try {
     ok(state.prefsProfileId === null,
       'a remembered profile the server no longer lists is NOT restored', String(state.prefsProfileId));
     ok(state.gateOpen === true, 'and that browser is asked to choose again');
+    await ctx.close();
+  }
+
+  // ── 4. A CHILD SAYS 'general' ON THE WIRE, WHATEVER THE RECORD SAYS ───────
+  //
+  // DEFECT 5, the half a cap-only check cannot catch. isKids and maxRating are
+  // INDEPENDENT fields — app.js:714-721 says so in as many words, and the Roku
+  // gates Manga on both for the same reason — so this fixture is a Kids profile
+  // carrying maxRating:'adult'. It is not a silly shape: the fleet clamps on
+  // CREATE, so any record made before that rule, or edited around it, lands
+  // here. A cap-only implementation reads 'adult', sends cap=adult, and the
+  // addon then mints an adult capability FOR A CHILD — which is the whole
+  // defect moved one layer down rather than fixed.
+  //
+  // It is also why the assertion is cap === 'general' and not "cap is present".
+  {
+    const KID = { id: 'kid', name: 'Sam', maxRating: 'adult', allowAdult: true, isKids: true, hasPin: false };
+    const { ctx, page, seen, faults } = await run(browser, {
+      remembered: { ...REMEMBERED('kid'), isKids: true },
+      profiles: [KID],
+    });
+    await page.waitForFunction(
+      () => window.BlazingStreamPreferences?.current().profileId === 'kid',
+      null, { timeout: 20000 },
+    ).catch(() => {});
+    await page.getByRole('button', { name: `View ${TITLE.name}`, exact: true }).first().click();
+    await page.locator('#detail-streams .stream-row').first().waitFor({ timeout: 20000 }).catch(() => {});
+
+    const kidCall = seen.find((r) => r.path.startsWith('/stream/'));
+    ok(Boolean(kidCall), 'a kids profile still resolves sources at all', kidCall ? kidCall.search : 'no call');
+    ok(kidCall?.search && new URLSearchParams(kidCall.search).get('cap') === 'general',
+      'a KIDS viewer sends cap=general even though the stored record says adult',
+      kidCall ? kidCall.search : 'no call');
+    // The cap is an ADDITION. A parental fix that quietly drops the language
+    // preferences would pass the line above and break every source search.
+    ok(kidCall?.search && /(^|[?&])audio=/.test(kidCall.search) && /[?&]sub=/.test(kidCall.search),
+      'and the audio/subtitle preferences are still on the same request',
+      kidCall ? kidCall.search : 'no call');
+    // Nothing else joined the query. The addon asked for the cap, not for an
+    // identity, and a profile id on a public-ish URL is exactly what DEFECT 5
+    // is about not leaking.
+    ok(kidCall?.search && ![...new URLSearchParams(kidCall.search).keys()]
+      .some((key) => !['audio', 'sub', 'cap'].includes(key)),
+    'and nothing else was added — no profile id, no device id',
+    kidCall ? kidCall.search : 'no call');
+    ok(faults.length === 0, 'no page errors for a kids restore', faults.join(' | '));
     await ctx.close();
   }
 } finally {
