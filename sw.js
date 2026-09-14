@@ -129,7 +129,20 @@
 // is also a GATE bump: sources.js is what hides that row from a capped or Kids
 // profile, so a shell that serves the new markup without it would show the row
 // to everybody.
-const CACHE = 'blazing-shell-v39';
+// v40: DEFECT 5 — no new file this time, and that is exactly why it nearly went
+// out unbumped. app.js is the only thing that changed, and it is the file that
+// now puts the viewing profile's rating cap on every /stream request. The addon
+// grew a server-side gate to read that cap and refuse a title above it, and an
+// ABSENT cap means "uncapped" on the server, deliberately, so that every client
+// shipped before the gate keeps working.
+//
+// Put those two facts together and an installed PWA still holding v39 is not
+// merely stale — it is the one client that silently opts itself OUT of the
+// parental gate, for ever, because it never asks for the new app.js. A shell
+// bump is the only thing that reaches it. Every earlier note here is about a
+// NEW FILE; this one is the reminder that a changed file can matter just as
+// much when a security decision moved into it.
+const CACHE = 'blazing-shell-v40';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
