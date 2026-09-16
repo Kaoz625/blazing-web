@@ -234,7 +234,7 @@
   function addStyle() {
     const style = element('style');
     style.textContent = `
-      .wp-launch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
+      .wp-launch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
       .wp-launch:hover { background: var(--surface-focus, #1c1c1f); }
       .wp-launch-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.3); flex: 0 0 auto; }
       .wp-launch[data-hint="true"] .wp-launch-dot { background: #34d97a; animation: wp-pulse-dot 1.6s ease-in-out infinite; }
@@ -243,7 +243,7 @@
 
       .wp-join-layer { position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; padding: 16px; }
       .wp-join-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
-      .wp-join-panel { position: relative; width: min(420px, 100%); border: 1px solid rgba(255,255,255,.12); border-radius: 24px; padding: 24px; color: var(--text, #f7f7f8); background: var(--surface, #141416); box-shadow: 0 30px 100px rgba(0,0,0,.7); }
+      .wp-join-panel { position: relative; width: min(420px, 100%); border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 24px; padding: 24px; color: var(--text, #f7f7f8); background: var(--surface, #0E0A0C); box-shadow: 0 30px 100px rgba(0,0,0,.7); }
       .wp-join-close { position: absolute; top: 13px; right: 13px; min-width: 42px; min-height: 42px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }
       .wp-join-close:hover { background: rgba(255,255,255,.12); }
       .wp-join-kicker { margin: 0 48px 7px 0; color: var(--accent, #ff3d47); font-size: 12px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
@@ -257,7 +257,7 @@
       .wp-join-status { min-height: 22px; margin: 14px 0 0; color: var(--muted, #a3a3aa); font-size: 13px; line-height: 1.4; }
       .wp-join-status[data-state="error"] { color: #ff9aa1; }
 
-      .wp-panel { position: fixed; z-index: 70; right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); width: min(360px, calc(100vw - 24px)); max-height: min(78vh, 640px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 22px; color: var(--text, #f7f7f8); background: var(--surface, #141416); box-shadow: 0 26px 80px rgba(0,0,0,.6); }
+      .wp-panel { position: fixed; z-index: 70; right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); width: min(360px, calc(100vw - 24px)); max-height: min(78vh, 640px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 22px; color: var(--text, #f7f7f8); background: var(--surface, #0E0A0C); box-shadow: 0 26px 80px rgba(0,0,0,.6); }
       .wp-head { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; padding: 13px 10px 13px 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
       .wp-head-dot { width: 9px; height: 9px; border-radius: 50%; background: #34d97a; flex: 0 0 auto; animation: wp-pulse-dot 1.6s ease-in-out infinite; }
       .wp-head-dot[data-state="lost"] { background: #ffb020; animation: none; }
@@ -305,7 +305,7 @@
       .wp-chat-empty { margin: 8px 0; color: var(--quiet, #6d6d75); font-size: 12px; }
 
       .wp-chat-form { display: flex; gap: 7px; flex: 0 0 auto; padding: 10px 14px calc(12px + var(--safe-bottom, 0px)); border-top: 1px solid rgba(255,255,255,.08); }
-      .wp-chat-input { flex: 1; min-width: 0; min-height: 38px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 0 13px; color: var(--text, #fff); background: rgba(255,255,255,.04); font-size: 13px; }
+      .wp-chat-input { flex: 1; min-width: 0; min-height: 38px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 999px; padding: 0 13px; color: var(--text, #fff); background: rgba(255,255,255,.04); font-size: 13px; }
       .wp-chat-input:focus { outline: none; border-color: var(--accent, #ff3d47); }
       .wp-chat-send { flex: 0 0 auto; min-width: 38px; min-height: 38px; border: 0; border-radius: 999px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 13px; font-weight: 800; }
       .wp-chat-send:disabled { opacity: .5; }

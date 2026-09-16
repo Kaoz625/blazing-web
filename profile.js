@@ -435,7 +435,7 @@
       .bp-profile-copy { display: block; min-width: 0; padding: 0; }
       .bp-profile-name { display: block; overflow: hidden; font-size: 20px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
       .bp-profile-meta { display: block; margin-top: 5px; color: rgba(255,255,255,.7); font-size: 13px; }
-      .bp-profile-tag { position: absolute; left: 42px; top: 54px; border: 1px solid rgba(255,255,255,.3); border-radius: 6px; padding: 2px 4px; color: #fff; background: #141416; font-size: 9px; font-weight: 700; }
+      .bp-profile-tag { position: absolute; left: 42px; top: 54px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 6px; padding: 2px 4px; color: #fff; background: var(--surface, #0E0A0C); font-size: 9px; font-weight: 700; }
       .bp-pencil {
         position: absolute; right: 0; top: 14px;
         display: grid; place-items: center;
