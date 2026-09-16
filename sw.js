@@ -151,7 +151,13 @@
 // the gate, but has lost its safety net: when a source dies mid-play there is
 // nothing behind it, and that reads to the viewer as a dead film rather than a
 // dead link.
-const CACHE = 'blazing-shell-v41';
+// v42: the grey. profile.js and watch-party.js are SHELL files and this worker
+// is cache-first over them, so an installed PWA would keep serving the copies
+// that paint #141416 — the exact grey Markus banned — no matter how many times
+// the site is redeployed. No new file this time, which is precisely the case
+// the v40 note above says nearly went out unbumped: a content-only change to a
+// cached file is invisible unless the cache name moves.
+const CACHE = 'blazing-shell-v42';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
