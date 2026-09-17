@@ -1085,6 +1085,13 @@
     </div>
   </section>
 
+  <!-- ARRIVE (DESIGN-V2.md §2.7). The screen-enter dip to black: ONE plate for
+       the whole app, driven from ONE hook (arrive(), at the foot of showRoute()
+       in app.js). It lives in the markup rather than being built by JS so that
+       the first route change cannot race its creation, and it starts `hidden`
+       so it costs the compositor nothing between screens. -->
+  <div id="arrive-plate" aria-hidden="true" hidden></div>
+
   <!-- Loaded before app.js so window.BlazingTelemetry exists by the time the
        first screen_view fires. app.js guards for it anyway. -->
   <script src="./dpad.js" defer></script>

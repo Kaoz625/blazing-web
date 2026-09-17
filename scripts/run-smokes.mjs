@@ -89,7 +89,16 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // answered 39 — rather than by adding one to what was here, which is how a
 // floor drifts behind its own rule (see the 6 Sep note above, where it had
 // fallen seven suites behind).
-const MIN_SUITES = 39;
+//
+// Raised 39 -> 40 when arrive.smoke.mjs landed with ARRIVE (DESIGN-V2.md §2.7):
+// the screen-enter dip to black, its deadman, and its reduced-motion cut. That
+// suite is the reason this raise is worth more than one line — ARRIVE shipped
+// with a comment block in app.js citing "arrive.smoke.mjs" by name for five
+// separate measurements while no such file existed, so the harness was the only
+// thing standing between the product and five numbers nobody could re-take.
+// Counted on disk before writing it — `ls *.smoke.mjs | wc -l` answered 40 —
+// rather than by adding one to what was here.
+const MIN_SUITES = 40;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

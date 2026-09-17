@@ -1964,6 +1964,150 @@ const BROWSE_HEADINGS = Object.freeze({
   anime: ['Browse', 'Anime', 'The anime shelves, subbed and dubbed.'],
 });
 
+/**
+ * ARRIVE — DESIGN-V2.md §2.7, and this is the client's ONE hook point.
+ *
+ * A screen enter is a dip to black: the plate is already black, and it fades
+ * 1 -> 0 over ARRIVE (220ms linear, read out of the motion table in
+ * styles.css). Never a slide, never a scale, never a cross-fade of two screens.
+ *
+ * It hangs off showRoute() and nothing else. Every route in this app — the nav
+ * bar, the drawer, a d-pad Enter on either of them, openDiscover(), a card that
+ * navigates — arrives through this one function, so one call here covers all
+ * nineteen destinations navparity.smoke.mjs walks.
+ * A fade written into each screen's loader is how a product ends up with
+ * nineteen different enters and no contract left.
+ *
+ * THE FIRST PAINT MUST NOT GET ONE, and today it cannot: showRoute() is never
+ * called during boot. index.html paints the home shell itself and the first
+ * call to this function is always a real navigation — grep showRoute( and every
+ * call site is a click handler or openDiscover(). That is the whole reason
+ * there is no "skip the first one" flag here: a flag would swallow the
+ * viewer's first NAVIGATION instead, which is worse than the bug it prevents.
+ * If a boot route call is ever added, suppress ARRIVE at that call rather than
+ * here — a plate over the shell reads as the app booting, going black, and
+ * booting a second time. ARRIVE marks a CHANGE of screen; the first is not one.
+ *
+ * Under prefers-reduced-motion it is an instant cut, not a slower fade. That is
+ * the WEB LANE's rule and not DESIGN-V2.md's: §2.7 is the Roku contract and
+ * says nothing about prefers-reduced-motion anywhere — grep it before citing
+ * it, which is how this comment came to claim it "says so in as many words".
+ * The class is never added, so nothing animates and nothing has to be torn
+ * down. styles.css carries the same rule for a viewer who flips the OS switch
+ * mid-session.
+ *
+ * THE TWO HALVES ARE VERIFIED SEPARATELY, and the four-frame measurement proves
+ * the JS one, not the CSS one — it was written here as the CSS half's evidence
+ * and it is not. Under reducedMotion 'reduce' the plate never leaves
+ * display:none across four frames of a real route change: that is this early
+ * return, because a plate that is still `hidden` cannot be displaying anything
+ * whatever the stylesheet says. The CSS half needs the class FORCED on to be
+ * reachable at all, and with it on the cascade answers animation-name none and
+ * opacity 0. A harness that only did the first would pass with the @media block
+ * deleted.
+ *
+ * THAT CLAIM, AND EVERY OTHER MEASUREMENT IN THIS BLOCK, IS arrive.smoke.mjs.
+ * It was a comment and nothing else until 16 Sep 2026 — the sentence above said
+ * "verified" and no harness in the repo had ever opened this element. Writing
+ * the harness found the missing deadman below. A measurement that lives only in
+ * a comment is a measurement nobody can re-take.
+ */
+const arrivePlate = $('#arrive-plate');
+
+/**
+ * THE DEADMAN. Longer than ARRIVE by enough that it never races a fade that is
+ * merely slow, short enough that a stranded plate is gone before the viewer
+ * presses anything else. 1200ms, the same number the Tizen client uses, because
+ * a rescue that fires at a different moment on each client is not a contract.
+ */
+const ARRIVE_DEADMAN_MS = 1200;
+let arriveDeadman = 0;
+
+/**
+ * The ONE way down, and everything that lowers the plate goes through it.
+ *
+ * `hidden` is what takes it out of the compositor: styles.css has
+ * `[hidden] { display: none !important }`. Leaving a full-screen layer at
+ * opacity 0 parked over the app costs a composited surface for the whole
+ * session.
+ */
+function arriveDown() {
+  if (!arrivePlate) return;
+  if (arriveDeadman) { clearTimeout(arriveDeadman); arriveDeadman = 0; }
+  arrivePlate.classList.remove('arriving');
+  arrivePlate.hidden = true;
+}
+
+if (arrivePlate) {
+  // animationend rather than a setTimeout, so no duration is written twice —
+  // the 220ms lives in --dur-arrive and nowhere else. Cancelling the class for
+  // a second route change inside one fade fires animationCANCEL, not
+  // animationend, and the replacement animation ends normally, so the plate
+  // still goes back to `hidden` exactly once. MEASURED in headless Comet:
+  // animationend 1, animationcancel 1, and the `hidden` attribute set exactly
+  // once across two route changes 80ms apart.
+  arrivePlate.addEventListener('animationend', arriveDown);
+
+  // THERE IS DELIBERATELY NO animationcancel LISTENER. A cancel is the NORMAL
+  // first half of a second route change — arrive() removes the class and adds
+  // it again — and the event is dispatched after the replacement animation has
+  // already started, so lowering the plate there would kill the new dip
+  // instead of rescuing anything. The timer below is what covers a cancel that
+  // is never followed by a restart.
+}
+
+/**
+ * ARRIVE's own way down, for when the way down was never reached.
+ *
+ * MEASURED, and this is why the timer exists rather than being belt-and-braces
+ * for a case nobody has seen. Route change, then the running animation
+ * cancelled so `animationend` can never fire: the plate stayed
+ * display:block with `.arriving` still on it, and was STILL THERE two seconds
+ * later. Permanently. The live path that produces exactly that shape is a
+ * viewer flipping the OS reduced-motion switch mid-fade — macOS toggles it
+ * live, styles.css's `@media (prefers-reduced-motion: reduce)` override then
+ * sets `animation: none` on `.arriving`, which CANCELS the running animation,
+ * and the listener above is never called again.
+ *
+ * THAT "two seconds later" IS HISTORY AND arrive.smoke.mjs CANNOT RE-TAKE IT —
+ * the timer below is what it is a measurement of the absence of. What the
+ * harness takes instead, on every run, is each half that is still reachable:
+ * the strand itself (display:block, `.arriving` still on, opacity 0), that it
+ * is still up halfway to the deadman with `animationend` at zero, and that the
+ * timer and nothing else puts it away — one run read 1203ms against the 1200
+ * below, and the harness asserts the window rather than that figure, because a
+ * timer's exact landing is not a constant and writing one down here is how the
+ * next reader "corrects" a healthy run. It takes the strand twice, through a
+ * hand-cancelled animation AND
+ * through the real reduced-motion flip described above, because a rescue proven
+ * only against a synthetic cancel is not proven against the path it is for.
+ *
+ * WHAT THAT STRAND COSTS HERE IS NOT A BLACK TELEVISION, and the difference is
+ * worth writing down rather than repeating the Roku's warning by rote. On this
+ * client the plate's base rule is `opacity: 0` and only `.arriving` ever raises
+ * it, so a cancelled animation drops the fill and the stranded plate computes
+ * to opacity 0 — measured. What is left is a full-screen fixed layer parked
+ * over the app for the rest of the session, which is the exact cost the comment
+ * on arriveDown() says must not be paid. So: the fail-safe stops the black
+ * screen, and this stops the parked layer. Both are tested in
+ * arrive.smoke.mjs; neither one covers for the other.
+ */
+function arrive() {
+  if (!arrivePlate) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  arrivePlate.hidden = false;
+  arrivePlate.classList.remove('arriving');
+  // Force a reflow between the remove and the add, or a second route change
+  // inside the same frame keeps the first animation's clock and the new screen
+  // arrives with no dip at all.
+  void arrivePlate.offsetWidth;
+  arrivePlate.classList.add('arriving');
+  // Armed AFTER the raise and re-armed on every raise, so it covers the whole
+  // time the plate is up and never outlives the fade it belongs to.
+  if (arriveDeadman) clearTimeout(arriveDeadman);
+  arriveDeadman = setTimeout(arriveDown, ARRIVE_DEADMAN_MS);
+}
+
 function showRoute(route, mediaOptions = {}) {
   const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
@@ -2113,6 +2257,10 @@ function showRoute(route, mediaOptions = {}) {
   updateNavigation(route);
   closeDrawer();
   window.scrollTo(0, 0);
+  // ARRIVE, last: the scroll reset and the nav repaint have to be inside the
+  // black, or the viewer watches the old screen jump to the top before the dip
+  // covers it.
+  arrive();
 }
 
 function buildRowSkeleton(catalog) {

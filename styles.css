@@ -7,7 +7,7 @@
    Roku, Fire TV and Apple TV all carry #FF3D47, and Colors.kt says in as many
    words that "the Roku is the reference". The WEB and the Samsung app were the
    two left behind on the older Netflix-ish #E50914, so those are what moved.
-   Transitions: 300ms ease throughout
+   Motion: the six-name table in :root, mirroring Theme.brs ThemeMotion()
    ============================================================ */
 
 :root {
@@ -54,7 +54,6 @@
   --accent-strong: #E11D2B;
   --accent-glow: rgba(255,61,71, 0.35);
   --radius: 16px;
-  --transition: 300ms ease;
   /* THE FOCUS CURVE. Roku ramps focusPercent LINEARLY over its own ~0.25s
      animation and shapes the VALUE with an outCubic (Theme.brs
      ThemeFocusEase: 1 - (1-f)^3). cubic-bezier(.215,.61,.355,1) is that same
@@ -62,6 +61,52 @@
      on a television and in a browser. Do not "improve" it — DESIGN-V2.md §2.6
      says three other client builds are written against exactly this curve. */
   --focus-ease: 250ms cubic-bezier(.215, .61, .355, 1);
+
+  /* ── THE MOTION TABLE — DESIGN-V2.md §2.7 ────────────────────────────────
+     Six names, mirroring Theme.brs ThemeMotion() value for value, and this is
+     the ONLY timing table in this client. What used to sit here was
+     `--transition: 300ms ease`, driving 29 rules — a duration and a curve that
+     appear nowhere else in the product, so every button on the web settled at
+     a different rate from the same button on a television.
+
+       SETTLE    140ms outQuad    non-list focus: buttons, chips, drawer rows
+       ARRIVE    220ms linear     screen enter. A plate 1.0 -> 0.0. A DIP TO
+                                  BLACK, never a slide, never a cross-fade
+       GLIDE     300ms outQuint   any translation: details scroll, row raise
+       PANEL     200ms outQuad    drawer and StreamSelect slide-in + the scrim
+       DWELL     900ms outQuint   the room dim, going down. The signature
+       DWELL_UP  180ms outQuad    the room coming back
+
+     The two beziers are the CSS spellings of Roku's easeFunction names. Do NOT
+     reach for the keyword `ease-out` — that is cubic-bezier(0,0,.58,1), a
+     third curve, and swapping it in is how one client comes to feel slower
+     than another at an identical duration.
+
+     SETTLE IS NOT THE CARD CURVE, and this is the one mistake the table
+     invites. Card, tile and thumb focus is §2.6 and rides --focus-ease above:
+     250ms outCubic, the shape of the Roku firmware ramp, written against by
+     four client builds. Retiming a poster to 140ms breaks all of them.
+
+     GLIDE, DWELL and DWELL_UP have no consumer in this client yet. GLIDE wants
+     a scroll this app performs instantly; DWELL is the Home idle room dim —
+     nav leaves, rows go under a rising scrim — which is a Roku behaviour
+     nobody has built for a browser. They are declared anyway because the table
+     mirrors ThemeMotion() EXACTLY: a table missing rows is how a second table
+     gets written the day somebody needs one of them. */
+  --ease-out-quad:  cubic-bezier(.25, .46, .45, .94);
+  --ease-out-quint: cubic-bezier(.23, 1, .32, 1);
+  --dur-settle: 140ms;
+  --dur-arrive: 220ms;
+  --dur-glide: 300ms;
+  --dur-panel: 200ms;
+  --dur-dwell: 900ms;
+  --dur-dwell-up: 180ms;
+  --settle:   var(--dur-settle)   var(--ease-out-quad);
+  --arrive:   var(--dur-arrive)   linear;
+  --glide:    var(--dur-glide)    var(--ease-out-quint);
+  --panel:    var(--dur-panel)    var(--ease-out-quad);
+  --dwell:    var(--dur-dwell)    var(--ease-out-quint);
+  --dwell-up: var(--dur-dwell-up) var(--ease-out-quad);
 
   /* THE TYPE LADDER — five sizes, and it is closed.
      The Roku ships exactly five (18/22/26/40/78) forced through one
@@ -116,6 +161,99 @@ button { cursor: pointer; }
 body.no-scroll { overflow: hidden; }
 [hidden] { display: none !important; }
 
+/* ── ARRIVE ──────────────────────────────────────────
+   DESIGN-V2.md §2.7. A screen enter is a DIP TO BLACK and nothing else: one
+   flat, full-viewport plate sitting at opacity 1 and fading to 0 over 220ms
+   linear. Not a slide, not a scale, not two screens cross-fading.
+
+   ONE plate, ONE rule, ONE hook — arrive() at the foot of showRoute() in
+   app.js, which is the only place in this app a screen changes. A fade written
+   per screen is how a product ends up with twenty different enters and no
+   contract at all.
+
+   A <div> rather than an opacity or a filter on #app-main, because §2.7 says
+   prefer one flat rectangle's opacity over a container's: a container alpha
+   composites every card underneath it off-screen, every frame.
+
+   z-index 1000, and it is 1000 because of ONE element. This started at 90,
+   which clears the player (60), .wp-join-layer (85), the toast host and the
+   profile overlay (80) and the drawer layer (40) — every layer this app had
+   been thinking about. It does NOT clear `.media-audio-player` at 900, and
+   that one is the only layer in the product that is BOTH above the plate and
+   alive during a route change: media-library.js's leave() never hides
+   #media-player-host, so the audio bar is a persistent mini-player that
+   survives every navigation with a track loaded. MEASURED in headless Comet
+   with the plate frozen at opacity 1 — the bar went on painting, fixed, across
+   the foot of a screen that is supposed to be entirely black. A dip with a lit
+   strip in it is not a dip. 1000 is the full census plus headroom; nothing else
+   in styles.css, profile.js or watch-party.js declares anything above 900.
+
+   THE CENSUS IS NOW A TEST, and it had to become one: this paragraph carried a
+   bar height ("51px tall") that no harness had ever taken, and re-measuring it
+   on 16 Sep 2026 read 117px at 1440x900 — a made-up number sitting inside a
+   real finding. arrive.smoke.mjs seeds a saved track, walks off the books room
+   and catches the bar mid-dip — not hidden, still painting, under a plate that
+   is up — then freezes the plate at opacity 1 and reads back EVERY PIXEL IT
+   COVERS: 1,282,500 of them, 0 lit, brightest channel 0. It also enumerates the
+   live z-index of every element, so a future layer declared above 1000 is named
+   rather than discovered on a TV.
+
+   1,282,500 AND NOT 1,296,000, and the difference is the whole lesson of this
+   paragraph repeating itself. 1440x900 is the WINDOW. `position: fixed; inset:
+   0` resolves against the LAYOUT viewport, which on the Movies route is
+   1425x900 because the page overflows and grows a classic 15px scrollbar — so
+   the plate covers 1425 columns and the sixteenth is browser chrome it is not
+   supposed to reach. 1,296,000 was arithmetic done on the window size by
+   somebody who had not run the census, in the same breath as the "51px" above.
+   The harness prints its own width and height every run for exactly this
+   reason; read the run, do not multiply.
+
+   A <dialog> opened with showModal() lives in the top layer where no z-index
+   reaches it, 1000 included. That is fine and it is checked: every
+   route-changing control in this app — `button[data-view]` in the topnav and
+   the drawer, and the delegated [data-discover-slug] handler — sits outside
+   all five <dialog>s, so showRoute() is never called with one open. A plate
+   that covered a modal would be a worse bug than one that does not.
+
+   It is `hidden` between screens, so the rule above takes it out of the
+   compositor entirely rather than leaving a full-screen transparent layer
+   parked over the app for the life of the session.
+
+   `opacity: 0` on the base rule is the FAIL-SAFE and is not decoration. If the
+   animation shorthand below ever fails to resolve — an engine that cannot read
+   `var(--arrive)`, say — the element falls back to this rule, which is
+   invisible. Were the base opacity 1, the same failure would leave a permanent
+   black screen over the whole app. */
+#arrive-plate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #000;
+  opacity: 0;
+  /* It must never eat a click, including during the 220ms it is painting. */
+  pointer-events: none;
+}
+#arrive-plate.arriving { animation: arrive var(--arrive) forwards; }
+@keyframes arrive { from { opacity: 1; } to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Under `reduce` ARRIVE is an INSTANT CUT, not a slower fade. A 220ms black
+     wipe is the single largest piece of motion on the screen, so "less motion"
+     has to mean none of it. app.js never adds the class in the first place;
+     this rule is the belt for a viewer who flips the OS switch while the app is
+     open — macOS toggles it live, which is the same reason the trailer band
+     below carries a CSS half.
+
+     The rule is the web lane's, NOT DESIGN-V2.md §2.7's. §2.7 is the Roku
+     contract and says nothing about prefers-reduced-motion — grep it. Do not
+     go looking for the citation that used to be on this line; it was wrong.
+
+     THE PANEL HALF OF THIS OVERRIDE IS NOT HERE. It cannot be: it has to be
+     declared AFTER the rule it beats. See the block under @keyframes panel-in
+     below, and the paragraph there, before moving either of them. */
+  #arrive-plate.arriving { animation: none; opacity: 0; }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -164,14 +302,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
   backdrop-filter: blur(40px) saturate(150%);
   -webkit-backdrop-filter: blur(40px) saturate(150%);
-  transition: background var(--transition);
+  transition: background var(--settle);
 }
 
 .brand, .icon-button, .topnav button, .drawer-nav button {
   border: 0;
   color: var(--text);
   background: transparent;
-  transition: color var(--transition), background var(--transition);
+  transition: color var(--settle), background var(--settle);
 }
 
 .brand {
@@ -206,7 +344,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   width: 44px;
   height: 44px;
   border-radius: var(--radius-pill);
-  transition: background var(--transition);
+  transition: background var(--settle);
 }
 .icon-button:hover { background: var(--surface-focus); }
 .icon-button svg, .player-close svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
@@ -230,7 +368,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   color: var(--muted);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
-  transition: color var(--transition), background var(--transition);
+  transition: color var(--settle), background var(--settle);
 }
 /* Hover is a surface; ACTIVE is the accent. These shared one grey plate, which
    is the "it highlights grey and not red" note against the TVs -- the same bug,
@@ -286,6 +424,47 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .drawer-nav button:hover { background: rgba(255, 61, 71, .20); color: #fff; }
 .drawer-nav button.active { background: var(--focus-fill); color: #fff; }
 .drawer-section { margin: 26px 0 8px; color: var(--quiet); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .13em; text-transform: uppercase; }
+
+/* PANEL — §2.7, 200ms outQuad for the drawer and its scrim together.
+   An ANIMATION rather than a transition, because openDrawer() opens this by
+   clearing `hidden`: display goes none -> block, which no transition can see,
+   and an animation runs the moment the element starts being displayed. So the
+   slide costs no class to add, no rAF to wait for, and no second piece of state
+   in app.js to keep in step with the attribute.
+   ENTER ONLY. An exit has to outlive `hidden = true`, which is a JS change this
+   does not need. A TV engine too old for the keyframes gets today's hard cut. */
+.drawer-layer:not([hidden]) .drawer-backdrop { animation: panel-scrim var(--panel) both; }
+.drawer-layer:not([hidden]) .drawer { animation: panel-in var(--panel) both; }
+@keyframes panel-scrim { from { opacity: 0; } }
+/* The drawer is pinned to the left edge, so it arrives from the left. 24px and
+   not its full width: 200ms cannot carry 340px without reading as a snap, and
+   §2.7's ceiling forbids buying the distance with a longer duration. */
+@keyframes panel-in { from { opacity: 0; transform: translateX(-24px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* PANEL under `reduce` is an instant open, same law as ARRIVE above.
+
+     THIS BLOCK HAS TO LIVE HERE, under the two rules it cancels, and moving it
+     up beside the ARRIVE override is the one edit that silently breaks it.
+     A media query adds NO specificity. `.drawer-layer:not([hidden]) .drawer` is
+     (0,3,0) whether it sits in a query or not, so against the identical
+     selector two lines above, the cascade is decided by source order alone and
+     the LAST one wins.
+
+     It was written up there, and it did nothing at all. MEASURED in headless
+     Comet with reducedMotion: 'reduce' — the drawer opened with
+     animationName: "panel-in", backdropAnimationName: "panel-scrim", both
+     animations live, and the panel caught mid-slide at
+     transform: matrix(1, 0, 0, 1, -24, 0). A viewer who asks the OS for less
+     motion got the whole slide. ARRIVE's override worked only by luck of
+     ordering: #arrive-plate.arriving is (1,1,0) in both places and the reduce
+     copy happens to come second.
+
+     So: an override goes under its rule, never in one tidy motion block at the
+     top of the file. */
+  .drawer-layer:not([hidden]) .drawer,
+  .drawer-layer:not([hidden]) .drawer-backdrop { animation: none; }
+}
 
 /* ── Main layout ─────────────────────────────────────────── */
 /* Was min(1440px, 100%). EVERY size in DESIGN.md was measured at 1920, so a
@@ -475,7 +654,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: var(--fw-bold);
   line-height: 1.2;
   text-decoration: none;
-  transition: filter var(--transition), background var(--transition), box-shadow var(--transition);
+  transition: filter var(--settle), background var(--settle), box-shadow var(--settle);
 }
 /* WATCH NOW IS A WHITE PILL. DESIGN.md:172 — "white fill, #0A0A0B text, pill,
    14px/600, padding 10x20". The Roku ships it exactly, as a baked pill asset
@@ -536,7 +715,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   /* opacity joins these because the focus law below ramps it, and the curve is
      the Roku's outCubic rather than the app's generic 300ms ease — the growth
      and the brightening have to arrive together or the card reads as two
-     separate events. */
+     separate events.
+
+     AND THAT ARGUMENT REACHES EVERY PART OF A CARD, which is why --focus-ease
+     now also drives .card-image, .card-backdrop, .card-hero-content,
+     .card-mute-btn, .row-hero .card, .yt-thumb, .livetv-card and
+     .livetv-guide-block below. All eight were left on the deleted generic
+     token, so the poster grew on one curve while the artwork under it faded on
+     another. These are §2.6 list-item focus and they stay at 250ms: SETTLE is
+     140ms and is for NON-list focus — buttons, chips, drawer rows. Retiming a
+     card to SETTLE breaks the four client builds written against §2.6. */
   transition: transform var(--focus-ease), opacity var(--focus-ease),
               border-color var(--focus-ease), box-shadow var(--focus-ease);
 }
@@ -614,7 +802,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .card:hover::after, .card:focus-visible::after { opacity: 1; }
 .card:active { transform: scale(.97); }
-.card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); transition: opacity var(--transition); }
+.card-image { display: block; width: 100%; height: 100%; object-fit: cover; background: linear-gradient(135deg, #1B1417, #0E0A0C); transition: opacity var(--focus-ease); }
 /* .seerr-art joins these: the Requests poster is a real <img> now, like every
    other card in the app, so it needs the same dead-URL mark rather than a
    private one that would drift from this. */
@@ -660,7 +848,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity var(--transition);
+  transition: opacity var(--focus-ease);
   pointer-events: none;
 }
 .card-hero-content {
@@ -675,7 +863,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: linear-gradient(0deg, rgba(0,0,0,.95) 10%, rgba(0,0,0,.55) 60%, transparent);
   opacity: 0;
   transform: translateY(6px);
-  transition: opacity var(--transition), transform var(--transition);
+  transition: opacity var(--focus-ease), transform var(--focus-ease);
   pointer-events: none;
 }
 .card-hero-title { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-bold); letter-spacing: -.02em; line-height: 1.15; }
@@ -693,8 +881,15 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .card-cta { display: inline-block; margin-top: 10px; color: var(--accent); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .02em; }
 
 .row-hero .row-track { align-items: flex-start; }
+/* KNOWN DEPARTURE FROM §2.7, recorded rather than quietly fixed: this is the one
+   rule in the app that animates `width`, which the contract forbids because it
+   relayouts the row every frame. It cannot become a transform without also
+   rewriting what `width`/`aspect-ratio` buy here — the portrait-to-landscape
+   switch below, and the height cap that stops every row under it from jumping.
+   That is a redesign of the hover state, not a retime, so it is out of scope
+   for the motion pass. Only the curve moved. */
 .row-hero .card {
-  transition: width var(--transition), aspect-ratio var(--transition), transform var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: width var(--focus-ease), aspect-ratio var(--focus-ease), transform var(--focus-ease), border-color var(--focus-ease), box-shadow var(--focus-ease);
 }
 .row-hero .card:hover,
 .row-hero .card:focus-visible {
@@ -784,7 +979,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   display: grid;
   place-items: center;
   opacity: 0;
-  transition: opacity var(--transition);
+  transition: opacity var(--focus-ease);
   cursor: pointer;
 }
 .card:hover .card-mute-btn { opacity: 1; }
@@ -793,7 +988,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .page-heading { max-width: 760px; margin: 44px auto 24px; padding: 0 20px; }
 .page-heading h1 { font-size: clamp(30px, 6vw, 48px); }
 .search-form { display: flex; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0 20px; }
-.search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--transition), box-shadow var(--transition); }
+.search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--settle), box-shadow var(--settle); }
 .search-form input::placeholder { color: var(--quiet); }
 .search-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); }
 .search-status { min-height: 24px; max-width: 760px; margin: 16px auto 0; padding: 0 20px; color: var(--muted); font-size: var(--fs-body); }
@@ -810,7 +1005,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .settings-host { max-width: 760px; margin: 0 auto; padding: 0 20px 64px; }
 .settings-section { margin: 32px 0 12px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .settings-section:first-child { margin-top: 8px; }
-.settings-row { display: block; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--text); background: var(--surface); font-size: var(--fs-body); font-weight: 700; text-align: left; transition: border-color var(--transition), background var(--transition); }
+.settings-row { display: block; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--text); background: var(--surface); font-size: var(--fs-body); font-weight: 700; text-align: left; transition: border-color var(--settle), background var(--settle); }
 .settings-row:hover:not(:disabled), .settings-row:focus-visible { border-color: var(--accent); background: var(--surface-focus); outline: none; }
 .settings-row:disabled { opacity: .5; cursor: not-allowed; }
 .settings-input { width: 100%; min-height: 48px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); font-size: var(--fs-body); }
@@ -850,7 +1045,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .sources-card-base { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .sources-card-copy { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .sources-card-meta { margin: 10px 0 0; color: var(--quiet); font-size: var(--fs-body); }
-.sources-row { display: flex; align-items: baseline; gap: 14px; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--muted); background: var(--surface); font-size: var(--fs-body); text-align: left; transition: border-color var(--transition), background var(--transition), color var(--transition); }
+.sources-row { display: flex; align-items: baseline; gap: 14px; width: 100%; min-height: 52px; margin-top: 8px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 13px 16px; color: var(--muted); background: var(--surface); font-size: var(--fs-body); text-align: left; transition: border-color var(--settle), background var(--settle), color var(--settle); }
 .sources-row:hover, .sources-row:focus-visible, .sources-row[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--surface-focus); outline: none; }
 .sources-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .sources-row-meta { flex: 0 0 auto; color: var(--quiet); font-size: var(--fs-caption); white-space: nowrap; }
@@ -963,7 +1158,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-radius: 50%;
   color: var(--text);
   background: rgba(255,255,255,.05);
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--settle), border-color var(--settle);
 }
 .search-mic svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .search-mic:hover { background: rgba(255,255,255,.1); }
@@ -1006,7 +1201,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   text-align: left;
-  transition: background var(--transition), color var(--transition);
+  transition: background var(--settle), color var(--settle);
 }
 .search-facet:hover { background: rgba(255,255,255,.06); color: var(--text); }
 .search-facet.active { color: #fff; background: rgba(255,61,71,.18); }
@@ -1164,7 +1359,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
-  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .edu-tab:hover { color: #fff; background: var(--surface-focus); }
 .edu-tab.active {
@@ -1227,7 +1422,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .detail-close {
   position: absolute; top: 14px; right: 14px; z-index: 3; color: #fff;
   border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
-  background: rgba(10,10,10,.78); transition: background var(--transition);
+  background: rgba(10,10,10,.78); transition: background var(--settle);
 }
 .detail-close:hover { background: rgba(255,61,71,.3); }
 /* THE SHEET SCROLLS, so the source list is ONE page.
@@ -1435,7 +1630,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--settle), border-color var(--settle);
 }
 .detail-mute-btn:hover { background: rgba(255,61,71,.4); border-color: var(--accent); }
 
@@ -1457,7 +1652,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition: border-color var(--settle), box-shadow var(--settle);
 }
 .quality-select:hover, .quality-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,61,71,.18); outline: none; }
 .quality-select option { background: var(--surface-focus); color: #fff; }
@@ -1505,7 +1700,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: var(--fw-bold);
   white-space: nowrap;
   scroll-snap-align: start;
-  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .season-chip:hover { color: #fff; background: var(--surface-focus); }
 .season-chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -1545,7 +1740,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   text-align: left;
   background: rgba(28,28,31,.8);
   scroll-snap-align: start;
-  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .episode-chip:hover { background: var(--surface-focus); }
 .episode-chip:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
@@ -1588,7 +1783,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ── Player ──────────────────────────────────────────────── */
 .player { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #000; }
 .player-bar { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-top)) 16px 26px; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.8), transparent); }
-.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: var(--radius-pill); padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: var(--fs-body); font-weight: var(--fw-bold); transition: background var(--transition); }
+.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: var(--radius-pill); padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: var(--fs-body); font-weight: var(--fw-bold); transition: background var(--settle); }
 .player-close:hover { background: rgba(255,61,71,.3); }
 .player-title { overflow: hidden; color: #fff; font-size: var(--fs-body); font-weight: var(--fw-bold); text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
 .player-bar { flex-wrap: wrap; }
@@ -1760,7 +1955,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   align-items: center;
   border: 1px solid transparent;
   user-select: none;
-  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+  transition: border-color var(--settle), background var(--settle), box-shadow var(--settle);
 }
 .stream-row:hover {
   border-color: var(--accent);
@@ -2265,7 +2460,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
-  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .yt-section:hover { color: #fff; background: var(--surface-focus); }
 .yt-section.active {
@@ -2350,7 +2545,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: 0 8px 22px rgba(0,0,0,.3);
-  transition: border-color var(--transition), box-shadow var(--transition);
+  transition: border-color var(--focus-ease), box-shadow var(--focus-ease);
 }
 .yt-card:hover .yt-thumb, .yt-card:focus-visible .yt-thumb {
   border-color: var(--accent);
@@ -2410,7 +2605,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: rgba(28,28,31,.8);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
-  transition: color var(--transition), background var(--transition), border-color var(--transition);
+  transition: color var(--settle), background var(--settle), border-color var(--settle);
 }
 .yt-chip:hover { color: #fff; border-color: var(--accent); background: var(--surface-focus); }
 
@@ -2476,7 +2671,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: var(--fw-bold);
   color: var(--muted);
   background: rgba(28,28,31,.8);
-  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .livetv-chip:hover { color: #fff; background: var(--surface-focus); }
 /* aria-pressed IS the state, so the styling reads the same attribute a screen
@@ -2528,7 +2723,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border: 1px solid rgba(255,255,255,.10);
   border-radius: var(--radius);
   background: rgba(28,28,31,.72);
-  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+  transition: background var(--focus-ease), border-color var(--focus-ease), transform var(--focus-ease);
 }
 .livetv-card:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.2); transform: translateY(-2px); }
 .livetv-card-art {
@@ -2692,7 +2887,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: rgba(28,28,31,.82);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 4px;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--focus-ease), border-color var(--focus-ease);
 }
 .livetv-guide-block:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.22); }
 .livetv-guide-block:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }

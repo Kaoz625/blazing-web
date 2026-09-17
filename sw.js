@@ -157,7 +157,17 @@
 // the site is redeployed. No new file this time, which is precisely the case
 // the v40 note above says nearly went out unbumped: a content-only change to a
 // cached file is invisible unless the cache name moves.
-const CACHE = 'blazing-shell-v42';
+// v43: the motion contract (DESIGN-V2.md §2.7). THREE shell files move together
+// and they are only correct together — index.html gains the #arrive-plate
+// element, styles.css gains the motion table and the rules that drive that
+// element, app.js gains the one hook that adds the class. All three are `code`
+// to the split below, so a device with a network gets the matched set; the bump
+// is for the OFFLINE fallback, which is the one path that can still hand out a
+// cached index.html carrying a plate against a cached styles.css that has no
+// rule for it. An unstyled #arrive-plate is an inert empty div rather than a
+// black screen, but a half-updated install is exactly what the v40 note above
+// says nearly went out unbumped.
+const CACHE = 'blazing-shell-v43';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

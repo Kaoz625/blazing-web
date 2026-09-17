@@ -4,9 +4,13 @@ Extracted from the live `styles.css` — these are the tokens already in
 production **on this site**, not proposed ones.
 
 **This file is DERIVED, not the contract.** The one contract for every client is
-`roku channels/DESIGN.md`, and `Theme.brs` (Roku) and `Theme.swift` (Apple TV)
+`roku channels/DESIGN-V2.md`, and `Theme.brs` (Roku) and `Theme.swift` (Apple TV)
 are its reference implementations. When the two disagree, that file wins and this
-one is out of date. Kept in sync by hand, so re-read `styles.css` before trusting
+one is out of date.
+
+This line used to point at `roku channels/DESIGN.md`. That file is SUPERSEDED and
+its values are dead — an audit that reads it reports correctly shipped work as
+drift, which is the opposite of what a pointer is for. Kept in sync by hand, so re-read `styles.css` before trusting
 a value here — this section described `--surface: #141416` for ten days after the
 CSS had moved on.
 
