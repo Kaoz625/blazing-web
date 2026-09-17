@@ -167,7 +167,14 @@
 // rule for it. An unstyled #arrive-plate is an inert empty div rather than a
 // black screen, but a half-updated install is exactly what the v40 note above
 // says nearly went out unbumped.
-const CACHE = 'blazing-shell-v43';
+// v44: DESIGN-V2 §2.11 — the 25-card shelf and View All. THREE shell files move
+// together again and are only correct together: index.html gains #viewall-view,
+// styles.css gains .row-head/.row-more/.viewall-*, app.js gains fillRow(),
+// openViewAll() and the 'viewall' route. A cached index.html carrying the new
+// section against a cached styles.css with no rules for it would render an
+// unstyled full-width grid, and a cached app.js without fillRow() would leave
+// every shelf uncapped with a dead button. Same reason as the v43 bump below.
+const CACHE = 'blazing-shell-v44';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

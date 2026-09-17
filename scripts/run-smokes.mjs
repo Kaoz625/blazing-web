@@ -98,7 +98,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // thing standing between the product and five numbers nobody could re-take.
 // Counted on disk before writing it — `ls *.smoke.mjs | wc -l` answered 40 —
 // rather than by adding one to what was here.
-const MIN_SUITES = 40;
+// Raised 40 -> 41 when viewall.smoke.mjs landed with DESIGN-V2 §2.11: the
+// 25-card shelf and the View All that opens the row's OWN source rather than a
+// guess from its heading. Counted on disk before writing it — `ls *.smoke.mjs
+// | wc -l` answered 41 — rather than by adding one to what was here.
+const MIN_SUITES = 41;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

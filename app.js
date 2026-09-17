@@ -731,6 +731,7 @@ const libraryView = $('#library-view');
 const adminView = $('#admin-view');
 const discoverView = $('#discover-view');
 const roadmapsView = $('#roadmaps-view');
+const viewallView = $('#viewall-view');
 const rowsWrap = $('#rows');
 let homeRequest = 0;
 let homeCatalogs = new Set();
@@ -2149,6 +2150,7 @@ function showRoute(route, mediaOptions = {}) {
   adminView.hidden = route !== 'admin' && route !== 'link';
   discoverView.hidden = route !== 'discover';
   roadmapsView.hidden = route !== 'roadmaps';
+  viewallView.hidden = route !== 'viewall';
   // The Trailers and Education sections shipped as markup with no code behind
   // them, so both tabs opened a blank page. They are lazy: a tab that is never
   // pressed costs nothing, and both back onto rows that are empty today.
@@ -2263,6 +2265,92 @@ function showRoute(route, mediaOptions = {}) {
   arrive();
 }
 
+/**
+ * THE SHELF DEPTH — DESIGN-V2 §2.11. One number, every client, every row.
+ *
+ * It is 25 because the contract now says 25. Before 17 Sep 2026 it said nothing,
+ * and the fleet answered with six different numbers: Roku 30, webOS 24 (10 on a
+ * "Top 10" row), Fire TV 12/18/30 in one screen, Tizen 40/12/30/48/60, and THIS
+ * client and tvOS with no cap at all — whatever the server sent is what the
+ * shelf held. The literal 25 was not a row size in any of the six repos.
+ *
+ * THE CAP IS OURS AND IT IS APPLIED AFTER THE MERGE. §2.11 is explicit that row
+ * depth must never be an upstream page size: the addon merges several sources
+ * into one catalogue and only then answers. Asking an upstream for 25 would let
+ * each source decide its own shelf depth, which is precisely how Fire TV ended
+ * up with three numbers and Tizen with five.
+ */
+const ROW_CAP = 25;
+
+/**
+ * FILL A SHELF, AND GIVE IT ITS OWN ADDRESS.
+ *
+ * ONE function for every catalogue row, and that is the point rather than
+ * tidiness. §2.11 exists because six clients each answered the depth question
+ * alone; three loaders in THIS file answering it separately is the same defect
+ * one scale down. loadRow(), loadFreshHomeRow() and loadSDUIRow() all end here.
+ *
+ * `viewAll.load` IS THE SOURCE DESCRIPTOR, and it is a thunk rather than a
+ * {type, id} pair on purpose. §2.11's rule is that a row carries its own way
+ * back to its own source and View All reads THAT — never the row's heading. A
+ * thunk satisfies it for every kind of row we have without a second shape: a
+ * catalogue row closes over the metas it already holds, and an Emby row closes
+ * over a bigger request. The heading is display text; it gets edited and
+ * translated, and it is not an address. The Roku's HomeRouteForRow guesses a
+ * destination by string-matching the heading and therefore opens a DIFFERENT
+ * catalogue than the one that filled the shelf — that is the bug this shape
+ * is built to not have.
+ *
+ * NO SECOND REQUEST FOR A CATALOGUE ROW, and that is measured rather than
+ * assumed. The addon answers a catalogue whole — `server.js:4388` is
+ * `metas.slice(0, 300)` — so the full group is already in hand when the shelf
+ * is drawn. Live counts on 17 Sep 2026: blazing-movies 300, blazing-series 300,
+ * blazing-anime 300, blazing-livetv 300, blazing-bollywood 270, blazing-asian
+ * 38. Fetching again would fetch nothing new. (The manifest advertises
+ * `extra: ['skip']` on all 47 catalogs and NO route serves it —
+ * /catalog/movie/blazing-movies/skip=25.json answers 404 — so a client that
+ * believed the manifest would get an error, not a page.)
+ */
+function fillRow(section, metas, viewAll) {
+  const track = $('.row-track', section);
+  track.replaceChildren(...metas.slice(0, ROW_CAP).map(buildCard));
+  section._viewAll = viewAll || null;
+  const more = $('.row-more', section);
+  if (!more) return;
+  // The button appears only when there is something behind it. A "View all"
+  // that opens the same 25 cards the viewer is already looking at is worse
+  // than no button — the same reason §2.11 clause 4 says a row that cannot be
+  // opened gets none.
+  const hasMore = !!viewAll && metas.length > ROW_CAP;
+  more.hidden = !hasMore;
+  if (hasMore) more.setAttribute('aria-label', `View all ${metas.length} in ${viewAll.title}`);
+}
+
+/**
+ * Open a shelf's whole catalogue.
+ *
+ * Reads the row's OWN descriptor and nothing else — no heading, no guess. The
+ * grid is `.search-results`, which is this app's one poster grid (search, Emby,
+ * Discover and Requests already render into it), so a View All page inherits
+ * the card geometry, the focus law and the d-pad walk for free.
+ */
+async function openViewAll(section) {
+  const viewAll = section && section._viewAll;
+  if (!viewAll) return;
+  const grid = $('#viewall-results');
+  $('#viewall-title').textContent = viewAll.title;
+  $('#viewall-count').textContent = '';
+  grid.replaceChildren();
+  showRoute('viewall');
+  let metas = [];
+  try { metas = (await viewAll.load()) || []; } catch { metas = []; }
+  // The route may have moved on while a slower source answered.
+  if (state.route !== 'viewall') return;
+  metas = metas.filter((meta) => ratingAllowed(meta.contentRating));
+  $('#viewall-count').textContent = metas.length ? `${metas.length} titles` : 'Nothing here right now.';
+  grid.replaceChildren(...metas.map(buildCard));
+}
+
 function buildRowSkeleton(catalog) {
   const section = el('section', 'row');
   section.dataset.type = plainText(catalog.type);
@@ -2271,7 +2359,18 @@ function buildRowSkeleton(catalog) {
   heading.textContent = plainText(catalog.name, catalog.id);
   const track = el('div', 'row-track');
   for (let i = 0; i < 6; i += 1) track.appendChild(el('div', 'card skeleton'));
-  section.append(heading, track);
+  // VIEW ALL — DESIGN-V2 §2.11. In the markup from the start and `hidden` until
+  // fillRow() finds there is more than ROW_CAP behind it, so the row never
+  // reflows a button in after the cards have already been drawn. A real
+  // <button> rather than a styled div because dpad.js walks real focusables.
+  const more = el('button', 'row-more');
+  more.type = 'button';
+  more.textContent = 'View all';
+  more.hidden = true;
+  more.addEventListener('click', () => openViewAll(section));
+  const head = el('div', 'row-head');
+  head.append(heading, more);
+  section.append(head, track);
   return section;
 }
 
@@ -2761,7 +2860,7 @@ async function loadRow(catalog, section, request = homeRequest) {
       section.remove();
       return [];
     }
-    track.replaceChildren(...metas.map(buildCard));
+    fillRow(section, metas, { title: plainText(catalog.name, catalog.id), load: async () => metas });
     claimHeroRow(section, metas);
     return metas;
   } catch {
@@ -2782,7 +2881,7 @@ async function loadFreshHomeRow(shelf, section, request = homeRequest) {
       section.remove();
       return [];
     }
-    track.replaceChildren(...metas.map(buildCard));
+    fillRow(section, metas, { title: plainText(shelf.title || shelf.name, 'More'), load: async () => metas });
     claimHeroRow(section, metas);
     return metas;
   } catch {
@@ -2850,7 +2949,7 @@ async function loadSDUIRow(catalogInfo, section, request = homeRequest) {
       section.remove();
       return [];
     }
-    track.replaceChildren(...metas.map(buildCard));
+    fillRow(section, metas, { title: plainText(catalogInfo.name || catalogInfo.title, catalogInfo.catalogSlug), load: async () => metas });
     claimHeroRow(section, metas);
     return metas;
   } catch {

@@ -404,6 +404,25 @@
       <div id="search-media-results" hidden></div>
     </section>
 
+    <!-- VIEW ALL (DESIGN-V2.md §2.11). A shelf holds 25; this is the whole
+         catalogue behind it. It is ONE page for every row, fed by the row's own
+         source descriptor (see fillRow/openViewAll in app.js) rather than by its
+         heading — routing off the heading is the bug §2.11 was written about,
+         and it is why the Roku's View All opens a different catalogue than the
+         one that filled the shelf.
+
+         The grid is `.search-results`, this app's single poster grid, already
+         shared by search, Emby, Discover and Requests. Reusing it means card
+         geometry, the focus law and the d-pad walk are inherited rather than
+         re-stated — a second grid class is how two of them drift apart. -->
+    <section id="viewall-view" class="view viewall-view" hidden>
+      <header class="viewall-head">
+        <h2 id="viewall-title" class="viewall-title"></h2>
+        <p id="viewall-count" class="viewall-count" role="status"></p>
+      </header>
+      <div id="viewall-results" class="search-results"></div>
+    </section>
+
     <!-- B22. The three-section saved-titles screen, ported from Fire TV's
          ListsActivity.kt: Watchlist, Collection and Watched, each with its own
          count and its own one-line description, and every row openable or

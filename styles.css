@@ -687,6 +687,37 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .rows { display: flex; flex-direction: column; gap: 29px; }
 .row[hidden] { display: none; }
 .row-title { margin: 0 0 11px var(--gutter); font-size: var(--fs-title); font-weight: var(--fw-bold); letter-spacing: -.03em; }
+
+/* ── VIEW ALL — DESIGN-V2 §2.11 ──────────────────────────────────────────────
+   The heading moved inside `.row-head` so the button can sit on its baseline.
+   Safe by inspection rather than by hope: every `.row-title` rule in this file
+   and in the six sibling scripts is a DESCENDANT selector, so none of them
+   breaks on the extra wrapper. `.row-title` keeps its own left gutter, which is
+   why this row is not padded — padding it would double that margin and push
+   every shelf heading out of line with the cards beneath it. */
+.row-head { display: flex; align-items: baseline; gap: 12px; }
+.row-head .row-title { flex: 1 1 auto; min-width: 0; }
+.row-more {
+  flex: 0 0 auto;
+  margin: 0 var(--gutter) 11px 0;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  font-weight: var(--fw-bold);
+  /* SETTLE, not the card law. §2.6 is explicit: a button, chip or row control
+     is 140ms outQuad; 250ms outCubic is for a card, tile, poster or thumb.
+     "Focus is focus" is the reasoning §2.6 exists to refuse. */
+  transition: color var(--settle), background var(--settle), border-color var(--settle);
+}
+.row-more:hover { color: #fff; background: var(--surface-focus); border-color: var(--accent); }
+.row-more:focus-visible { outline: none; color: #fff; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+.viewall-head { margin: 0 var(--gutter) 18px; }
+.viewall-title { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: -.03em; }
+.viewall-count { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-meta); }
 .row-track, .result-grid {
   display: flex;
   gap: 12px;
