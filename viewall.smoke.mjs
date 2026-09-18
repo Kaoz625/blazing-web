@@ -150,12 +150,34 @@ const smallRow = rows.find((r) => r.cards === SMALL);
 ok(!smallRow || !smallRow.more, 'a shelf that is already complete shows NO View all',
   smallRow ? `[${smallRow.title} cards=${smallRow.cards} more=${smallRow.more}]` : '[no small row]');
 
-/* ── 3. IT OPENS THE WHOLE CATALOGUE ─────────────────────────────────────────*/
-const rowTitles = await page.evaluate((cap) => {
+/* ── 3. IT OPENS THE WHOLE CATALOGUE, AND THE HEADING IS NOT AN ADDRESS ───────
+   THE TRAP, ported from blazing-webos/test/viewall.smoke.mjs, whose harness was
+   the stronger of the two. Disjoint fixtures alone are a PASSIVE check: they
+   catch a heading-matcher only if the heading it read happened to name the other
+   catalogue. Nothing here guaranteed that, so the assertion below could go green
+   on a client that read the heading and simply failed to match anything.
+
+   So the heading is REWRITTEN, to a real heading on this very screen backed by
+   the DISJOINT small catalogue, and only then is View all pressed. A client that
+   routed by heading — the Roku's shipped bug, HomeRouteForRow at
+   HomeScreen.brs:1066-1112 — now lands in `small` and every card says so. This
+   client cannot: there is no string to match, only the `viewAll.load` thunk the
+   row closed over when it was built.
+
+   The rewrite is the LAST thing before the click, because a client that read the
+   heading at BUILD time and cached it would be unaffected by a later edit — and
+   that client is also correct under §2.11, which asks only that the destination
+   come from the row's own descriptor rather than its display copy. What must
+   never happen is the read at PRESS time, which is what this measures. */
+const decoyTitle = smallRow ? smallRow.title : 'Small Shelf';
+const rowTitles = await page.evaluate(({ cap, decoy }) => {
   const s = Array.from(document.querySelectorAll('#home-view section.row'))
     .find((x) => x.querySelectorAll('.row-track .card:not(.skeleton)').length === cap);
+  const t = s.querySelector('.row-title');
+  if (t) t.textContent = decoy;
   return Array.from(s.querySelectorAll('.row-track .card')).slice(0, 5).map((c) => c.textContent.trim());
-}, ROW_CAP);
+}, { cap: ROW_CAP, decoy: decoyTitle });
+ok(!!decoyTitle && decoyTitle !== '', 'the fixture has a second, disjoint row to impersonate', `[${decoyTitle}]`);
 
 await page.evaluate((cap) => {
   const s = Array.from(document.querySelectorAll('#home-view section.row'))
@@ -179,11 +201,13 @@ ok(grid.count === BIG, `the page holds the WHOLE catalogue, not the shelf's slic
 ok(grid.count > ROW_CAP, `which is more than the shelf showed  [${grid.count} > ${ROW_CAP}]`);
 
 /* ── 4. THE DESTINATION IS THE ROW'S OWN SOURCE ───────────────────────────────
-   THE ASSERTION THIS FILE IS FOR. The two fixture catalogues are disjoint, so a
-   View All that guessed its destination from the heading — the Roku's bug —
-   would come back full of `small N` and be caught here. Order is compared too:
-   the shelf is the first 25 OF THIS LIST, so the grid must open on the same
-   titles in the same order, not merely on the same catalogue re-sorted. */
+   THE ASSERTION THIS FILE IS FOR, and it is now armed by the rewrite in §3. The
+   row was pressed while WEARING THE OTHER ROW'S NAME, and the two fixture
+   catalogues are disjoint, so a View All that guessed its destination from the
+   heading — the Roku's bug — comes back full of `small N` and is caught below.
+   Order is compared too: the shelf is the first 25 OF THIS LIST, so the grid
+   must open on the same titles in the same order, not merely on the same
+   catalogue re-sorted. */
 ok(grid.first.length === 5 && grid.first.every((t, i) => t === rowTitles[i]),
   'the page opens on the ROW\'S OWN source, in the row\'s own order',
   `row=${JSON.stringify(rowTitles)} grid=${JSON.stringify(grid.first)}`);
