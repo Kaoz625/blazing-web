@@ -102,7 +102,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // 25-card shelf and the View All that opens the row's OWN source rather than a
 // guess from its heading. Counted on disk before writing it — `ls *.smoke.mjs
 // | wc -l` answered 41 — rather than by adding one to what was here.
-const MIN_SUITES = 41;
+// Raised 41 -> 42 when games-hub.smoke.mjs landed with the one games browser
+// that replaces the eight nookie "Game Browser" apps. Same rule as every line
+// above: this number is the real count, always.
+const MIN_SUITES = 42;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

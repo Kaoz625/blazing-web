@@ -775,23 +775,161 @@
     </div>
 
     <!-- ── Games View ──
-         Built against roku channels/source/lib/Games.brs and
-         GameDetailScreen.brs (see games.js). Discovery only: there is no
-         game to stream, same as every other client in this fleet. -->
+         ONE games browser, replacing the eight closed com.nookie.* "Game
+         Browser" .app binaries on mac1 (FitGirl, GOG, PS3, PS4, PS5, PSP,
+         Switch, Xbox 360). Markus: "merge them into one so i dont have so
+         many apps to go through. there should be a way to add more sources
+         and this should also be accessible on the ps5."
+
+         THREE TABS, and the split is deliberate:
+           BROWSE    — search every registered source at once (games.js
+                       hub half, GET /games/search on the add-on).
+           SOURCES   — the registry: what is registered, what is on, and
+                       the form that adds a new one.
+           ACCOUNTS  — Real-Debrid and TorBox keys. The DIRECT lane must
+                       work with both of these empty; that is the case
+                       games-hub.smoke.mjs tests by name.
+
+         The fourth tab, CATALOGUE, is the original RAWG poster wall this
+         file shipped with (Roku's GamesScreen/Games.brs mirror). It is
+         discovery only — cover art and a trailer, never a download — and
+         it is kept because it is the only place cover art comes from for
+         a title no source has. Its markup and ids are unchanged so
+         games.smoke.mjs still proves it. -->
     <section id="games-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">RAWG Catalogue</p>
+        <p class="eyebrow">One library, every system</p>
         <h1>🎮 Games</h1>
-        <p>Browse and search. Info only — there is no game to stream here.</p>
+        <p>Search every source at once. Real-Debrid, TorBox, or a plain direct link.</p>
       </div>
-      <form id="games-search-form" class="search-form" role="search">
-        <input id="games-search-input" name="gq" type="search" autocomplete="off" placeholder="Search for a game" />
-        <button class="primary-button" type="submit">Search</button>
-      </form>
-      <p id="games-status" class="search-status" role="status"></p>
-      <div id="games-results" class="search-results"></div>
-      <button type="button" id="games-load-more" class="primary-button" hidden>Load more</button>
+
+      <nav id="games-tabs" class="edu-tabs" role="tablist" aria-label="Games sections">
+        <button type="button" class="edu-tab active" role="tab" data-games-tab="browse" aria-selected="true">Browse</button>
+        <button type="button" class="edu-tab" role="tab" data-games-tab="sources" aria-selected="false">Sources</button>
+        <button type="button" class="edu-tab" role="tab" data-games-tab="accounts" aria-selected="false">Accounts</button>
+        <button type="button" class="edu-tab" role="tab" data-games-tab="catalogue" aria-selected="false">Catalogue</button>
+      </nav>
+
+      <!-- ── BROWSE ── one query, every enabled source ── -->
+      <div id="games-tab-browse" class="games-panel" role="tabpanel">
+        <form id="games-hub-form" class="search-form" role="search">
+          <input id="games-hub-input" name="ghq" type="search" autocomplete="off" placeholder="Search every source — e.g. Metroid Prime" />
+          <button class="primary-button" type="submit">Search</button>
+        </form>
+        <div id="games-platform-chips" class="games-chip-row" role="group" aria-label="Filter by system"></div>
+        <div class="games-chip-row">
+          <label class="games-select-label" for="games-source-filter">Source</label>
+          <select id="games-source-filter" class="games-select">
+            <option value="">All sources</option>
+          </select>
+        </div>
+        <p id="games-hub-status" class="search-status" role="status"></p>
+        <!-- A SOURCE THAT FAILED IS NAMED HERE. /games/search answers an
+             errors[] beside its results, and without this one dead indexer
+             looks exactly like a thin catalogue. -->
+        <div id="games-hub-warnings" class="games-warnings" role="status"></div>
+        <div id="games-hub-results" class="search-results result-grid"></div>
+      </div>
+
+      <!-- ── SOURCES ── the registry Markus asked to be able to grow ── -->
+      <div id="games-tab-sources" class="games-panel" role="tabpanel" hidden>
+        <p id="games-sources-status" class="search-status" role="status"></p>
+        <ul id="games-sources-list" class="games-source-list"></ul>
+        <p id="games-sources-gap" class="games-sources-gap"></p>
+        <form id="games-source-add" class="games-add-form">
+          <h2 class="games-add-title">Add a source</h2>
+          <!-- These are validateSource()'s own required fields, in its own
+               words (services/addon/lib/game-sources.js): an id matching its
+               ID_RE, a label, at least one platform from its PLATFORMS list,
+               and a delivery from its DELIVERIES list. A form that asked for
+               anything else would only ever produce a 400. -->
+          <label class="games-field"><span>Id</span>
+            <input id="games-source-id" name="id" type="text" autocomplete="off" placeholder="steamrip" required /></label>
+          <label class="games-field"><span>Name</span>
+            <input id="games-source-name" name="label" type="text" autocomplete="off" placeholder="SteamRIP" required /></label>
+          <label class="games-field"><span>Address</span>
+            <input id="games-source-url" name="url" type="url" autocomplete="off" placeholder="https://steamrip.com" /></label>
+          <!-- DELIVERIES, verbatim out of lib/game-sources.js: magnet, torrent,
+               direct. The three options here used to be http / magnet / nzb,
+               and validateSource() would have refused every one of them with
+               `bad-delivery` — a form that can only ever produce a 400. -->
+          <label class="games-field"><span>Delivery</span>
+            <select id="games-source-kind" name="delivery">
+              <option value="direct">Direct download (needs no account)</option>
+              <option value="magnet">Magnet</option>
+              <option value="torrent">Torrent file</option>
+            </select></label>
+          <label class="games-field"><span>Systems</span>
+            <input id="games-source-platforms" name="platforms" type="text" autocomplete="off" placeholder="pc, switch, ps3" required /></label>
+          <button class="primary-button" type="submit">Add source</button>
+          <p id="games-source-add-status" class="detail-status" role="status"></p>
+        </form>
+      </div>
+
+      <!-- ── ACCOUNTS ── the two debrid lanes, and proof the third needs neither ── -->
+      <div id="games-tab-accounts" class="games-panel" role="tabpanel" hidden>
+        <!-- NO KEY BOXES, AND THAT IS THE POINT.
+             The add-on owns the Real-Debrid and TorBox keys: /games/sources
+             answers `lanes` and `debridEnabled` off its own debrid state, and
+             /games/resolve uses those. A copy in this browser could draw a
+             lane as ready while the server refuses it — two sources of truth
+             for one credential, which is worse than none. So this screen
+             reports what the server really has. -->
+        <div class="games-add-form">
+          <h2 class="games-add-title">Download accounts</h2>
+          <p class="detail-copy">The add-on holds these, not this browser. The
+             <strong>Direct</strong> lane needs no account at all — a plain HTTP
+             source works with both of the others missing.</p>
+          <div id="games-lane-state" class="games-lane-state"></div>
+          <p id="games-accounts-status" class="detail-status" role="status"></p>
+          <p class="detail-copy games-accounts-where">A key is set on the add-on as
+             <code>REALDEBRID_API_KEY</code> or <code>TORBOX_API_KEY</code>, then the
+             add-on is restarted. Setting one from here needs a LAN-only
+             <code>POST /games/accounts</code>, which the add-on does not serve yet.</p>
+        </div>
+      </div>
+
+      <!-- ── CATALOGUE ── the original RAWG poster wall. IDs UNCHANGED. ── -->
+      <div id="games-tab-catalogue" class="games-panel" role="tabpanel" hidden>
+        <form id="games-search-form" class="search-form" role="search">
+          <input id="games-search-input" name="gq" type="search" autocomplete="off" placeholder="Search for a game" />
+          <button class="primary-button" type="submit">Search</button>
+        </form>
+        <p id="games-status" class="search-status" role="status"></p>
+        <div id="games-results" class="search-results"></div>
+        <button type="button" id="games-load-more" class="primary-button" hidden>Load more</button>
+      </div>
     </section>
+
+    <!-- ── Game source dialog ── the download lanes for one found release.
+         SEPARATE from #game-detail-dialog on purpose: that one is the RAWG
+         info card (synopsis, screenshots, trailer) and this one is the act
+         of getting a file. Folding them together would put a Download
+         button on a catalogue row that has no release behind it. -->
+    <dialog id="game-source-dialog" class="detail-dialog" aria-labelledby="game-source-title">
+      <article class="detail-card">
+        <button id="game-source-close" class="detail-close icon-button" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+        <div id="game-source-art" class="detail-art" aria-hidden="true"></div>
+        <div class="detail-body">
+          <h2 id="game-source-title"></h2>
+          <p id="game-source-meta" class="detail-copy"></p>
+          <p id="game-source-file" class="detail-copy"></p>
+          <!-- IGDB fills these server-side (Twitch-owned; Markus's account
+               already has the app). Both are hidden until they really have
+               something, so an empty one never reads as a broken card. -->
+          <p id="game-source-summary" class="detail-copy" hidden></p>
+          <div id="game-source-shots" class="game-shots" hidden></div>
+          <h3 class="games-lane-head">Download lanes</h3>
+          <div id="game-source-lanes" class="games-lane-row"></div>
+          <div class="detail-actions">
+            <button id="game-source-ps5" class="secondary-button" type="button" hidden>Send to PS5</button>
+          </div>
+          <p id="game-source-status" class="detail-status" role="status"></p>
+        </div>
+      </article>
+    </dialog>
 
     <!-- ── Game detail dialog ── -->
     <dialog id="game-detail-dialog" class="detail-dialog" aria-labelledby="game-detail-title">

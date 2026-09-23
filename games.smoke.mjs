@@ -110,6 +110,16 @@ async function openApp({ configured = true, onCall } = {}) {
   // (app.js:3026, a plain `$$('[data-view]').forEach(...)`), so dispatching
   // the click directly is exercising the same handler a visible tap would.
   await page.evaluate(() => document.querySelector('[data-view="games"]').click());
+  // THE CATALOGUE IS NO LONGER THE DEFAULT TAB, AND IT NO LONGER LOADS ON OPEN.
+  //
+  // Games is now the one hub that replaces the eight nookie "Game Browser"
+  // apps, and it opens on BROWSE (search every registered source). The RAWG
+  // poster wall this suite proves is the fourth tab, and games.js loads its
+  // page 1 lazily the first time that tab is activated — deliberately, so a
+  // RAWG request is not spent on a screen nobody opened. Everything below
+  // this line is unchanged; it just has to open the tab first, exactly as a
+  // person would.
+  await page.click('[data-games-tab="catalogue"]');
   return { ctx, page, calls };
 }
 
@@ -232,6 +242,16 @@ async function settledStatus(page, id, timeout = 5000) {
   await page.goto(`${base}/index.html`, { waitUntil: 'domcontentloaded' });
   await selectProfile(page);
   await page.evaluate(() => document.querySelector('[data-view="games"]').click());
+  // THE CATALOGUE IS NO LONGER THE DEFAULT TAB, AND IT NO LONGER LOADS ON OPEN.
+  //
+  // Games is now the one hub that replaces the eight nookie "Game Browser"
+  // apps, and it opens on BROWSE (search every registered source). The RAWG
+  // poster wall this suite proves is the fourth tab, and games.js loads its
+  // page 1 lazily the first time that tab is activated — deliberately, so a
+  // RAWG request is not spent on a screen nobody opened. Everything below
+  // this line is unchanged; it just has to open the tab first, exactly as a
+  // person would.
+  await page.click('[data-games-tab="catalogue"]');
   await page.waitForSelector('#games-results .card', { timeout: 10000 });
   check('a poster-less game gets the no-image placeholder', (await page.locator('#games-results .card').first().evaluate((n) => n.classList.contains('no-image'))) === true);
   await page.click('#games-results .card >> nth=0');

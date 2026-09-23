@@ -61,3 +61,25 @@ like a timeout. That single cause accounted for five separate "broken" tests
 the packages from there and **refuses to publish an unsigned `.wgt`** — an
 unsigned widget fails on the TV rather than at build time, which is how an
 uninstallable download stayed on the site for weeks.
+
+## Blazing Games.app — one Mac icon in place of eight
+
+`mac/` builds a thin launcher that opens this same app at `#games`:
+
+    bash mac/build-app.sh          # -> /Applications/Blazing Games.app
+
+It replaces eight closed `com.nookie.*` "Game Browser" apps (FitGirl, GOG,
+PS3, PS4, PS5, PSP, Switch, Xbox 360), all still in `/Applications`. **They
+are not removed by this script** — Markus takes them off himself once this
+has earned it.
+
+The `.app` is NOT committed. `mac/build-app.sh` rebuilds it from
+`BlazingGames.applescript` and `make-icon.py` in a second, and a binary blob
+nobody can diff is how a stale build ships.
+
+Point it somewhere else while working on the hub:
+
+    echo 'http://127.0.0.1:8080/index.html#games' > ~/.blazing-games-url
+
+The same hub runs on the PS5 through the `blazing-games` tile in
+`~/Desktop/blazing-ps5`, and on the four televisions through this app.

@@ -12,3 +12,11 @@ __pycache__/
 
 # playwright and its friends, for the *.smoke.mjs harnesses. npm ci restores them.
 node_modules/
+
+# The built Mac launcher and its intermediates. `bash mac/build-app.sh`
+# rebuilds all three in a second from BlazingGames.applescript and
+# make-icon.py, and a binary nobody can diff is how a stale build ships.
+mac/build/
+mac/BlazingGames.iconset/
+mac/BlazingGames.icns
+mac/BlazingGames-512.png

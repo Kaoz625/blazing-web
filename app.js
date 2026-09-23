@@ -6571,7 +6571,31 @@ document.addEventListener('blazing-profile-selected', (event) => {
   discoverResults.replaceChildren();
   if ($('#emby-view').dataset.loaded === 'true') loadEmbyPage(true);
   boot();
+  openHashRoute();
 });
+
+/* A URL may name the screen to land on: …/app/#games opens Games directly.
+ *
+ * WHY IT HANGS OFF THE PROFILE EVENT AND NOT OFF BOOT. The profile gate holds
+ * the whole screen until a viewer is picked, and showRoute() before that would
+ * be overwritten the moment the gate lets go — the same trap the comment above
+ * loadDiscoverMenu() describes for three earlier attempts at top-level code.
+ * This is the first point at which a route survives.
+ *
+ * ADDED FOR THE ONE-ICON RULE. "Blazing Games.app" on the Mac and the Blazing
+ * Games tile on the PS5 both open this app to replace eight separate game
+ * browsers; landing on Discover and making him find the Games tab would put
+ * two of the clicks straight back.
+ *
+ * It only honours a hash that a real nav button already exposes, so it can
+ * never route to a screen that is not reachable by hand anyway, and a hash it
+ * does not know is ignored rather than blanking the app. */
+function openHashRoute() {
+  const wanted = String(window.location.hash || '').replace(/^#/, '').trim();
+  if (!wanted) return;
+  if (!document.querySelector(`[data-view="${CSS.escape(wanted)}"]`)) return;
+  showRoute(wanted);
+}
 
 document.addEventListener('blazing-profile-unlock-expired', () => {
   state.mediaProfile = null;
