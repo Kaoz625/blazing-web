@@ -827,6 +827,96 @@ for (const who of [
   await s.ctx.close();
 }
 
+// ── (j3) the LIVE site's QR address: ?pair=%3Acode ────────────────────────────
+// Found from the PS5, 24 Sep 2026. blazing-site's `/pair/:code /app/?pair=:code`
+// does not fill a placeholder inside a query string, so every scan of a TV's QR
+// arrived as ?pair=%3Acode. That normalised to "CODE", was peeked, failed, and a
+// link code got no box. A value that is not six code characters must open the
+// box instead, and peek nothing.
+{
+  const s = await scenario({
+    seed: { id: 'dev-1', token: 'tok' },
+    path: '/index.html?pair=%3Acode',
+    fleet: (c) => {
+      if (c.path === '/profiles') return ONE_PROFILE('Mark');
+      if (c.path === '/pair/peek') {
+        return new URLSearchParams(c.search).get('code') === 'K7M2PX'
+          ? { status: 200, body: { model: 'PlayStation 5', label: 'Blazing Web', requestedAt: new Date().toISOString() } }
+          : { status: 404, body: { error: 'unknown code' } };
+      }
+      return null;
+    },
+  });
+  await s.page.waitForTimeout(1500);
+  await tap(s.page, '.bp-profile');
+  await s.page.waitForTimeout(700);
+  const box = await s.page.evaluate(() => ({
+    sheet: !document.getElementById('bp-approve')?.hidden,
+    input: !document.getElementById('bp-approve-input')?.hidden,
+    focused: document.activeElement?.id,
+  }));
+  check('(j3) ?pair=%3Acode opens the code box and peeks NOTHING',
+    box.sheet && box.input && box.focused === 'bp-approve-input' && s.calls('GET', '/pair/peek').length === 0, JSON.stringify(box) + ' ' + s.trail());
+  await type(s.page, '#bp-approve-input', 'k7m2px');
+  await s.page.waitForTimeout(800);
+  check('(j3) typing the code from the TV then asks the question',
+    (await s.page.evaluate(() => document.getElementById('bp-approve-question')?.textContent)) === 'Approve PlayStation 5 as a device on your account?');
+  check('(j3) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
+// ── (j4) a dead code from a LINK still leaves the box ─────────────────────────
+// It used to stop at "No device is waiting on that code." with nothing to type
+// into, while the other screen was still showing a good code.
+{
+  const s = await scenario({
+    seed: { id: 'dev-1', token: 'tok' },
+    path: '/index.html?pair=ABCDEF',
+    fleet: (c) => {
+      if (c.path === '/profiles') return ONE_PROFILE('Mark');
+      if (c.path === '/pair/peek') {
+        return new URLSearchParams(c.search).get('code') === 'K7M2PX'
+          ? { status: 200, body: { model: 'Roku Ultra', label: 'Living room', requestedAt: new Date().toISOString() } }
+          : { status: 404, body: { error: 'unknown code' } };
+      }
+      return null;
+    },
+  });
+  await s.page.waitForTimeout(1500);
+  await tap(s.page, '.bp-profile');
+  await s.page.waitForTimeout(1000);
+  const after = await s.page.evaluate(() => ({
+    input: !document.getElementById('bp-approve-input')?.hidden,
+    actionsHidden: document.getElementById('bp-approve-actions')?.hidden,
+    url: location.search,
+  }));
+  const said = await status(s.page);
+  check('(j4) the dead link code was peeked once, and the box is now open',
+    s.calls('GET', '/pair/peek').length === 1 && after.input && after.actionsHidden === true, JSON.stringify(after));
+  check('(j4) the line says so and says what to do', /No device is waiting/.test(said) && /Type the code/.test(said), said);
+  check('(j4) the dead code is gone from the address', !after.url.includes('pair='), after.url);
+  await type(s.page, '#bp-approve-input', 'k7m2px');
+  await s.page.waitForTimeout(800);
+  check('(j4) the typed code is peeked and asked about',
+    (await s.page.evaluate(() => document.getElementById('bp-approve-question')?.textContent)) === 'Approve Roku Ultra as a device on your account?');
+  check('(j4) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
+// ── (j5) a phone that is NOT signed in opens the QR link ──────────────────────
+// Approving takes a signed-in screen, so this phone sees the gate. It must say
+// why, or the scan reads as "nothing happened".
+{
+  const s = await scenario({ path: '/index.html?pair=K7M2PX', fleet: () => null });
+  await s.page.waitForTimeout(1200);
+  const said = await status(s.page);
+  check('(j5) the gate says to sign in on this phone first, and names the owner way in',
+    (await view(s.page)) === 'gate' && /sign in on this phone first/.test(said) && /I am the owner/.test(said), said);
+  check('(j5) and it registers nothing just by looking', s.calls('POST', '/agent/register').length === 0, s.trail());
+  check('(j5) no ReferenceError/TypeError', s.faults().length === 0, s.faults().slice(0, 2).join(' | '));
+  await s.ctx.close();
+}
+
 // ── (k) Gate → "I am the owner" → Back returns to the GATE ────────────────────
 // It called showProfiles(): an empty rail, no owner or invite hatch (those are
 // unhidden only by a 403 from /profiles), and the gate gone. Stranded.

@@ -1790,6 +1790,12 @@
     // visit there is nothing to check again, and a button that can only say
     // "nothing happened" is worse than no button.
     if (ui.gateRecheck) ui.gateRecheck.hidden = !(state.credentials || storedCredentials());
+    // A phone that scanned a TV's QR but is not signed in ITSELF lands here,
+    // not on the approve sheet: approving takes a signed-in screen. Without a
+    // line saying so, the scan looked like it did nothing (24 Sep 2026).
+    if (!message && pairParam().present) {
+      message = 'To approve the other screen, sign in on this phone first. The owner can use "I am the owner". The approve step opens next.';
+    }
     setStatus(message || '', type);
   }
 
@@ -2195,7 +2201,15 @@
       const fromPath = PAIR_PATH.exec(url.pathname);
       if (fromPath) return { present: true, code: fromPath[1].toUpperCase() };
       if (!url.searchParams.has('pair')) return { present: false, code: '' };
-      return { present: true, code: normalizePairCode(url.searchParams.get('pair')) };
+      // A value that is not SIX code characters is not a code, so the sheet
+      // opens with the box instead of peeking it. Found 24 Sep 2026 from the
+      // PS5: the site's `/pair/:code /app/?pair=:code` rule does not fill a
+      // placeholder inside a query string, so every QR scan landed on
+      // ?pair=%3Acode. That normalised to "CODE", the peek said "No device is
+      // waiting on that code", and a link code gets no box — Markus had the
+      // code on his TV and nowhere to type it.
+      const code = normalizePairCode(url.searchParams.get('pair'));
+      return { present: true, code: code.length === PAIR_CODE_LENGTH ? code : '' };
     } catch {
       return { present: false, code: '' };
     }
@@ -2315,16 +2329,23 @@
     }
     // A dead code typed by hand is a typo until proven otherwise: keep the box
     // and let the viewer fix it. A dead code from a link is dead — drop it so a
-    // refresh does not ask again.
+    // refresh does not ask again — and then OPEN the box. It used to stop at
+    // the error line, which left a phone holding a broken link with no way to
+    // type the code the other screen is still showing. The box is the only
+    // way forward, so there is always one.
     const dead = (message) => {
       state.approveCode = '';
-      setStatus(message, 'error');
-      if (state.approveEntry) {
-        ui.approveInput.value = '';
-        window.setTimeout(() => ui.approveInput.focus(), 0);
-        return;
+      if (!state.approveEntry) {
+        clearPairParam();
+        state.approveEntry = true;
+        ui.approveQuestion.textContent = '';
+        ui.approveActions.hidden = true;
+        ui.approveInput.hidden = false;
+        message = `${message} Type the code shown on the other screen.`;
       }
-      clearPairParam();
+      setStatus(message, 'error');
+      ui.approveInput.value = '';
+      window.setTimeout(() => ui.approveInput.focus(), 0);
     };
     if (result.status === 404) {
       dead('No device is waiting on that code.');

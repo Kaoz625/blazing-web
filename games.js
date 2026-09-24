@@ -404,14 +404,24 @@
  *
  * ── PS5 ─────────────────────────────────────────────────────────────────────
  *
- * The console does not run this app. It reaches Blazing through the JTPlay
- * plugin (blazing/clients/ps5/plugins/blazing.js), which has its own games
- * branch — the PS5 has no user-reachable browser at all. The PS5 hand-off
- * button below is for driving it FROM the Mac.
+ * The console DOES run this app now. Its "Blazing Games" tile (PPSA99190,
+ * ps5-linux tools/blazing-games-tile) opens https://blazingstream.lyreosai.com/
+ * app/#games in the PS5's own system browser (NPXS40036, a WebKit that sends
+ * "PlayStation 5/10.20"). isConsole() below is what keeps the Download button
+ * off that screen. The PS5 hand-off button is still for driving the console
+ * FROM the Mac.
  * =========================================================================== */
 (() => {
   const ADDON_BASE = window.BLAZING_API_BASE || 'https://addon.lyreosai.com';
-  const TIMEOUT_MS = 20000;
+  // THE CLIENT MUST OUTWAIT THE SERVER. /games/search holds a question for up
+  // to 25 s (DEFAULT_WAIT_MS in services/addon/lib/game-source-routes.js)
+  // before it answers 202 "still looking", and a real answer then has IGDB
+  // fields laid over it. This was 20 s. Measured 24 Sep 2026 against the live
+  // add-on: a cold "tekken" answered in 21.7 s and "god of war" in 21.9 s, so
+  // the browser cut the socket first and printed "Could not reach the add-on."
+  // about an add-on that was answering. On the PS5 browser that line was the
+  // only thing Markus ever saw. 45 s covers the 25 s hold and the enrichment.
+  const TIMEOUT_MS = 45000;
   const LIMIT = 60;
 
   // `http`, not `direct`. The server calls this lane `http` in lanesFor(), in
@@ -562,8 +572,20 @@
     } catch { return ''; }
   }
 
+  // AbortSignal.timeout() is Safari 16+. The console's WebKit claims 17, but a
+  // missing one would throw before the try below and leave the screen saying
+  // "Searching…" for ever, so the old-browser path costs one line.
+  function timeoutSignal(ms) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const controller = new AbortController();
+    window.setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  }
+
   async function api(path, { method = 'GET', body = null } = {}) {
-    const init = { method, signal: AbortSignal.timeout(TIMEOUT_MS), headers: {} };
+    const init = { method, signal: timeoutSignal(TIMEOUT_MS), headers: {} };
     if (body != null) {
       init.body = JSON.stringify(body);
       init.headers['content-type'] = 'application/json';
@@ -573,9 +595,29 @@
       let json = null;
       try { json = await res.json(); } catch { json = null; }
       return { status: res.status, ok: res.ok, json };
-    } catch {
-      return { status: 0, ok: false, json: null };
+    } catch (error) {
+      // Nothing here aborts a request except the timer, so an abort IS a
+      // timeout: TimeoutError from AbortSignal.timeout, AbortError from the
+      // fallback controller.
+      const name = error && error.name;
+      return { status: 0, ok: false, json: null, timeout: name === 'TimeoutError' || name === 'AbortError' };
     }
+  }
+
+  /**
+   * The sentence for a call that did not come back with an answer.
+   *
+   * THREE DIFFERENT FAILURES, and they used to share one line. "Could not reach
+   * the add-on" is only true of the last one: a SLOW add-on is reachable and
+   * still working (and caches what it finds, so asking again is quick), and an
+   * add-on that answered 503 said in its own words what went wrong.
+   */
+  function failureText(res) {
+    if (res.timeout) return 'The add-on is slow to answer right now. Try again in a minute — it keeps searching and remembers what it finds.';
+    const told = res.json && res.json.unavailable && clean(res.json.unavailable.message);
+    if (told) return told;
+    if (res.status === 0) return 'Could not reach the add-on. Check the network connection.';
+    return `The add-on answered with an error (${res.status}). Try again in a minute.`;
   }
 
   function refs() {
@@ -664,7 +706,7 @@
       return;
     }
     if (!res.ok || !res.json) {
-      if (r.srcStatus) r.srcStatus.textContent = 'Could not reach the add-on.';
+      if (r.srcStatus) r.srcStatus.textContent = failureText(res);
       return;
     }
     const d = res.json;
@@ -953,6 +995,169 @@
     return button;
   }
 
+  /**
+   * ONE TITLE ROW on a system's list. It is a GAME, not a release: pressing it
+   * asks what the add-on can deliver for it. `row.source` set means the row came
+   * off /games/library (a catalog that holds links for it); unset means it came
+   * off /games/browse (IGDB, which only knows the game exists).
+   */
+  function titleRow(row) {
+    const button = el('button', 'games-row games-title-row');
+    button.type = 'button';
+    const title = clean(row.title, 'Untitled');
+    button.setAttribute('aria-label', `Ways to get ${title}`);
+    const cover = safeImage(row.cover);
+    if (cover) {
+      const img = el('img', 'games-row-art');
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = '';
+      img.src = cover;
+      button.append(img);
+    } else {
+      button.append(el('div', 'games-row-art is-blank', (title[0] || '?').toUpperCase()));
+    }
+    const main = el('div', 'games-row-main');
+    main.append(el('span', 'games-row-title', title));
+    // One caption line; a second value joins the first with a middle dot
+    // (DESIGN-V2 §2.8, "Caption is ONE line").
+    const bits = [];
+    if (row.provider) bits.push(clean(row.provider));
+    const year = clean(row.released).slice(0, 4);
+    if (/^\d{4}$/.test(year)) bits.push(year);
+    const size = sizeText(row.size);
+    if (size) bits.push(size);
+    if (Number(row.hosts) > 0) bits.push(`${Number(row.hosts)} link${Number(row.hosts) === 1 ? '' : 's'}`);
+    if (clean(row.risk)) bits.push('Warning');
+    main.append(el('span', 'games-row-meta', bits.join('  ·  ')));
+    button.append(main);
+    button.addEventListener('click', () => {
+      if (row.source) {
+        openTitle(row);
+        return;
+      }
+      // IGDB title: the route's own documented flow is an ordinary search for
+      // that exact name, with the chosen system still set.
+      const r = refs();
+      hub.query = title;
+      if (r.input) r.input.value = title;
+      runSearch();
+    });
+    return button;
+  }
+
+  /**
+   * A SYSTEM WITH NO NAME TYPED: that system's list of games.
+   *
+   * THIS IS WHAT A CONTROLLER DOES FIRST, and it was the "can't reach the
+   * add-on" Markus saw on the PS5. A chip is one press and a name is the
+   * on-screen keyboard, so "pick a system" is the natural first move — and it
+   * sent /games/search?q= with nothing in it. The add-on refuses that with 400
+   * missing-query (its sources are archives you search, not lists), and this
+   * screen printed "Could not reach the add-on." Measured 24 Sep 2026: 400 in
+   * 0.23 s, on a healthy add-on.
+   *
+   * WHICH LIST. /games/library first: every game a catalog HOLDS A LINK FOR
+   * (1,056 for ps5 and 8,292 for pc, 0.5 s, measured 24 Sep), so every row
+   * opens into something. /games/browse (IGDB) only when no catalog covers the
+   * system (404 no-catalog-source): IGDB knows what EXISTS, and its rows can
+   * open into nothing, so it is the fallback and not the default.
+   */
+  async function runBrowse() {
+    const r = refs();
+    const asked = hub.platform;
+    const label = platformLabel(asked);
+    hub.loading = true;
+    r.results.replaceChildren();
+    if (r.warnings) r.warnings.replaceChildren();
+    r.status.textContent = `Loading ${label} games…`;
+
+    let res = await api(`/games/library?platform=${encodeURIComponent(asked)}&pageSize=${LIMIT}`);
+    let fromIgdb = false;
+    if (res.status === 404) {
+      fromIgdb = true;
+      res = await api(`/games/browse?platform=${encodeURIComponent(asked)}&limit=${LIMIT}`);
+    }
+    hub.loading = false;
+    // A chip pressed, or a name typed, while this was loading wins.
+    if (hub.platform !== asked || hub.query) {
+      runSearch();
+      return;
+    }
+
+    if (fromIgdb && (res.status === 503 || res.status === 404)) {
+      r.status.textContent = `No list of ${label} games yet. Type a game name instead.`;
+      return;
+    }
+    if (!res.ok || !res.json) {
+      r.status.textContent = failureText(res);
+      return;
+    }
+    const rows = (Array.isArray(res.json.results) ? res.json.results : []).filter((row) => clean(row && row.title));
+    if (!rows.length) {
+      r.status.textContent = `No ${label} games to list. Type a game name instead.`;
+      return;
+    }
+    r.results.append(...rows.map(titleRow));
+    const total = Number(res.json.total) || rows.length;
+    r.status.textContent = total > rows.length
+      ? `${rows.length} of ${total} ${label} games. Pick one, or type a name to find the rest.`
+      : `${rows.length} ${label} games. Pick one.`;
+  }
+
+  /**
+   * ONE GAME off the library: every way to get it. /games/library/title signs
+   * each row, so what comes back is the same shape /games/search returns and
+   * opens the same download dialog.
+   *
+   * `risk` IS SHOWN, NEVER DROPPED. The route marks a risky title and asks the
+   * client to warn; Markus chose "show everything, warn clearly".
+   */
+  async function openTitle(row) {
+    const r = refs();
+    if (hub.loading) return;
+    const title = clean(row.title, 'Untitled');
+    hub.loading = true;
+    r.results.replaceChildren();
+    if (r.warnings) r.warnings.replaceChildren();
+    r.status.textContent = `Finding ways to get ${title}…`;
+    const params = new URLSearchParams();
+    params.set('title', clean(row.title));
+    if (row.platform || hub.platform) params.set('platform', clean(row.platform || hub.platform));
+    if (row.source) params.set('source', clean(row.source));
+    const asked = hub.platform;
+    const res = await api(`/games/library/title?${params.toString()}`);
+    hub.loading = false;
+    // A chip pressed, or a name typed, while this was loading wins.
+    if (hub.platform !== asked || hub.query) {
+      runSearch();
+      return;
+    }
+
+    if (res.status === 404) {
+      r.status.textContent = `The catalog no longer lists ${title}. Pick another game.`;
+      return;
+    }
+    if (!res.ok || !res.json) {
+      r.status.textContent = failureText(res);
+      return;
+    }
+    const d = res.json;
+    const risk = clean(d.risk);
+    if (r.warnings && risk) r.warnings.replaceChildren(el('p', 'games-warning', `Warning: ${risk}`));
+    if (Number(d.parts) > 1 && r.warnings) {
+      r.warnings.append(el('p', 'games-warning',
+        `This game comes in ${Number(d.parts)} parts. Get every part — one part alone will not open.`));
+    }
+    hub.results = Array.isArray(d.rows) ? d.rows : [];
+    if (!hub.results.length) {
+      r.status.textContent = `No working link for ${title} right now.`;
+      return;
+    }
+    r.results.append(...hub.results.map(resultRow));
+    r.status.textContent = `${hub.results.length} way${hub.results.length === 1 ? '' : 's'} to get ${title}`;
+  }
+
   function clearPending() {
     if (hub.pendingTimer) {
       window.clearTimeout(hub.pendingTimer);
@@ -960,10 +1165,29 @@
     }
   }
 
-  async function runSearch() {
+  /**
+   * `retried` is the ONE automatic second ask after a timeout. The add-on does
+   * not stop when the browser gives up — the search runs on and fills its cache
+   * — so the second ask usually answers at once. One, not a loop: a page that
+   * re-asks for ever with nobody watching is the thing every retry in this app
+   * refuses to be.
+   */
+  async function runSearch(retried = false) {
     const r = refs();
     if (!r.results || hub.loading) return;
     clearPending();
+    // /games/search refuses an empty q (400 missing-query). A system with no
+    // name is a browse; neither is a prompt, and neither ever reaches the wire.
+    if (!hub.query) {
+      if (hub.platform) {
+        await runBrowse();
+        return;
+      }
+      r.results.replaceChildren();
+      if (r.warnings) r.warnings.replaceChildren();
+      r.status.textContent = 'Type a game name, or pick a system.';
+      return;
+    }
     hub.loading = true;
     r.results.replaceChildren();
     if (r.warnings) r.warnings.replaceChildren();
@@ -977,6 +1201,12 @@
 
     const res = await api(`/games/search?${params.toString()}`);
     hub.loading = false;
+
+    if (res.timeout && !retried) {
+      r.status.textContent = 'The add-on is slow to answer. Still searching…';
+      hub.pendingTimer = window.setTimeout(() => runSearch(true), 1000);
+      return;
+    }
 
     if (res.status === 404) {
       r.status.textContent = 'This add-on has no /games/search route yet.';
@@ -994,7 +1224,7 @@
     }
 
     if (!res.ok || !res.json) {
-      r.status.textContent = 'Could not reach the add-on.';
+      r.status.textContent = failureText(res);
       return;
     }
 
@@ -1152,7 +1382,7 @@
       return;
     }
     if (!res.ok || !res.json) {
-      r.dStatus.textContent = 'Could not reach the add-on.';
+      r.dStatus.textContent = failureText(res);
       return;
     }
     if (res.json.ok !== true) {

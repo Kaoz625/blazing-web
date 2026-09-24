@@ -270,7 +270,7 @@ const browser = await launchBrowser();
  * @param {boolean} options.hasRd      the ADD-ON holds a Real-Debrid key
  * @param {boolean} options.hasTorbox  the ADD-ON holds a TorBox key
  */
-async function openHub({ ps5 = false, hasRd = false, hasTorbox = false } = {}) {
+async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTimeouts = 0 } = {}) {
   const debrid = { hasRd, hasTorbox };
   // lanesAvailable(), lib/game-source-routes.js. `http` is true unconditionally.
   const lanes = { http: true, realdebrid: hasRd, torbox: hasTorbox };
@@ -416,6 +416,41 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false } = {}) {
       });
     }
 
+    /* GET /games/library — what a catalog HOLDS A LINK FOR, per system. The
+       live shape of 24 Sep 2026 (nookie-ps5, 1,056 rows). Only ps5 has a
+       catalog here, so every other system answers 404 no-catalog-source and
+       the hub must fall back to /games/browse. */
+    if (u.pathname === '/games/library') {
+      const platform = (u.searchParams.get('platform') || '').toLowerCase();
+      if (platform !== 'ps5') {
+        return json(404, {
+          platform, count: 0, total: 0, results: [], sourcesAsked: [],
+          unavailable: { reason: 'no-catalog-source', message: `No enabled source holds a browsable catalog for "${platform}".` },
+        });
+      }
+      const results = [
+        { title: '15 in 1 Solitaire', platform: 'ps5', cover: '', info: '', size: 0, risk: '', hosts: 5, formats: [], source: 'nookie-ps5', provider: 'PS5 Game Browser' },
+        { title: 'Astro Bot', platform: 'ps5', cover: 'https://media.example.test/astro.jpg', info: '', size: 53687091200, risk: 'fake-crack', hosts: 2, formats: ['pkg'], source: 'nookie-ps5', provider: 'PS5 Game Browser' },
+      ];
+      return json(200, { platform, page: 1, pageSize: 60, total: 1056, count: results.length, exact: true, hasMore: true, results, sourcesAsked: ['nookie-ps5'], errors: [], unavailable: null });
+    }
+
+    /* GET /games/library/title — every way to get one game, each row signed. */
+    if (u.pathname === '/games/library/title') {
+      const title = u.searchParams.get('title') || '';
+      const risk = title === 'Astro Bot' ? 'fake-crack' : '';
+      const row = (n) => ({
+        source: 'nookie-ps5', provider: 'PS5 Game Browser', title, platform: 'ps5', collection: `Host ${n}`,
+        region: '', format: '', size: 0, url: `ref-nookie-${n}`, ref: `ref-nookie-${n}`, direct: true, playable: true,
+        info: '', cover: '', risk, part: 0, tier: 0, lane: 'http', delivery: 'direct', kind: 'module', hash: '',
+      });
+      return json(200, {
+        title, platform: 'ps5', cover: '', info: '', risk, needsConfirm: Boolean(risk), parts: 0, action: 'stream',
+        availability: { disk: false, diskKnown: true, locations: [], drive: '', queued: false, cloud: false, ddl: true },
+        count: 2, rows: [row(1), row(2)], lanes, debridEnabled: hasRd || hasTorbox,
+      });
+    }
+
     /* GET /games/browse — IGDB titles, and 503 on a box with no credentials. */
     if (u.pathname === '/games/browse') {
       return json(503, {
@@ -449,6 +484,27 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false } = {}) {
     } catch { /* private mode */ }
     if (forcePs5) window.BLAZING_FORCE_PS5 = true;
   }, ps5);
+  // The first N /games/search calls die the way a browser timeout kills them:
+  // a rejected fetch with a TimeoutError, exactly what AbortSignal.timeout()
+  // throws. Holding a real socket for 45 s would make one check take a minute.
+  if (searchTimeouts > 0) {
+    await ctx.addInitScript((n) => {
+      let left = n;
+      const real = window.fetch.bind(window);
+      window.__searchAttempts = 0;
+      window.fetch = (input, init) => {
+        const url = String(input && input.url ? input.url : input);
+        if (url.includes('/games/search')) {
+          window.__searchAttempts += 1;
+          if (left > 0) {
+            left -= 1;
+            return Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'));
+          }
+        }
+        return real(input, init);
+      };
+    }, searchTimeouts);
+  }
 
   await prepareProfile(ctx);
   const page = await ctx.newPage();
@@ -819,6 +875,114 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
   await page.locator('#game-source-close').click();
   check('a cover-less row falls back to the platform initial, not a broken image',
     (await page.locator('#games-hub-results .games-row').nth(1).locator('.games-row-art.is-blank').count()) === 1);
+  await ctx.close();
+}
+
+// ── 9: a SLOW add-on is not an UNREACHABLE one ───────────────────────────────
+// Found from the PS5, 24 Sep 2026: the client gave up at 20 s, the add-on holds
+// a search for up to 25 s (DEFAULT_WAIT_MS, lib/game-source-routes.js), cold
+// searches measured 21.7 s, and the screen said "Could not reach the add-on."
+{
+  const source = await readFile(join(ROOT, 'games.js'), 'utf8');
+  const hubHalf = source.slice(source.indexOf('const ADDON_BASE'));
+  const timeout = Number((/const TIMEOUT_MS = (\d+)/.exec(hubHalf) || [])[1]);
+  check('the hub waits longer than the add-on holds a search (25 000 ms)', timeout > 25000, `${timeout} ms`);
+
+  // One timeout, then an answer: the hub asks again by itself, once.
+  {
+    const { ctx, page } = await openHub({ searchTimeouts: 1 });
+    await page.fill('#games-hub-input', 'tekken');
+    await page.click('#games-hub-form button[type="submit"]');
+    await page.waitForFunction(
+      () => document.querySelectorAll('#games-hub-results .games-row').length > 0,
+      null, { timeout: 8000 }).catch(() => {});
+    const attempts = await page.evaluate(() => window.__searchAttempts);
+    const said = await text(page.locator('#games-hub-status'));
+    check('after one timeout the hub asks again by itself, and the rows arrive',
+      attempts === 2 && (await page.locator('#games-hub-results .games-row').count()) === 2, `attempts=${attempts} status="${said}"`);
+    check('and it never said the add-on was unreachable', !/Could not reach/.test(said), said);
+    await ctx.close();
+  }
+
+  // Timeouts every time: two asks, then a sentence that says SLOW.
+  {
+    const { ctx, page } = await openHub({ searchTimeouts: 5 });
+    await page.fill('#games-hub-input', 'tekken');
+    await page.click('#games-hub-form button[type="submit"]');
+    await page.waitForFunction(
+      () => /slow to answer right now/.test(document.getElementById('games-hub-status').textContent || ''),
+      null, { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    const attempts = await page.evaluate(() => window.__searchAttempts);
+    const said = await text(page.locator('#games-hub-status'));
+    check('a search that keeps timing out is asked exactly twice, never in a loop', attempts === 2, `attempts=${attempts}`);
+    check('and the line says the add-on is SLOW, not unreachable',
+      /slow to answer right now/.test(said) && !/Could not reach/.test(said), said);
+    await ctx.close();
+  }
+}
+
+// ── 10: a SYSTEM chip with NO name typed is a list, not a broken search ─────
+// Found from the PS5, 24 Sep 2026. On a controller, a chip is one press and a
+// name is the on-screen keyboard, so the chip comes first — and it sent
+// /games/search?q= with nothing in it. The add-on answers that 400
+// missing-query in 0.23 s, and the screen said "Could not reach the add-on."
+{
+  const { ctx, page, calls } = await openHub();
+  const statusText = () => text(page.locator('#games-hub-status'));
+
+  await page.click('#games-platform-chips .games-chip[data-platform="ps5"]');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#games-hub-results .games-title-row').length > 0,
+    null, { timeout: 8000 }).catch(() => {});
+  check('a chip with no name typed sends NO /games/search at all',
+    calls.filter((c) => c.path === '/games/search').length === 0,
+    calls.map((c) => c.path + (c.params.get('q') !== null ? `?q=${c.params.get('q')}` : '')).join(' '));
+  const lib = calls.filter((c) => c.path === '/games/library').pop();
+  check('it asks /games/library for that system', Boolean(lib) && lib.params.get('platform') === 'ps5', lib ? lib.url : 'no call');
+  check('the system\'s games render as title rows',
+    (await page.locator('#games-hub-results .games-title-row').count()) === 2);
+  check('the line counts them against the catalog\'s total, and says nothing is unreachable',
+    /2 of 1056/.test(await statusText()) && !/Could not reach/.test(await statusText()), await statusText());
+  const astro = page.locator('#games-hub-results .games-title-row').nth(1);
+  check('a title row joins its caption with middle dots, one line',
+    /PS5 Game Browser\s·\s50 GB\s·\s2 links\s·\sWarning/.test(await text(astro.locator('.games-row-meta'))),
+    await text(astro.locator('.games-row-meta')));
+
+  // Press a title: every way to get it, as ordinary release rows.
+  await astro.click();
+  await page.waitForFunction(
+    () => /way/.test(document.getElementById('games-hub-status').textContent || ''),
+    null, { timeout: 8000 }).catch(() => {});
+  const one = calls.filter((c) => c.path === '/games/library/title').pop();
+  check('pressing a title asks /games/library/title with its title, system and source',
+    Boolean(one) && one.params.get('title') === 'Astro Bot' && one.params.get('platform') === 'ps5'
+      && one.params.get('source') === 'nookie-ps5', one ? one.url : 'no call');
+  check('its links render as release rows with a lane badge',
+    (await page.locator('#games-hub-results .games-row:not(.games-title-row)').count()) === 2
+      && (await page.locator('#games-hub-results .games-lane-badge[data-lane="http"]').count()) === 2);
+  check('a risky title shows its warning, it is not dropped',
+    /Warning: fake-crack/.test(await text(page.locator('#games-hub-warnings'))),
+    await text(page.locator('#games-hub-warnings')));
+  check('still no /games/search was sent', calls.filter((c) => c.path === '/games/search').length === 0);
+
+  // A system no catalog covers: /games/browse (IGDB), which answers 503 here.
+  await page.click('#games-platform-chips .games-chip[data-platform="switch"]');
+  await page.waitForFunction(
+    () => /No list of/.test(document.getElementById('games-hub-status').textContent || ''),
+    null, { timeout: 8000 }).catch(() => {});
+  check('a system with no catalog falls back to /games/browse',
+    calls.some((c) => c.path === '/games/browse' && c.params.get('platform') === 'switch'));
+  check('and an add-on with no IGDB key says type a name, not unreachable',
+    /No list of .*Type a game name instead/.test(await statusText()) && !/Could not reach/.test(await statusText()),
+    await statusText());
+
+  // "All" with no name: a prompt, and nothing on the wire.
+  const before = calls.length;
+  await page.click('#games-platform-chips .games-chip[data-platform=""]');
+  await page.waitForTimeout(300);
+  check('"All" with no name asks for a name and sends nothing',
+    calls.length === before && /Type a game name, or pick a system/.test(await statusText()), await statusText());
   await ctx.close();
 }
 
