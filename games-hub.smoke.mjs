@@ -952,7 +952,10 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
   // Press a title: every way to get it, as ordinary release rows.
   await astro.click();
   await page.waitForFunction(
-    () => /way/.test(document.getElementById('games-hub-status').textContent || ''),
+    // "\d+ ways? to get", not a bare /way/: the LOADING line "Finding ways to
+    // get Astro Bot…" matches /way/ too, so on a slower machine this wait
+    // returned before the answer landed and the next check saw zero rows.
+    () => /\d+ ways? to get/.test(document.getElementById('games-hub-status').textContent || ''),
     null, { timeout: 8000 }).catch(() => {});
   const one = calls.filter((c) => c.path === '/games/library/title').pop();
   check('pressing a title asks /games/library/title with its title, system and source',
