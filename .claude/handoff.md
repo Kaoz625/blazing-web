@@ -1,3 +1,35 @@
+# blazing-web — handoff, 25 Sep 2026 12:15 (claude-polish-slop, relay BLZ-0045)
+
+Working on: the AI-slop pass, on branch `polish-slop` (NOT main; main is a public deploy and needs Markus's OK).
+Last action: fixes 1-4 committed and pushed; full suite green (32 + 18 rerun = 50/50).
+Next step: fixes 5-10 on the same branch. `cd /Users/markususche/Desktop/blazing-web && git checkout polish-slop && git pull`
+Key files: styles.css, dpad.js, profile.js, watch-party.js
+Blockers: none. The coordinator cut scope to fixes 1-4 because usage ran near its limit.
+
+| commit | fix |
+|---|---|
+| 695f307 | 1. banned grey rgba(28,28,31) -> var(--surface) + var(--border); other cold greys too |
+| 470ef2f | 2. Library / games grid focused card wins at (0,5,0): 1.00 / 1.00 |
+| 0605caf | 3. deleted the 1.08 "magnetic focus engine" |
+| c0800c1 | 4. dpad.js input guard: caret, select values, Escape/Back leaves a control |
+
+Still to do (fixes 5-10): emoji headings + watch-party SVG icons; the 7 repeated
+eyebrows and the two plumbing subtitles; Admin panels / Approve Device / kids gate
+(use grownUp() at profile.js:170); developer copy (app.js ~5879, ~5926, youtube.js ~663,
+settings.js ~493); quality badges #0066ee / #1a9e4a / #555 (styles.css ~2004);
+one heading token + define --fs-meta + profile gate CSS tokens.
+
+Found, not fixed (out of scope for 1-4): search-view ground is a stray blue #0a1620
+(styles.css ~1180); edu card/badge use a second green rgba(40,200,100) / rgba(30,160,80);
+.card-previewing scale(1.04) and .roadmap-card scale(1.01) pass the 1.00 ceiling; the
+Library's OTHER section grid stays at 1.00 while one grid is engaged (dim is per grid).
+
+Test trap: `samsunt tv/test/run-smokes.mjs` reaps every NEW blazing-smoke-comet- Comet
+it sees during its suite, so a blazing-web run alongside it loses browsers
+("Target page, context or browser has been closed"). Run one repo at a time.
+
+---
+
 # blazing-web — handoff, 13 Sep 2026 14:35
 
 Working on: closing the two live access-control holes from the audit, and the
