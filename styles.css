@@ -2357,18 +2357,6 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .game-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .game-shots img { width: 150px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius); border: 1px solid rgba(255,255,255,.1); }
 
-/* 10-foot UI D-pad magnetic focus engine */
-@media (pointer: coarse), (hover: none) {
-  .card:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible, button:focus-visible {
-    transform: scale(1.08);
-    box-shadow: 0 0 15px var(--accent-glow);
-    outline: 3px solid var(--accent);
-    outline-offset: 4px;
-    z-index: 10;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-}
-
 [data-theme="kids_warm"] {
   --bg: #1a1510;
   --surface: #261f1a;
