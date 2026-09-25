@@ -68,11 +68,11 @@ const ok = (condition, label, detail = '') => {
 };
 
 /* THE ROKU'S OWN SENTENCE, from
-   roku channels/components/screens/AddonsScreen.brs:28, repeated verbatim by
-   tvOS at StreamSourcesView.swift:354. All three clients say these words so
+   roku channels/components/screens/AddonsScreen.brs, repeated verbatim by
+   tvOS in StreamSourcesView.swift. All three clients share these words so
    that nobody arrives here expecting the Fire Stick's screen. If this literal
    and sources.js ever disagree, one of the three clients has drifted. */
-const ROKU_FOOTER = 'Kodi add-ons cannot run here - they are Python. These speak the Stremio protocol, which is plain HTTP, which is why a Roku can use them.';
+const ROKU_FOOTER = 'Kodi add-ons don\'t run here. Add-ons made for Stremio do.';
 /** The Roku's sentence for a directory that did not answer. */
 const DEAD_DIRECTORY = 'Could not reach the add-on directory - check the network.';
 

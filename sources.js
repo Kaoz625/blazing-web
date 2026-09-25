@@ -90,11 +90,13 @@
   ]);
 
   /* THE ROKU'S OWN SENTENCE, word for word, from
-     roku channels/components/screens/AddonsScreen.brs:28. tvOS repeats it at
-     StreamSourcesView.swift:354 for the same reason, and that reason is the
-     whole of B2: it is the sentence that stops somebody expecting the Fire
-     Stick's screen here. Three clients, one sentence. Do not reword it. */
-  const FOOTER_SHARED = 'Kodi add-ons cannot run here - they are Python. These speak the Stremio protocol, which is plain HTTP, which is why a Roku can use them.';
+     roku channels/components/screens/AddonsScreen.brs. tvOS repeats it in
+     StreamSourcesView.swift for the same reason, and that reason is the whole
+     of B2: it is the sentence that stops somebody expecting the Fire Stick's
+     screen here. Three clients share this one sentence. Reworded 25 Sep 2026
+     in all three at once, because the old one explained Python and plain HTTP
+     to a viewer; change it the same way, in all three, or not at all. */
+  const FOOTER_SHARED = 'Kodi add-ons don\'t run here. Add-ons made for Stremio do.';
 
   /* This client's half of the same truth — tvOS's second footer paragraph with
      "This Apple TV" swapped for the thing the reader is actually holding. */
