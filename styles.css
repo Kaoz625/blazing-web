@@ -805,9 +805,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   opacity: .65;
 }
 
-/* The focused card itself. Contract: 1.00 / 1.00. Listed last so it wins. */
+/* The focused card itself. Contract: 1.00 / 1.00.
+   Source order is not enough here. The cold-row rule above is (0,4,0), and a
+   bare `.card:focus-visible` is only (0,2,0), so without its own grid-scoped
+   copy the focused poster in Library and the games search grid was the DIMMEST
+   card on the screen (.45 / .93). Each container that dims needs its own
+   focused selector at (0,5,0). */
 .rows:has(.card:hover, .card:focus-visible) .card:hover,
 .rows:has(.card:hover, .card:focus-visible) .card:focus-visible,
+.result-grid:has(.card:hover, .card:focus-visible) .card:hover,
+.result-grid:has(.card:hover, .card:focus-visible) .card:focus-visible,
 .card:hover, .card:focus-visible {
   opacity: 1;
   transform: scale(1);
