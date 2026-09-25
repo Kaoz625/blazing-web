@@ -1432,23 +1432,37 @@
     // JTPlay plugin, whose QuickJS sandbox exposes exactly one network call,
     // `http.get` — there is no http.post to call. The add-on serves it as
     // `app.get('/games/ps5/queue')` for that reason and writes down the three
-    // things that make a state-changing GET safe here: LAN only, idempotent on
-    // a ref already queued, and the ref itself is signed. One shape for both
+    // things that make a state-changing GET safe here: HOME only (the LAN, or
+    // the house's own public address through the Cloudflare tunnel), idempotent
+    // on a ref already queued, and the ref itself is signed. One shape for both
     // callers.
     const params = new URLSearchParams({ ref: String(row.ref || '') });
     const title = clean(row.title || row.name);
     if (title) params.set('title', title);
     if (row.platform) params.set('platform', clean(row.platform).toLowerCase());
     const res = await api(`/games/ps5/queue?${params.toString()}`);
+    // No answer at all is a network or timeout failure, not a refusal. Saying
+    // "refused (HTTP 0)" would send him hunting for a permission problem.
+    if (!res.status) {
+      r.dStatus.textContent = failureText(res);
+      return;
+    }
     if (res.status === 404) {
       r.dStatus.textContent = clean(res.json && res.json.message,
         'No hand-off queue on the add-on yet (GET /games/ps5/queue?ref=). Nothing was sent.');
       return;
     }
+    // 403 has THREE causes since 24 Sep 2026 — not at home, another website
+    // asking, or the LAN gate — and the add-on names the one that applied.
+    // Its sentence is the useful one; this line is only for an old add-on.
     if (res.status === 403) {
-      r.dStatus.textContent = 'The hand-off queue only works on the home network. Nothing was sent.';
+      r.dStatus.textContent = clean(res.json && res.json.message,
+        'Send to PS5 only works from home. Nothing was sent.');
       return;
     }
+    // 422 not-a-file: the release is a file-host web page, which the Mac cannot
+    // fetch. 503: the add-on could not check that this is home. Both carry a
+    // sentence written for him, and the branch below shows it.
     if (!res.ok || !res.json || res.json.ok !== true) {
       r.dStatus.textContent = clean(res.json && (res.json.message || res.json.error),
         `The hand-off queue refused it (HTTP ${res.status}).`);

@@ -286,6 +286,9 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTi
       : {}
   );
   const calls = [];
+  // What GET /games/ps5/queue answers. null = the normal "Queued". A case sets
+  // it to drive the refusals the live add-on can give since 24 Sep 2026.
+  const queue = { answer: null };
 
   await ctx.route('https://addon.lyreosai.com/**', (route) => {
     const req = route.request();
@@ -409,6 +412,7 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTi
 
     /* GET /games/ps5/queue — a GET, because JTPlay's sandbox has only http.get */
     if (u.pathname === '/games/ps5/queue') {
+      if (queue.answer) return json(queue.answer.status, queue.answer.body);
       return json(200, {
         ok: true, queued: true, duplicate: false, count: 1,
         dest: '/mnt/usb0/PS5-DOWNLOADS/Freedoom Phase 1',
@@ -516,7 +520,7 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTi
   // app.js binds every [data-view] button the same way regardless.
   await page.evaluate(() => document.querySelector('[data-view="games"]').click());
   await page.waitForSelector('#games-tab-browse', { state: 'visible', timeout: 10000 });
-  return { ctx, page, calls };
+  return { ctx, page, calls, queue };
 }
 
 async function search(page, term) {
@@ -799,7 +803,7 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
 
 // ── 7: PS5 — browse and choose, never fetch ──────────────────────────────────
 {
-  const { ctx, page, calls } = await openHub({ ps5: true });
+  const { ctx, page, calls, queue } = await openHub({ ps5: true });
   await search(page, 'metroid');
   await page.click('#games-hub-results .games-row >> nth=0');
   await page.waitForSelector('#game-source-dialog[open]', { timeout: 8000 });
@@ -819,13 +823,36 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
   // A GET, and the old assertion demanding a POST was wrong about the server.
   // JTPlay's QuickJS sandbox exposes exactly one network call, `http.get`, so
   // the add-on serves this as app.get() — a POST-only queue would be a queue
-  // the console cannot reach. It is made safe by being LAN-only, idempotent on
+  // the console cannot reach. It is made safe by being home-only, idempotent on
   // a ref already queued, and by taking only a signed ref.
   check('the hand-off sends the chosen ref to the queue, as a GET',
     Boolean(queued) && queued.method === 'GET' && queued.params.get('ref') === 'ref-steamrip-http',
     queued ? `${queued.method} ${queued.url}` : 'no call');
   check('nothing on the console ever called /games/resolve',
     calls.filter((c) => c.path === '/games/resolve').length === 0);
+
+  // Each refusal the add-on gives carries its own sentence, and the page must
+  // show THAT sentence. The old page printed one fixed "home network" line for
+  // every 403, which was also the only thing he ever saw: every press was one.
+  const says = async (status, body, expect, name) => {
+    queue.answer = { status, body };
+    await page.click('#game-source-ps5');
+    await page.waitForFunction(
+      (want) => (document.getElementById('game-source-status').textContent || '').includes(want),
+      expect, { timeout: 8000 }).catch(() => {});
+    const shown = await text(page.locator('#game-source-status'));
+    check(name, shown.includes(expect), shown);
+  };
+  await says(200, { ok: true, queued: true, duplicate: true, count: 1, message: 'x' },
+    'already waiting for the Mac', 'a second press says it is already waiting');
+  await says(403, { reason: 'not-home', message: 'Send to PS5 only works from home, on the same internet connection as the console. Nothing was sent.' },
+    'only works from home', 'a 403 shows the add-on\'s own reason');
+  await says(403, { reason: 'foreign-origin', message: 'Only the Blazing page can send a game to the PS5. Nothing was sent.' },
+    'Only the Blazing page', 'a foreign-origin 403 is told apart from not-at-home');
+  await says(422, { reason: 'not-a-file', message: 'This release is a web page on vikingfile.com, not a file, so the Mac cannot fetch it for the PS5. Nothing was sent. Pick a row from another source.' },
+    'web page on vikingfile.com', 'a file-host web page is refused in plain words');
+  await says(503, { reason: 'home-address-unknown', message: 'The add-on could not check that you are at home, so nothing was sent. Try again in a minute.' },
+    'could not check that you are at home', 'a 503 says try again, not "refused"');
   await ctx.close();
 }
 
