@@ -675,7 +675,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .primary-button:hover { background: #fff; filter: brightness(.92); box-shadow: 0 12px 28px rgba(0,0,0,.45); }
 .primary-button:disabled { cursor: wait; opacity: .55; }
-.secondary-button { border: 1px solid rgba(255,255,255,.12); color: #fff; background: rgba(28,28,31,.9); }
+.secondary-button { border: 1px solid var(--border); color: #fff; background: var(--surface); }
 .secondary-button:hover { background: var(--surface-focus); }
 .text-link { display: inline-flex; align-items: center; color: #fff; background: transparent; }
 .text-link:hover { color: var(--accent); }
@@ -1112,10 +1112,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .list-keep {
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid rgba(255,255,255,.18);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: #fff;
-  background: rgba(28,28,31,.9);
+  background: var(--surface);
   font: inherit;
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
@@ -1383,13 +1383,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .edu-tab {
   min-height: 44px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   color: var(--muted);
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .edu-tab:hover { color: #fff; background: var(--surface-focus); }
@@ -1669,11 +1669,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .quality-select {
   height: 42px;
   min-width: 130px;
-  border: 1px solid rgba(255,255,255,.18);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 0 14px;
   color: #fff;
-  background: rgba(28,28,31,.9);
+  background: var(--surface);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   cursor: pointer;
@@ -1722,11 +1722,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .season-chip {
   flex: 0 0 auto;
   min-height: 40px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 8px 16px;
   color: var(--muted);
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   white-space: nowrap;
@@ -1765,11 +1765,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   justify-items: start;
   width: 190px;
   min-height: 56px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
   text-align: left;
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   scroll-snap-align: start;
   transition: background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
@@ -1814,7 +1814,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* ── Player ──────────────────────────────────────────────── */
 .player { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #000; }
 .player-bar { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-top)) 16px 26px; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.8), transparent); }
-.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: var(--radius-pill); padding: 8px 12px 8px 6px; color: #fff; background: rgba(28,28,31,.78); font-size: var(--fs-body); font-weight: var(--fw-bold); transition: background var(--settle); }
+.player-close { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: var(--radius-pill); padding: 8px 12px 8px 6px; color: #fff; background: var(--surface); font-size: var(--fs-body); font-weight: var(--fw-bold); transition: background var(--settle); }
 .player-close:hover { background: rgba(255,61,71,.3); }
 .player-title { overflow: hidden; color: #fff; font-size: var(--fs-body); font-weight: var(--fw-bold); text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000; }
 .player-bar { flex-wrap: wrap; }
@@ -1854,17 +1854,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .media-search-card span { font-size: var(--fs-body); line-height: 1.45; overflow-wrap: anywhere; }
 .media-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 28px 20px; align-items: start; }
 .media-library .media-library-card { display: flex; flex-direction: column; width: 100%; height: auto; min-width: 0; aspect-ratio: auto; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; box-shadow: none; overflow: visible; }
-.media-library-card .card-image { display: block; position: static; width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; border-radius: var(--radius); background: #202024; }
+.media-library-card .card-image { display: block; position: static; width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; border-radius: var(--radius); background: var(--surface); }
 .media-library-card.no-image .card-image { visibility: hidden; }
 #media-view[data-kind="music"] .card-image, #media-view[data-kind="podcasts"] .card-image { aspect-ratio: 1; }
 .media-library-card .card-label { position: static; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; width: auto; margin: 12px 0 0; padding: 0; background: none; font-size: var(--fs-body); font-weight: var(--fw-semibold); line-height: 1.4; text-shadow: none; white-space: normal; overflow: hidden; }
 .media-card-creator, .media-reading-position { display: block; margin-top: 5px; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .media-reading-position { color: #dfc6ad; }
 .media-library-detail:empty { display: none; }
-.media-library-detail { margin: 24px 0 32px; padding-bottom: 24px; border-bottom: 1px solid #303034; }
+.media-library-detail { margin: 24px 0 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
 .media-library-detail h2 { max-width: 780px; font-size: clamp(22px, 3vw, 32px); line-height: 1.2; }
 .media-track-list { padding: 0; list-style: none; }
-.media-track-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #29292d; }
+.media-track-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .media-track-row button { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .media-book-reader { width: min(860px, calc(100vw - 32px)); height: 88vh; height: min(88dvh, 1100px); max-height: 1100px; margin: auto; padding: 0; border: 0; border-radius: var(--radius); background: #f6f0e6; color: #2e2922; }
 .media-book-reader[open] { display: flex; flex-direction: column; }
@@ -1946,7 +1946,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   color: var(--text);
   /* Was also blur(18px) saturate(140%). Behind a 92%-opaque panel there is
      almost nothing left to blur: the cost was real and the effect was not. */
-  background: rgba(14,14,16,.96);
+  background: var(--surface);
   box-shadow: 0 14px 40px rgba(0,0,0,.4);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
@@ -1977,7 +1977,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   gap: 0.5rem;
 }
 .stream-row {
-  background: rgba(20,20,22,.6);
+  background: var(--surface);
   padding: 0.5rem 0.75rem;
   border-radius: var(--radius);
   cursor: pointer;
@@ -2484,13 +2484,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .yt-section {
   min-height: 44px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   color: var(--muted);
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .yt-section:hover { color: #fff; background: var(--surface-focus); }
@@ -2629,11 +2629,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .yt-chips-label { color: var(--quiet); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .06em; text-transform: uppercase; }
 .yt-chip {
   min-height: 34px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 6px 13px;
   color: var(--muted);
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   transition: color var(--settle), background var(--settle), border-color var(--settle);
@@ -2695,13 +2695,13 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .livetv-chip {
   min-height: 44px;
-  border: 1px solid rgba(255,255,255,.12);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: var(--fs-body);
   font-weight: var(--fw-bold);
   color: var(--muted);
-  background: rgba(28,28,31,.8);
+  background: var(--surface);
   transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
 }
 .livetv-chip:hover { color: #fff; background: var(--surface-focus); }
@@ -2751,9 +2751,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   min-height: 88px;
   padding: 10px 12px;
   text-align: left;
-  border: 1px solid rgba(255,255,255,.10);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(28,28,31,.72);
+  background: var(--surface);
   transition: background var(--focus-ease), border-color var(--focus-ease), transform var(--focus-ease);
 }
 .livetv-card:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.2); transform: translateY(-2px); }
@@ -2915,8 +2915,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-size: var(--fs-caption);
   font-weight: var(--fw-semibold);
   color: #fff;
-  background: rgba(28,28,31,.82);
-  border: 1px solid rgba(255,255,255,.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
   transition: background var(--focus-ease), border-color var(--focus-ease);
 }

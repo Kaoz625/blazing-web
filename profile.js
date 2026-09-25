@@ -346,8 +346,8 @@
   function addStyle() {
     const style = element('style');
     style.textContent = `
-      .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
-      .bp-connect:hover { background: var(--surface-focus, #1c1c1f); }
+      .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: var(--surface, #0E0A0C); font-size: 13px; font-weight: 800; white-space: nowrap; }
+      .bp-connect:hover { background: var(--surface-focus, #171012); }
       .bp-connect[data-connected="true"] { border-color: rgba(255,61,71,.42); }
       .bp-welcome-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
       .bp-invite-input, .bp-create-input { width: 100%; min-height: 52px; margin: 16px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 18px; font-weight: 800; }
@@ -404,7 +404,7 @@
         border-radius: 0;
         padding: 40px clamp(24px, 5vw, 56px);
         color: var(--text, #f7f7f8);
-        background: linear-gradient(180deg, rgba(20,20,22,.4), rgba(10,10,11,.85));
+        background: linear-gradient(180deg, rgba(14,10,12,.4), rgba(10,10,11,.85));
         box-shadow: none;
       }
       .bp-close { position: absolute; top: 13px; right: 13px; min-width: 44px; min-height: 44px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }

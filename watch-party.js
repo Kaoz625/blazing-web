@@ -234,8 +234,8 @@
   function addStyle() {
     const style = element('style');
     style.textContent = `
-      .wp-launch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: rgba(28,28,31,.85); font-size: 13px; font-weight: 800; white-space: nowrap; }
-      .wp-launch:hover { background: var(--surface-focus, #1c1c1f); }
+      .wp-launch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: var(--surface, #0E0A0C); font-size: 13px; font-weight: 800; white-space: nowrap; }
+      .wp-launch:hover { background: var(--surface-focus, #171012); }
       .wp-launch-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.3); flex: 0 0 auto; }
       .wp-launch[data-hint="true"] .wp-launch-dot { background: #34d97a; animation: wp-pulse-dot 1.6s ease-in-out infinite; }
       .wp-launch[data-joined="true"] { border-color: rgba(255,61,71,.42); }
@@ -310,7 +310,7 @@
       .wp-chat-send { flex: 0 0 auto; min-width: 38px; min-height: 38px; border: 0; border-radius: 999px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 13px; font-weight: 800; }
       .wp-chat-send:disabled { opacity: .5; }
 
-      .wp-chip { position: fixed; z-index: 70; right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); display: inline-flex; align-items: center; gap: 8px; min-height: 46px; border: 1px solid rgba(255,61,71,.4); border-radius: 999px; padding: 0 15px; color: #fff; background: rgba(20,20,22,.94); box-shadow: 0 16px 46px rgba(0,0,0,.5); font-size: 13px; font-weight: 800; }
+      .wp-chip { position: fixed; z-index: 70; right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); display: inline-flex; align-items: center; gap: 8px; min-height: 46px; border: 1px solid rgba(255,61,71,.4); border-radius: 999px; padding: 0 15px; color: #fff; background: var(--surface, #0E0A0C); box-shadow: 0 16px 46px rgba(0,0,0,.5); font-size: 13px; font-weight: 800; }
       .wp-chip-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent, #ff3d47); animation: wp-pulse-dot 1.6s ease-in-out infinite; }
       .wp-chip-badge { min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; color: #fff; background: var(--accent, #ff3d47); font-size: 10px; line-height: 17px; text-align: center; }
 
