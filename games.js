@@ -457,6 +457,9 @@
     source: '',
     query: '',
     loading: false,
+    // Bumped by every request this hub starts. An answer whose number is not
+    // the newest is stale: a newer press already owns the screen.
+    seq: 0,
     pendingTimer: 0,
     current: null,
   };
@@ -1067,6 +1070,7 @@
     const r = refs();
     const asked = hub.platform;
     const label = platformLabel(asked);
+    const mine = ++hub.seq;
     hub.loading = true;
     r.results.replaceChildren();
     if (r.warnings) r.warnings.replaceChildren();
@@ -1078,6 +1082,7 @@
       fromIgdb = true;
       res = await api(`/games/browse?platform=${encodeURIComponent(asked)}&limit=${LIMIT}`);
     }
+    if (mine !== hub.seq) return;
     hub.loading = false;
     // A chip pressed, or a name typed, while this was loading wins.
     if (hub.platform !== asked || hub.query) {
@@ -1115,7 +1120,12 @@
    */
   async function openTitle(row) {
     const r = refs();
-    if (hub.loading) return;
+    // A press on a title is the newest thing he asked for, so it wins over a
+    // list or search still in flight, and over a retry still waiting on its
+    // timer. It used to return here while anything was loading - pressing a
+    // title then did nothing at all - and a late retry could wipe its rows.
+    clearPending();
+    const mine = ++hub.seq;
     const title = clean(row.title, 'Untitled');
     hub.loading = true;
     r.results.replaceChildren();
@@ -1127,6 +1137,7 @@
     if (row.source) params.set('source', clean(row.source));
     const asked = hub.platform;
     const res = await api(`/games/library/title?${params.toString()}`);
+    if (mine !== hub.seq) return;
     hub.loading = false;
     // A chip pressed, or a name typed, while this was loading wins.
     if (hub.platform !== asked || hub.query) {
@@ -1188,6 +1199,7 @@
       r.status.textContent = 'Type a game name, or pick a system.';
       return;
     }
+    const mine = ++hub.seq;
     hub.loading = true;
     r.results.replaceChildren();
     if (r.warnings) r.warnings.replaceChildren();
@@ -1200,6 +1212,7 @@
     params.set('limit', String(LIMIT));
 
     const res = await api(`/games/search?${params.toString()}`);
+    if (mine !== hub.seq) return;
     hub.loading = false;
 
     if (res.timeout && !retried) {
