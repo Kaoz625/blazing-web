@@ -958,9 +958,15 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
   check('pressing a title asks /games/library/title with its title, system and source',
     Boolean(one) && one.params.get('title') === 'Astro Bot' && one.params.get('platform') === 'ps5'
       && one.params.get('source') === 'nookie-ps5', one ? one.url : 'no call');
+  // The detail names what the screen actually showed. Without it this check
+  // failed on the CI runner three pushes running and said nothing about why.
+  const releaseRows = await page.locator('#games-hub-results .games-row:not(.games-title-row)').count();
+  const httpBadges = await page.locator('#games-hub-results .games-lane-badge[data-lane="http"]').count();
+  const shown = await page.evaluate(() => [...document.querySelectorAll('#games-hub-results > *')]
+    .map((n) => n.className || n.tagName).join(' | '));
   check('its links render as release rows with a lane badge',
-    (await page.locator('#games-hub-results .games-row:not(.games-title-row)').count()) === 2
-      && (await page.locator('#games-hub-results .games-lane-badge[data-lane="http"]').count()) === 2);
+    releaseRows === 2 && httpBadges === 2,
+    `rows=${releaseRows} badges=${httpBadges} status="${await statusText()}" results=[${shown}]`);
   check('a risky title shows its warning, it is not dropped',
     /Warning: fake-crack/.test(await text(page.locator('#games-hub-warnings'))),
     await text(page.locator('#games-hub-warnings')));
