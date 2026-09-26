@@ -2109,7 +2109,39 @@ function arrive() {
   arriveDeadman = setTimeout(arriveDown, ARRIVE_DEADMAN_MS);
 }
 
+/* ── Admin is for grown-ups ──────────────────────────────────────────────────
+ * The Admin row sat in every profile's drawer, a Kids profile's included, and
+ * it opens the owner's device console. The rule is the EXISTING grownUp()
+ * (profile.js:170, itself firetv ProfileGateRules.kt:121): not a Kids profile,
+ * and rated at least 'mature'. So a teen is refused too, by the same rule that
+ * keeps a child off the Approve sheet and off Stream Sources. No second rule.
+ *
+ * NOBODY CONNECTED IS A NO, and so is a missing BlazingProfile: profile.js is
+ * loaded before this file, so the only way `rules` is absent is a half-updated
+ * install, which is the moment to show least.
+ *
+ * The row is HIDDEN, never removed, for the reason sources.js syncDrawerRow()
+ * gives: navparity.smoke.mjs counts `.drawer-nav [data-view]`. Hiding it is not
+ * the gate on its own either: showRoute() below refuses the route as well.
+ */
+function adminAllowed() {
+  if (!state.profileId) return false;
+  const grownUp = window.BlazingProfile && window.BlazingProfile.rules && window.BlazingProfile.rules.grownUp;
+  if (typeof grownUp !== 'function') return false;
+  return grownUp({ isKids: state.profileIsKids, maxRating: state.profileCap }) === true;
+}
+
+/** Show or hide the Admin row for whoever is watching now. */
+function syncAdminRow() {
+  const allowed = adminAllowed();
+  $$('button[data-view="admin"]').forEach((button) => { button.hidden = !allowed; });
+  // A profile switch does not re-run the router, so a Kids profile chosen while
+  // Admin is on screen would otherwise inherit it.
+  if (!allowed && state.route === 'admin') showRoute('home');
+}
+
 function showRoute(route, mediaOptions = {}) {
+  if ((route === 'admin' || route === 'link') && !adminAllowed()) route = 'home';
   const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
   const mediaRoute = ['books', 'music', 'podcasts'].includes(route);
@@ -6541,6 +6573,7 @@ function restoreProfileSession() {
   window.BlazingLists?.setProfile(id);
   updateSaveLabels();
   renderLibrary();
+  syncAdminRow();
   return true;
 }
 
@@ -6564,6 +6597,7 @@ document.addEventListener('blazing-profile-selected', (event) => {
   rememberProfileSession(detail);
   updateSaveLabels();
   renderLibrary();
+  syncAdminRow();
   // Search and discovery were filtered for the previous viewer.
   ++searchRequest;
   ++discoverRequest;
@@ -6632,6 +6666,7 @@ document.addEventListener('blazing-profile-signed-out', () => {
   $('#emby-results').replaceChildren();
   renderLibrary();
   updateSaveLabels();
+  syncAdminRow();
 });
 
 /* ---- Comics ------------------------------------------------------------- */

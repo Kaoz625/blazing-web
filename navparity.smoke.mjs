@@ -246,12 +246,22 @@ for (const view of VIEWS) {
 
 ok(titles.size === 5, 'browse routes and the book/audio room each have a clear title', `(${[...titles].join(' / ')})`);
 
-// ── Admin says why it is empty ──────────────────────────────────────────────
+// ── Admin holds only the panel that works ───────────────────────────────────
+// It used to carry three more panels that could never fill (admin.js is not
+// loaded), one with an Approve Device button that had no handler. They were
+// deleted, so the screen must hold the dashboard link and none of them.
 await page.evaluate(() => document.querySelector('[data-view="admin"]').click());
 await page.waitForTimeout(500);
-const admin = await page.evaluate(() => ['admin-upscale-list', 'admin-activity-list']
-  .map((id) => (document.getElementById(id).textContent || '').trim()));
-ok(admin.every((t) => t.length > 10), 'both Admin panels say why they are empty', `(${admin.map((t) => t.slice(0, 24)).join(' | ')})`);
+const admin = await page.evaluate(() => ({
+  shown: !document.getElementById('admin-view').hidden,
+  panels: document.querySelectorAll('#admin-view .admin-panel').length,
+  dashboard: Boolean(document.querySelector('#admin-view a[href$="/dashboard"]')),
+  dead: ['admin-linking', 'admin-approve-btn', 'admin-upscale', 'admin-activity']
+    .filter((id) => document.getElementById(id)),
+  noSource: /no data source/i.test(document.getElementById('admin-view').textContent || ''),
+}));
+ok(admin.shown && admin.panels === 1 && admin.dashboard && !admin.dead.length && !admin.noSource,
+  'Admin shows the dashboard panel and no dead panel', JSON.stringify(admin));
 
 // ── A Requests card is a real <img>, and survives a dead poster ─────────────
 await page.evaluate(() => document.querySelector('[data-view="requests"]').click());
