@@ -119,8 +119,21 @@
   --fs-caption: 12px;   /* badges, durations, meta      -> Roku 18 */
   --fs-body: 14px;      /* body copy, buttons, chips    -> Roku 22 */
   --fs-title: 16px;     /* every section heading        -> Roku 26 */
-  --fs-display: 26px;   /* dialog + page titles         -> Roku 40 */
+  --fs-display: 26px;   /* dialog and sheet titles      -> Roku 40 */
   --fs-hero: 42px;      /* the hero title, and only it  -> Roku 78 */
+  /* META is not a sixth size. DESIGN-V2 §2.2 META is 22 on the 1920 canvas,
+     and the same 1.6x licence that turns body 14 into Roku 22 makes META the
+     body rung here. It is named because .row-more and .viewall-count asked for
+     var(--fs-meta) while nothing defined it, so both fell back to whatever
+     font size they inherited. */
+  --fs-meta: var(--fs-body);
+  /* THE SCREEN TITLE — every screen's <h1>, and the View All title, at ONE
+     size. It was clamp(28px,5vw,52px) in one rule, clamp(30px,6vw,48px) in a
+     later rule that overrode it, clamp(28px,3.5vw,44px) on Anime & Manga and a
+     fixed 26px on View All: four sizes for one role. It is the only fluid rung
+     because a screen title is the one line that has to hold from a phone to a
+     television; this is the value .page-heading h1 already rendered at. */
+  --fs-page-title: clamp(30px, 6vw, 48px);
 
   /* THE WEIGHT LADDER — four, and system-ui really has these four.
      650/750/850/900 were being synthesised by the engine rather than selected,
@@ -488,7 +501,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .hero-loading .hero-art { animation: pulse 1.4s ease-in-out infinite alternate; background: linear-gradient(110deg, #100C0E, var(--surface-focus), #100C0E); background-size: 180% 100%; }
 .hero-content { display: flex; flex-direction: column; justify-content: end; min-height: inherit; width: min(560px, 100%); padding: 48px 24px 28px; }
 .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: .12em; text-transform: uppercase; }
-.hero h1, .page-heading h1 { margin: 0; font-size: clamp(28px, 5vw, 52px); line-height: 1.02; letter-spacing: -.05em; }
+.hero h1, .page-heading h1 { margin: 0; font-size: var(--fs-page-title); line-height: 1.02; letter-spacing: -.05em; }
 .hero-content > p:not(.eyebrow), .page-heading > p:not(.eyebrow) { max-width: 520px; margin: 12px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .hero-actions, .detail-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; align-items: center; }
 
@@ -716,7 +729,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .row-more:focus-visible { outline: none; color: #fff; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
 .viewall-head { margin: 0 var(--gutter) 18px; }
-.viewall-title { margin: 0; font-size: var(--fs-display); font-weight: var(--fw-bold); letter-spacing: -.03em; }
+.viewall-title { margin: 0; font-size: var(--fs-page-title); font-weight: var(--fw-bold); letter-spacing: -.03em; }
 .viewall-count { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-meta); }
 .row-track, .result-grid {
   display: flex;
@@ -1024,7 +1037,6 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 /* ── Inner pages ─────────────────────────────────────────── */
 .page-heading { max-width: 760px; margin: 44px auto 24px; padding: 0 20px; }
-.page-heading h1 { font-size: clamp(30px, 6vw, 48px); }
 .search-form { display: flex; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0 20px; }
 .search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--settle), box-shadow var(--settle); }
 .search-form input::placeholder { color: var(--quiet); }
@@ -1315,7 +1327,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: transparent center / cover no-repeat;
 }
 .roadmap-header-body { max-width: 1180px; margin: 0 auto; }
-.roadmap-header-body h1 { margin: 16px 0 0; font-size: clamp(30px, 6vw, 48px); letter-spacing: -.03em; }
+.roadmap-header-body h1 { margin: 16px 0 0; font-size: var(--fs-page-title); letter-spacing: -.03em; }
 .roadmap-about { max-width: 900px; margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); line-height: 1.5; }
 .roadmap-header-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 14px; }
 .roadmap-stats { margin: 0; color: var(--muted); font-size: var(--fs-body); font-weight: var(--fw-bold); }
@@ -2392,7 +2404,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .anime-room-header { padding: 30px 0 0; margin-bottom: 24px; }
 .anime-room-header { padding-left: var(--gutter); padding-right: var(--gutter); }
 .anime-room-intro { display: flex; justify-content: space-between; align-items: end; gap: 36px; }
-.anime-room-intro h1 { font-size: clamp(28px, 3.5vw, 44px); line-height: 1.12; letter-spacing: -.035em; margin: 6px 0 12px; }
+.anime-room-intro h1 { font-size: var(--fs-page-title); line-height: 1.12; letter-spacing: -.035em; margin: 6px 0 12px; }
 .anime-room-intro p { color: rgba(255,255,255,.72); margin: 0; line-height: 1.6; }
 .anime-room-intro .eyebrow { color: rgba(255,255,255,.65); }
 #anime-room-search { width: min(420px, 40%); flex-shrink: 0; }

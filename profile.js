@@ -346,13 +346,23 @@
   function addStyle() {
     const style = element('style');
     style.textContent = `
-      .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: var(--surface, #0E0A0C); font-size: 13px; font-weight: 800; white-space: nowrap; }
+      /* ON THE SHARED TOKENS. This block used to carry fifteen font sizes of its
+         own (9 to 32px) and a second black, #08080a, beside the page's
+         #0A0A0B. Text now takes the styles.css ladder: caption 12 for tags,
+         meta and labels; body 14 for copy, buttons and chips; title 16 for
+         names, questions and inputs (16 is also the floor that stops iOS Safari
+         zooming the page when an input takes focus); display 26 for every
+         screen and sheet title and for the PIN keys. The fallback after each
+         var() is the same value, so the gate still reads if styles.css fails.
+         The only sizes left as numbers are pictures, not text: the avatar and
+         icon glyphs and the pairing code that has to be read across a room. */
+      .bp-connect { flex: 0 0 auto; min-height: 44px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 13px; padding: 8px 11px; color: var(--text, #fff); background: var(--surface, #0E0A0C); font-size: var(--fs-body, 14px); font-weight: 800; white-space: nowrap; }
       .bp-connect:hover { background: var(--surface-focus, #171012); }
       .bp-connect[data-connected="true"] { border-color: rgba(255,61,71,.42); }
       .bp-welcome-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
-      .bp-invite-input, .bp-create-input { width: 100%; min-height: 52px; margin: 16px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 18px; font-weight: 800; }
+      .bp-invite-input, .bp-create-input { width: 100%; min-height: 52px; margin: 16px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: var(--fs-title, 16px); font-weight: 800; }
       .bp-invite-input { letter-spacing: .1em; text-transform: uppercase; }
-      .bp-kids-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; color: var(--muted, #a3a3aa); font-size: 14px; }
+      .bp-kids-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); }
       .bp-welcome[hidden], .bp-invite[hidden], .bp-create[hidden], .bp-icons[hidden] { display: none; }
       .bp-profile-add .bp-avatar { border-style: dashed; border-color: rgba(255,255,255,.22); }
       /* DebridStream reference: full-bleed art, a LEFT rail only, "nothing
@@ -370,7 +380,7 @@
         z-index: 80;
         display: flex;
         align-items: stretch;
-        background: radial-gradient(120% 100% at 0% 0%, rgba(255,61,71,.16), transparent 55%), #08080a;
+        background: radial-gradient(120% 100% at 0% 0%, rgba(255,61,71,.16), transparent 55%), var(--bg, #0A0A0B);
       }
       /* The per-profile art, swapped as the focus moves down the rail. It is
          the FIRST child of the layer and pointer-events:none, so it can never
@@ -387,7 +397,7 @@
       .bp-art[data-shown="true"] { opacity: 1; }
       .bp-art::after {
         content: ""; position: absolute; inset: 0;
-        background: linear-gradient(90deg, #08080a 0%, rgba(8,8,10,.88) 30%, rgba(8,8,10,.4) 66%, rgba(8,8,10,.6) 100%);
+        background: linear-gradient(90deg, var(--bg, #0A0A0B) 0%, rgba(10,10,11,.88) 30%, rgba(10,10,11,.4) 66%, rgba(10,10,11,.6) 100%);
       }
       .bp-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: transparent; }
       .bp-panel {
@@ -409,10 +419,10 @@
       }
       .bp-close { position: absolute; top: 13px; right: 13px; min-width: 44px; min-height: 44px; border: 0; border-radius: 13px; color: inherit; background: rgba(255,255,255,.06); font-weight: 800; }
       .bp-close:hover { background: rgba(255,255,255,.12); }
-      .bp-kicker { margin: 0 48px 7px 0; color: var(--accent, #ff3d47); font-size: 12px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
-      .bp-heading { margin: 0; font-size: clamp(27px, 6vw, 40px); line-height: 1.02; letter-spacing: -.05em; }
-      .bp-copy { margin: 12px 0 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.5; }
-      .bp-status { min-height: 24px; margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.45; }
+      .bp-kicker { margin: 0 48px 7px 0; color: var(--accent, #ff3d47); font-size: var(--fs-caption, 12px); font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+      .bp-heading { margin: 0; font-size: var(--fs-display, 26px); line-height: 1.02; letter-spacing: -.05em; }
+      .bp-copy { margin: 12px 0 0; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); line-height: 1.5; }
+      .bp-status { min-height: 24px; margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); line-height: 1.45; }
       .bp-status[data-state="error"] { color: #ff9aa1; }
       .bp-status[data-state="pending"] { color: #ffd289; }
       /* Profile rail: shared avatars, clear names and one visible edit control. */
@@ -433,16 +443,16 @@
         box-shadow: 0 0 0 3px rgba(255,255,255,.2);
       }
       .bp-profile-copy { display: block; min-width: 0; padding: 0; }
-      .bp-profile-name { display: block; overflow: hidden; font-size: 20px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-      .bp-profile-meta { display: block; margin-top: 5px; color: rgba(255,255,255,.7); font-size: 13px; }
-      .bp-profile-tag { position: absolute; left: 42px; top: 54px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 6px; padding: 2px 4px; color: #fff; background: var(--surface, #0E0A0C); font-size: 9px; font-weight: 700; }
+      .bp-profile-name { display: block; overflow: hidden; font-size: var(--fs-title, 16px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+      .bp-profile-meta { display: block; margin-top: 5px; color: rgba(255,255,255,.7); font-size: var(--fs-caption, 12px); }
+      .bp-profile-tag { position: absolute; left: 38px; top: 50px; border: 1px solid var(--border, rgba(255,61,71,.20)); border-radius: 6px; padding: 1px 4px; color: #fff; background: var(--surface, #0E0A0C); font-size: var(--fs-caption, 12px); font-weight: 700; line-height: 1.2; }
       .bp-pencil {
         position: absolute; right: 0; top: 14px;
         display: grid; place-items: center;
         width: 44px; height: 44px; min-height: 44px;
         border: 0; border-radius: 999px; padding: 0;
         color: var(--text, #f7f7f8); background: rgba(255,255,255,.1);
-        font-size: 14px; line-height: 1;
+        font-size: var(--fs-body, 14px); line-height: 1;
         opacity: .7; transition: opacity .15s, background .15s, color .15s, box-shadow .15s;
       }
       .bp-profile-slot:hover .bp-pencil, .bp-profile-slot:focus-within .bp-pencil { opacity: .6; }
@@ -454,7 +464,7 @@
          The same 20 emoji as Fire TV's ICON_CHOICES, in the same order, 5 to a
          row — one set across the fleet, so a profile picked on the television
          is the same picture in the browser. */
-      .bp-icon-current { display: flex; align-items: center; gap: 13px; margin: 0 0 16px; color: var(--muted, #a3a3aa); font-size: 13px; line-height: 1.4; }
+      .bp-icon-current { display: flex; align-items: center; gap: 13px; margin: 0 0 16px; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); line-height: 1.4; }
       .bp-icon-preview { display: grid; place-items: center; width: 58px; height: 58px; flex: 0 0 auto; border-radius: 18px; background: rgba(255,255,255,.07); font-size: 32px; font-weight: 900; line-height: 1; }
       .bp-icon-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
       .bp-icon { display: grid; place-items: center; aspect-ratio: 1 / 1; min-height: 48px; border: 2px solid rgba(255,255,255,.1); border-radius: 16px; padding: 0; color: inherit; background: rgba(255,255,255,.05); font-size: clamp(21px, 4.6vw, 30px); line-height: 1; transition: background .15s, border-color .15s, box-shadow .15s; }
@@ -469,16 +479,16 @@
          horizontal weightSum row ParentalSettingsActivity.kt:107-125 draws. */
       .bp-parental[hidden] { display: none; }
       .bp-parental-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-      .bp-parental-row { min-height: 52px; width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 12px 16px; color: inherit; background: rgba(255,255,255,.05); font-size: 15px; font-weight: 800; text-align: left; }
+      .bp-parental-row { min-height: 52px; width: 100%; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 12px 16px; color: inherit; background: rgba(255,255,255,.05); font-size: var(--fs-body, 14px); font-weight: 800; text-align: left; }
       .bp-parental-row:hover:not(:disabled), .bp-parental-row:focus-visible { border-color: var(--accent, #ff3d47); background: rgba(255,255,255,.1); outline: none; }
       .bp-parental-row:disabled { opacity: .45; cursor: not-allowed; }
       .bp-parental-row[data-tone="danger"] { border-color: rgba(255,61,71,.55); color: #ff8a8f; }
-      .bp-parental-label { margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+      .bp-parental-label { margin: 18px 0 0; color: var(--muted, #a3a3aa); font-size: var(--fs-caption, 12px); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
       .bp-parental-ratings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-      .bp-parental-rating { min-height: 48px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 4px; color: inherit; background: rgba(255,255,255,.05); font-size: 13px; font-weight: 800; }
+      .bp-parental-rating { min-height: 48px; border: 1px solid rgba(255,255,255,.12); border-radius: 13px; padding: 8px 4px; color: inherit; background: rgba(255,255,255,.05); font-size: var(--fs-body, 14px); font-weight: 800; }
       .bp-parental-rating[aria-pressed="true"] { border-color: var(--accent, #ff3d47); background: rgba(255,61,71,.2); }
       .bp-parental-rating:disabled { opacity: .45; cursor: not-allowed; }
-      .bp-parental-note { margin: 14px 0 0; color: var(--muted, #a3a3aa); font-size: 13px; line-height: 1.45; }
+      .bp-parental-note { margin: 14px 0 0; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); line-height: 1.45; }
       .bp-parental-note[data-tone="error"] { color: #ff8a8f; }
       .bp-parental-note[data-tone="success"] { color: #7ee2a8; }
       .bp-pin { margin-top: 22px; }
@@ -490,13 +500,13 @@
       .bp-dot { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.45); border-radius: 50%; }
       .bp-dot[data-filled="true"] { border-color: var(--accent, #ff3d47); background: var(--accent, #ff3d47); box-shadow: 0 0 0 4px rgba(255,61,71,.15); }
       .bp-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
-      .bp-digit, .bp-action { min-height: 58px; border: 1px solid rgba(255,255,255,.11); border-radius: 16px; color: inherit; background: rgba(255,255,255,.055); font-size: 20px; font-weight: 850; }
+      .bp-digit, .bp-action { min-height: 58px; border: 1px solid rgba(255,255,255,.11); border-radius: 16px; color: inherit; background: rgba(255,255,255,.055); font-size: var(--fs-display, 26px); font-weight: 850; }
       .bp-digit:hover, .bp-digit:focus-visible, .bp-action:hover, .bp-action:focus-visible { border-color: rgba(255,61,71,.85); background: rgba(255,61,71,.12); }
-      .bp-action { font-size: 13px; }
+      .bp-action { font-size: var(--fs-body, 14px); }
       .bp-pad-spacer { min-height: 58px; }
       .bp-pin-actions, .bp-footer { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
-      .bp-verify, .bp-refresh { min-height: 44px; border: 1px solid var(--accent, #ff3d47); border-radius: 999px; padding: 10px 16px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: 14px; font-weight: 850; }
-      .bp-secondary { min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 10px 16px; color: inherit; background: rgba(255,255,255,.055); font-size: 14px; font-weight: 800; }
+      .bp-verify, .bp-refresh { min-height: 44px; border: 1px solid var(--accent, #ff3d47); border-radius: 999px; padding: 10px 16px; color: #fff; background: linear-gradient(140deg, var(--accent, #ff3d47), var(--accent-strong, #e11d2b)); font-size: var(--fs-body, 14px); font-weight: 850; }
+      .bp-secondary { min-height: 44px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 10px 16px; color: inherit; background: rgba(255,255,255,.055); font-size: var(--fs-body, 14px); font-weight: 800; }
       .bp-verify:disabled, .bp-refresh:disabled, .bp-profile:disabled, .bp-digit:disabled, .bp-action:disabled, .bp-back:disabled { cursor: wait; opacity: .52; }
       /* A LEFT RAIL IS A DESKTOP SHAPE. It only reads as a rail when there is
          something beside it; the reference has full-bleed art there and this
@@ -563,7 +573,7 @@
          leaves the rail exactly as it was. Building a separate full-screen
          element would have meant a second gate to keep in step with this one,
          which is the drift navparity.smoke.mjs exists to catch elsewhere. */
-      .bp-layer[data-view="gate"] { background: var(--bg, #0A0A0A); }
+      .bp-layer[data-view="gate"] { background: var(--bg, #0A0A0B); }
       /* The per-profile art belongs to the rail. On the gate there is no
          profile yet, so there is nothing honest to show behind it. */
       .bp-layer[data-view="gate"] .bp-art { display: none; }
@@ -574,7 +584,7 @@
         border-right: 0;
         padding: calc(24px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
         text-align: center;
-        background: var(--bg, #0A0A0A);
+        background: var(--bg, #0A0A0B);
       }
       .bp-layer[data-view="gate"] .bp-kicker, .bp-layer[data-view="gate"] .bp-copy { display: none; }
       /* NOT display:none. The panel is aria-labelledby="bp-heading", so the
@@ -597,8 +607,8 @@
       .bp-qr[hidden], .bp-signup[hidden], .bp-email[hidden], .bp-approve[hidden] { display: none; }
 
       .bp-gate-mark { display: block; width: min(272px, 62vw); height: auto; margin: 0 auto; }
-      .bp-gate-title { margin: 24px 0 0; color: #fff; font-size: 32px; font-weight: 650; letter-spacing: -.035em; line-height: 1.16; }
-      .bp-gate-sub { margin: 10px 0 0; color: var(--muted, #a3a3aa); font-size: clamp(15px, 3.6vw, 18px); }
+      .bp-gate-title { margin: 24px 0 0; color: #fff; font-size: var(--fs-display, 26px); font-weight: 650; letter-spacing: -.035em; line-height: 1.16; }
+      .bp-gate-sub { margin: 10px 0 0; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); }
       .bp-gate-key { display: block; width: 46px; height: 18px; margin: 18px auto 0; }
       .bp-gate-pills { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: 24px; }
       /* Working email sign-in leads; invite and phone pairing stay secondary. */
@@ -615,20 +625,20 @@
       .bp-pill:disabled { opacity: .42; }
       .bp-pill-icon { flex: 0 0 auto; width: 22px; height: 22px; }
       .bp-pill-copy { min-width: 0; flex: 1; }
-      .bp-pill-label { display: block; font-size: 15px; font-weight: 650; }
-      .bp-pill-sub { display: block; margin-top: 4px; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 400; line-height: 1.4; }
+      .bp-pill-label { display: block; font-size: var(--fs-body, 14px); font-weight: 650; }
+      .bp-pill-sub { display: block; margin-top: 4px; color: rgba(255,255,255,.7); font-size: var(--fs-caption, 12px); font-weight: 400; line-height: 1.4; }
       .bp-gate-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 16px; }
-      .bp-gate-link { min-height: 44px; border: 0; border-radius: 999px; padding: 8px 13px; color: var(--muted, #a3a3aa); background: transparent; font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+      .bp-gate-link { min-height: 44px; border: 0; border-radius: 999px; padding: 8px 13px; color: var(--muted, #a3a3aa); background: transparent; font-size: var(--fs-body, 14px); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
       .bp-gate-link:hover, .bp-gate-link:focus-visible { color: var(--text, #f7f7f8); }
-      .bp-sheet-title { margin: 0 0 4px; color: #fff; font-size: 20px; font-weight: 900; letter-spacing: .04em; }
+      .bp-sheet-title { margin: 0 0 4px; color: #fff; font-size: var(--fs-display, 26px); font-weight: 900; letter-spacing: .04em; }
       .bp-sheet-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
       /* Big enough to read across a room and off a photograph of the screen. */
       .bp-paircode { margin: 16px 0 0; color: #fff; font-size: clamp(38px, 11vw, 56px); font-weight: 900; letter-spacing: .18em; line-height: 1.05; }
       /* White plate under the QR on purpose: a QR inverted on a near-black
          ground is unreadable to a lot of phone cameras. */
       .bp-pairqr { display: block; width: 188px; height: 188px; margin: 18px auto 0; border-radius: 14px; padding: 9px; background: #fff; }
-      .bp-pairhelp { max-width: 330px; margin: 16px auto 0; color: var(--muted, #a3a3aa); font-size: 14px; line-height: 1.5; }
-      .bp-input { width: 100%; min-height: 52px; margin-top: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: 16px; font-weight: 700; }
+      .bp-pairhelp { max-width: 330px; margin: 16px auto 0; color: var(--muted, #a3a3aa); font-size: var(--fs-body, 14px); line-height: 1.5; }
+      .bp-input { width: 100%; min-height: 52px; margin-top: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 0 14px; color: inherit; background: rgba(255,255,255,.05); font-size: var(--fs-title, 16px); font-weight: 700; }
       .bp-form-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
       /* Both set display themselves, which beats the UA's [hidden] rule. */
       .bp-pairqr[hidden], .bp-form-actions[hidden] { display: none; }
@@ -636,44 +646,42 @@
       /* The gate centres everything; an email address centred in its box
          reads as decoration rather than a field. */
       .bp-email .bp-input, .bp-signup .bp-input { text-align: left; }
-      .bp-approve-question { margin: 6px 0 0; color: #fff; font-size: 18px; font-weight: 800; line-height: 1.4; }
+      .bp-approve-question { margin: 6px 0 0; color: #fff; font-size: var(--fs-title, 16px); font-weight: 800; line-height: 1.4; }
       /* The typed pairing code: the same size and spacing the code is shown at
          on the other screen, so the two can be compared by eye. */
-      .bp-approve-code { text-align: center; font-size: 26px; font-weight: 900; letter-spacing: .22em; text-transform: uppercase; }
+      .bp-approve-code { text-align: center; font-size: var(--fs-display, 26px); font-weight: 900; letter-spacing: .22em; text-transform: uppercase; }
       .bp-approve-code[hidden] { display: none; }
-      .bp-layer { background: #0A0A0B; color: #fff; }
+      .bp-layer { background: var(--bg, #0A0A0B); color: #fff; }
       .bp-layer .bp-panel { border-right: 0; background: linear-gradient(90deg, rgba(10,10,11,.98), rgba(10,10,11,.8)); }
       .bp-layer[data-view="profiles"] .bp-panel { width: min(520px, 100%); padding: 48px clamp(24px, 4vw, 56px); justify-content: flex-start; background: transparent; }
-      .bp-layer[data-view="profiles"] .bp-kicker { margin: 0 0 30px; padding-right: 48px; color: #fff; font-size: 15px; font-weight: 750; letter-spacing: .08em; }
-      .bp-heading { font-size: 32px; letter-spacing: -.025em; line-height: 1.15; }
+      .bp-layer[data-view="profiles"] .bp-kicker { margin: 0 0 30px; padding-right: 48px; color: #fff; font-size: var(--fs-body, 14px); font-weight: 750; letter-spacing: .08em; }
+      .bp-heading { letter-spacing: -.025em; line-height: 1.15; }
       .bp-status:empty { display: none; }
-      .bp-layer[data-view="gate"], .bp-layer[data-view="gate"] .bp-panel { background: #0A0A0B; }
+      .bp-layer[data-view="gate"], .bp-layer[data-view="gate"] .bp-panel { background: var(--bg, #0A0A0B); }
       .bp-layer[data-view="gate"] .bp-panel { justify-content: flex-start; padding-top: max(40px, 10vh); }
       .bp-layer[data-view="gate"] .bp-status { order: 2; margin-top: 20px; }
       .bp-brand-mark { display: block; width: 56px; height: 56px; margin: 0 auto; }
       .bp-pill { width: 100%; min-height: 66px; border-color: rgba(255,255,255,.25); padding: 12px 20px; }
-      .bp-pill-primary { background: #fff; color: #0A0A0B; border-color: #fff; }
+      .bp-pill-primary { background: #fff; color: var(--bg, #0A0A0B); border-color: #fff; }
       .bp-pill-primary .bp-pill-sub { color: #505054; }
-      .bp-pill-primary:hover:not(:disabled), .bp-pill-primary:focus-visible:not(:disabled) { background: #e7e7e9; color: #0A0A0B; border-color: #fff; }
-      .bp-field-label { display: block; margin-top: 18px; text-align: left; font-size: 14px; font-weight: 600; }
+      .bp-pill-primary:hover:not(:disabled), .bp-pill-primary:focus-visible:not(:disabled) { background: #e7e7e9; color: var(--bg, #0A0A0B); border-color: #fff; }
+      .bp-field-label { display: block; margin-top: 18px; text-align: left; font-size: var(--fs-body, 14px); font-weight: 600; }
       .bp-email .bp-input { margin-top: 8px; }
       .bp-footer { margin-top: 28px; }
       .bp-refresh { color: rgba(255,255,255,.75); background: transparent; border-color: rgba(255,255,255,.25); font-weight: 500; }
       a.bp-gate-link, a.bp-secondary { display: inline-flex; align-items: center; justify-content: center; }
-      .bp-verify { background: #fff; border-color: #fff; color: #0A0A0B; }
+      .bp-verify { background: #fff; border-color: #fff; color: var(--bg, #0A0A0B); }
       .bp-layer button:focus-visible, .bp-layer input:focus-visible { outline: 2px solid #fff; outline-offset: 4px; transform: none; }
       .bp-profile:focus-visible { outline: none !important; }
-      .bp-layer .bp-art::after { background: linear-gradient(90deg, #0A0A0B 8%, rgba(10,10,11,.62) 42%, rgba(10,10,11,.15)); }
+      .bp-layer .bp-art::after { background: linear-gradient(90deg, var(--bg, #0A0A0B) 8%, rgba(10,10,11,.62) 42%, rgba(10,10,11,.15)); }
       @media (max-width: 600px) {
         .bp-layer[data-view="profiles"] .bp-panel { padding: 32px 24px; background: rgba(10,10,11,.82); }
         .bp-layer[data-view="profiles"] .bp-kicker { margin-bottom: 24px; }
         .bp-layer .bp-panel { background: rgba(10,10,11,.82); }
         .bp-profile { grid-template-columns: 64px minmax(0, 1fr); min-height: 64px; gap: 16px; }
         .bp-avatar { width: 64px; height: 64px; font-size: 36px; }
-        .bp-profile-name { font-size: 18px; }
-        .bp-profile-tag { top: 48px; left: 34px; }
+        .bp-profile-tag { top: 42px; left: 30px; }
         .bp-pencil { top: 10px; }
-        .bp-gate-title { font-size: 28px; }
       }
       @media (prefers-reduced-motion: reduce) {
         .bp-layer, .bp-layer *, .bp-layer *::before, .bp-layer *::after { transition: none !important; animation: none !important; }
