@@ -1037,6 +1037,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 /* ── Inner pages ─────────────────────────────────────────── */
 .page-heading { max-width: 760px; margin: 44px auto 24px; padding: 0 20px; }
+/* Admin's one panel. No rule in this file had ever named .admin-panel, so it
+   sat unstyled at x=0 under a heading centred on a 760px track: the left edge
+   of the panel and of its heading were 360px apart on a desktop. Same track as
+   .page-heading's text, on the warm surface with the one hairline. */
+.admin-panel { width: min(720px, calc(100% - 40px)); margin: 0 auto 24px; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.admin-panel h2 { margin: 0; font-size: var(--fs-title); font-weight: var(--fw-semibold); }
+.admin-panel p { margin: 12px 0 0; color: var(--text-body); font-size: var(--fs-body); line-height: 1.5; }
+.admin-panel .muted { color: var(--muted); }
 .search-form { display: flex; gap: 10px; max-width: 760px; margin: 0 auto; padding: 0 20px; }
 .search-form input { width: 100%; min-height: 46px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius); padding: 0 15px; outline: none; color: var(--text); background: var(--surface); transition: border-color var(--settle), box-shadow var(--settle); }
 .search-form input::placeholder { color: var(--quiet); }
