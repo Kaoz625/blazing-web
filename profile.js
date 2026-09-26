@@ -1680,7 +1680,7 @@
       if (result.status === 503) {
         // Said plainly rather than as "wrong PIN", because the two need different
         // actions and confusing them sends the owner hunting for a typo.
-        leaveOwnerPad('Owner approval is not switched on for this fleet. Approve this browser in the Blazing dashboard instead.', 'error');
+        leaveOwnerPad('Owner approval is not switched on for this household. Approve this browser in the Blazing dashboard instead.', 'error');
         return;
       }
       if (result.status === 429) {

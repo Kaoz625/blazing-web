@@ -3333,7 +3333,9 @@ async function requestUpscale() {
     // 200 with status "error", or any non-queued body: this did NOT land.
     resetUpscaleButton();
     showToast(
-      plainText(data && data.message, `The upscale service did not accept this request (HTTP ${response.status}).`),
+      // The backend's own sentence wins when it sends one. The fallback is for
+      // the viewer, so it says what to do next and not the status code.
+      plainText(data && data.message, 'The 4K upscale did not start. Try again in a minute.'),
       'error'
     );
   } catch (error) {
@@ -4618,8 +4620,7 @@ async function playSelected() {
     const edu = await resolveEduStream(meta.id);
     if (!isCurrent()) return;
     if (!edu) {
-      detailStatus.textContent = 'This lesson could not be opened. The video ' +
-        'resolver on the server did not answer.';
+      detailStatus.textContent = 'This lesson could not be opened right now. Try again in a minute.';
       return;
     }
     openPlayer(meta.name, edu.url, { streamFormat: edu.streamFormat });
@@ -5903,12 +5904,13 @@ async function loadTrailersView() {
   const rows = await Promise.all(jobs);
 
   if (!rows.some((metas) => metas.length)) {
-    // Say why, rather than showing a page that looks broken. Both routes answer
-    // 200 with no items until the addon is redeployed.
+    // Say so, rather than showing a page that looks broken. Both routes answer
+    // 200 with no items until the addon is redeployed — which is a fact for us,
+    // not for the viewer, so the copy says only what they can do about it.
     // el() takes (tag, className) only — a third argument is silently dropped,
     // which is how this shipped as an empty <p> the first time.
     const note = el('p', 'search-status');
-    note.textContent = 'No trailers yet. This needs the trailer pipeline on the server, which is built but not deployed.';
+    note.textContent = 'No trailers right now. Check back soon.';
     wrap.appendChild(note);
   }
 }
@@ -5955,7 +5957,7 @@ function renderEducation(metas, slug) {
   if (status) {
     status.textContent = metas.length
       ? `${metas.length} in ${slug}`
-      : 'Nothing here yet. The education catalogs are built on the server but not deployed.';
+      : 'Nothing in this topic yet. Try another topic.';
   }
 }
 
