@@ -2020,9 +2020,11 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 /* Was #8a2be2, a purple. The contract allows ONE accent and every other
    client badges 4K in it. */
 .badge-4k { background: var(--accent); color: #fff; }
-.badge-1080 { background: #0066ee; color: #fff; }
-.badge-720 { background: #1a9e4a; color: #fff; }
-.badge-sd { background: #555; color: #fff; }
+/* Were #0066ee (a blue), #1a9e4a (a second green) and #555 (a grey): three
+   colours the palette does not have, on every stream row. Only 4K earns the
+   accent; the rest sit on the warm surface with the one hairline, and the
+   label says which is which. */
+.badge-1080, .badge-720, .badge-sd { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--text); }
 .stream-meta { font-size: var(--fs-caption); color: var(--muted); margin-top: 4px; display: flex; gap: 8px; }
 
 /* ── Progress bar ────────────────────────────────────────── */
