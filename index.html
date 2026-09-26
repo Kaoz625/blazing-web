@@ -440,8 +440,14 @@
          state written into the markup is a count that drifts from what is
          stored, which is the same reasoning as the Settings rows above. -->
     <section id="library-view" class="view" hidden>
+      <!-- No eyebrow on the screens whose eyebrow only said the heading again
+           ("LIBRARY / Library"): Library, Books & Audio, Calendar, YouTube,
+           Live TV, Stream Sources and Settings. An eyebrow is kept only where it
+           adds a word the heading does not have (Emby / Library, Admin /
+           Dashboard). Requests lost "KillahRequest (Seerr)" and YouTube lost
+           "played through our own resolver" for a plainer reason: they named
+           the plumbing, and a viewer cannot do anything with that. -->
       <div class="page-heading">
-        <p class="eyebrow">Library</p>
         <h1>Library</h1>
         <p id="library-subtitle">Saved titles</p>
       </div>
@@ -452,7 +458,6 @@
 
     <section id="media-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Books &amp; Audio</p>
         <h1>Books &amp; Audio</h1>
         <p>Read or listen. Your place is saved for this profile on this device.</p>
       </div>
@@ -624,7 +629,6 @@
          Movies/Shows pair on the Emby screen rather than a second kind of tab. -->
     <section id="calendar-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Calendar</p>
         <h1>Calendar</h1>
         <p>What is out, and when, across films, TV, anime and manga.</p>
       </div>
@@ -957,7 +961,6 @@
     <!-- ── Requests View ── -->
     <section id="requests-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">KillahRequest (Seerr)</p>
         <h1>Requests</h1>
         <p>Search and request movies or shows to be added to the server.</p>
       </div>
@@ -1013,9 +1016,8 @@
          played by the app's one <video> element down in #player. -->
     <section id="youtube-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">YouTube</p>
         <h1>YouTube</h1>
-        <p>Shelves, search, channels and playlists — played through our own resolver, never an embed.</p>
+        <p>Shelves, search, channels and playlists.</p>
       </div>
       <form id="yt-search-form" class="search-form" role="search">
         <input id="yt-search-input" name="ytq" type="search" autocomplete="off" placeholder="Search YouTube" />
@@ -1038,7 +1040,6 @@
          catalogue sends people hunting a bug that is not there. -->
     <section id="livetv-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Live TV</p>
         <h1>Live TV</h1>
         <p>Every channel the household subscribes to. Search by name — CNN, BBC, CBS.</p>
       </div>
@@ -1105,7 +1106,6 @@
          that drifts from what was actually fetched. -->
     <section id="sources-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Stream Sources</p>
         <h1>Stream Sources</h1>
         <p>Where a stream in this browser comes from, and the add-on directory behind it.</p>
       </div>
@@ -1114,7 +1114,6 @@
 
     <section id="settings-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Settings</p>
         <h1>Settings</h1>
         <p>Playback, sources, language and parental controls.</p>
       </div>
