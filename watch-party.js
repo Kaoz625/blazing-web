@@ -99,6 +99,26 @@
     return node;
   }
 
+  // The tile buttons draw inline SVG, not 🎤 / 📷 / 🔊 / 🔇. Same reason as the
+  // detail trailer's mute button (app.js startDetailTrailer): an emoji is drawn
+  // in the platform's colour font, so it cannot take the button's colour, and it
+  // is a different picture on every system. These are stroked in currentColor.
+  const SLASH = '<path d="M4 4l16 16"/>';
+  const ICONS = {
+    mic: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/>',
+    camera: '<rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3z"/>',
+    speaker: '<path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+    speakerOff: '<path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 9l5 5m0-5l-5 5"/>',
+  };
+
+  /** Draw one tile icon into a button. `off` adds the slash to mic and camera. */
+  function setIcon(button, name, off) {
+    const paths = ICONS[name] + (off && (name === 'mic' || name === 'camera') ? SLASH : '');
+    button.dataset.icon = off ? `${name}-off` : name;
+    button.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"`
+      + ` stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  }
+
   function plainText(value, fallback = '') {
     const out = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
     return out || fallback;
@@ -284,7 +304,8 @@
       .wp-tile-self { grid-column: span 1; }
       .wp-tile-self video { transform: scaleX(-1); }
       .wp-tile-controls { position: absolute; right: 5px; bottom: 5px; display: flex; gap: 4px; }
-      .wp-tile-toggle { width: 24px; height: 24px; border: 0; border-radius: 8px; color: #fff; background: rgba(0,0,0,.55); font-size: 12px; line-height: 1; }
+      .wp-tile-toggle { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 8px; padding: 0; color: #fff; background: rgba(0,0,0,.55); line-height: 1; }
+      .wp-tile-toggle svg { display: block; pointer-events: none; }
       .wp-tile-toggle[data-off="true"] { background: rgba(225,29,43,.75); }
       .wp-tile[data-muted="true"] video { opacity: .55; }
 
@@ -939,27 +960,32 @@
     const hasVideo = state.localStream.getVideoTracks().length > 0;
     const hasAudio = state.localStream.getAudioTracks().length > 0;
     if (hasAudio) {
-      ui.micToggle = element('button', 'wp-tile-toggle', '🎤');
+      ui.micToggle = element('button', 'wp-tile-toggle');
       ui.micToggle.type = 'button';
+      setIcon(ui.micToggle, 'mic', false);
       ui.micToggle.setAttribute('aria-label', 'Mute microphone');
       ui.micToggle.addEventListener('click', () => {
         const track = state.localStream.getAudioTracks()[0];
         if (!track) return;
         track.enabled = !track.enabled;
         ui.micToggle.dataset.off = track.enabled ? 'false' : 'true';
-        ui.micToggle.textContent = track.enabled ? '🎤' : '🔇';
+        setIcon(ui.micToggle, 'mic', !track.enabled);
+        ui.micToggle.setAttribute('aria-label', track.enabled ? 'Mute microphone' : 'Unmute microphone');
       });
       controls.appendChild(ui.micToggle);
     }
     if (hasVideo) {
-      ui.camToggle = element('button', 'wp-tile-toggle', '📷');
+      ui.camToggle = element('button', 'wp-tile-toggle');
       ui.camToggle.type = 'button';
+      setIcon(ui.camToggle, 'camera', false);
       ui.camToggle.setAttribute('aria-label', 'Turn off camera');
       ui.camToggle.addEventListener('click', () => {
         const track = state.localStream.getVideoTracks()[0];
         if (!track) return;
         track.enabled = !track.enabled;
         ui.camToggle.dataset.off = track.enabled ? 'false' : 'true';
+        setIcon(ui.camToggle, 'camera', !track.enabled);
+        ui.camToggle.setAttribute('aria-label', track.enabled ? 'Turn off camera' : 'Turn on camera');
         video.style.visibility = track.enabled ? 'visible' : 'hidden';
       });
       controls.appendChild(ui.camToggle);
@@ -1049,7 +1075,7 @@
     entry.videoEl.muted = muted;
     if (entry.muteToggle) {
       entry.muteToggle.dataset.off = muted ? 'true' : 'false';
-      entry.muteToggle.textContent = muted ? '🔇' : '🔊';
+      setIcon(entry.muteToggle, muted ? 'speakerOff' : 'speaker', false);
       entry.muteToggle.setAttribute(
         'aria-label',
         `${muted ? 'Unmute' : 'Mute'} ${shortLabel(peerId)} for me`,
@@ -1069,8 +1095,9 @@
     const avatar = element('div', 'wp-tile-avatar', shortLabel(peerId).replace('Guest-', ''));
     const label = element('span', 'wp-tile-label', shortLabel(peerId));
     const controls = element('div', 'wp-tile-controls');
-    const muteToggle = element('button', 'wp-tile-toggle', '🔊');
+    const muteToggle = element('button', 'wp-tile-toggle');
     muteToggle.type = 'button';
+    setIcon(muteToggle, 'speaker', false);
     controls.appendChild(muteToggle);
     tile.append(video, avatar, label, controls);
     ui.tiles.appendChild(tile);

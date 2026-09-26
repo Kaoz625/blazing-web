@@ -958,7 +958,7 @@
     <section id="requests-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">KillahRequest (Seerr)</p>
-        <h1>🚀 Requests</h1>
+        <h1>Requests</h1>
         <p>Search and request movies or shows to be added to the server.</p>
       </div>
       <form id="requests-form" class="search-form" role="search">
@@ -972,7 +972,7 @@
     <section id="trailers-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Trailers</p>
-        <h1>🎬 What to Watch</h1>
+        <h1>What to Watch</h1>
         <p>New in theaters and coming soon. Click any title to preview the trailer.</p>
       </div>
       <div id="trailers-rows" class="rows"></div>
@@ -982,15 +982,18 @@
     <section id="education-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Education</p>
-        <h1>📚 Learn Something</h1>
+        <h1>Learn Something</h1>
         <p>Documentaries, courses, and educational content, organized by topic.</p>
       </div>
+      <!-- No emoji on the tabs or on the headings of Requests, Trailers and
+           Education, for the reason the drawer gives above: no other heading or
+           tab in the app wears one, so these read as a different product. -->
       <div class="edu-tabs" role="tablist" aria-label="Education categories">
-        <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">🔬 Science</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="history" aria-selected="false">🏛️ History</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="stem" aria-selected="false">💻 STEM</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="kids" aria-selected="false">🎨 Kids</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="languages" aria-selected="false">🌍 Languages</button>
+        <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">Science</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="history" aria-selected="false">History</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="stem" aria-selected="false">STEM</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="kids" aria-selected="false">Kids</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="languages" aria-selected="false">Languages</button>
       </div>
       <p id="edu-status" class="search-status" role="status"></p>
       <div id="edu-results" class="search-results"></div>
