@@ -221,6 +221,19 @@ async function choose(page, name) {
 /** Press the drawer row the way a viewer does, not by typing a route. */
 const openSources = (page) => page.evaluate(() => document.querySelector('.drawer-nav [data-view="sources"]').click());
 
+/* Admin is gated by the same grownUp() rule, so it is proven on the same three
+   profiles. Measured the same way as the Sources row: the attribute and the
+   computed display, not offsetParent (the closed drawer hides every row). */
+const adminState = (page) => page.evaluate(() => {
+  const row = document.querySelector('.drawer-nav [data-view="admin"]');
+  return { inDrawer: Boolean(row), offered: Boolean(row) && row.hidden === false && getComputedStyle(row).display !== 'none' };
+});
+/* Press the hidden row anyway, the way a hand-typed route would arrive. */
+const tryAdmin = (page) => page.evaluate(() => {
+  document.querySelector('.drawer-nav [data-view="admin"]').click();
+  return !document.getElementById('admin-view').hidden;
+});
+
 const drawerState = (page) => page.evaluate(() => {
   const row = document.querySelector('.drawer-nav [data-view="sources"]');
   return {
@@ -258,6 +271,8 @@ try {
   ok(drawer.order.indexOf('sources') === drawer.order.indexOf('settings') - 1,
     'it sits last before Settings, the position tvOS NavBar.swift:144 puts it in',
     `(… ${drawer.order.slice(-3).join(' → ')})`);
+  const grownAdmin = await adminState(grown.page);
+  ok(grownAdmin.inDrawer && grownAdmin.offered, 'a grown-up profile gets the Admin row too');
 
   await openSources(grown.page);
   await grown.page.waitForSelector('#sources-view:not([hidden]) #sources-list .sources-row', { timeout: 15000 });
@@ -433,6 +448,9 @@ try {
   const kidsDrawer = await drawerState(kids.page);
   ok(kidsDrawer.inDrawer && !kidsDrawer.offered,
     'B13: a Kids profile is offered no Stream Sources row at all');
+  const kidsAdmin = await adminState(kids.page);
+  ok(kidsAdmin.inDrawer && !kidsAdmin.offered, 'a Kids profile is offered no Admin row either');
+  ok(!(await tryAdmin(kids.page)), 'and pressing the hidden Admin row anyway does not open Admin');
 
   // AND IT CANNOT BE WALKED ROUND. Press the row by hand anyway: the view opens
   // — every view does — and has to refuse on its own rather than lean on a
@@ -463,6 +481,9 @@ try {
   const cappedDrawer = await drawerState(kids.page);
   ok(cappedDrawer.inDrawer && !cappedDrawer.offered,
     'B13: a profile capped below "mature" gets no row either, Kids flag or not');
+  const cappedAdmin = await adminState(kids.page);
+  ok(cappedAdmin.inDrawer && !cappedAdmin.offered, 'nor an Admin row, because grownUp() refuses a teen too');
+  ok(!(await tryAdmin(kids.page)), 'and a teen pressing the hidden Admin row does not open Admin');
   await openSources(kids.page);
   await kids.page.waitForSelector('#sources-view:not([hidden]) #sources-gate', { timeout: 12000 });
   const cappedRows = await kids.page.locator('#sources-view .sources-row').count();
@@ -481,6 +502,7 @@ try {
   await choose(kids.page, 'Alex');
   const reopened = await drawerState(kids.page);
   ok(reopened.offered, 'switching back to a grown-up profile returns the row without a reload');
+  ok((await adminState(kids.page)).offered, 'and returns the Admin row with it');
   await kids.page.waitForSelector('#sources-list .sources-row', { timeout: 15000 });
   const reopenedRows = await kids.page.locator('#sources-list .sources-row').count();
   ok(reopenedRows === 5,

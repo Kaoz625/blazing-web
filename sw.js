@@ -174,7 +174,13 @@
 // section against a cached styles.css with no rules for it would render an
 // unstyled full-width grid, and a cached app.js without fillRow() would leave
 // every shelf uncapped with a dead button. Same reason as the v43 bump below.
-const CACHE = 'blazing-shell-v44';
+// v45: the slop pass (BLZ-0045, fixes 1-10). Content-only changes to files
+// already in SHELL — styles.css, profile.js, watch-party.js, dpad.js, app.js,
+// index.html, settings.js, youtube.js, livetv.js — and no new file. Code is
+// network-first now, so this is the hygiene bump the note at the fetch handler
+// asks for: it evicts the copies that still paint the banned grey, the emoji
+// buttons and the dead Admin panels from a device's offline fallback.
+const CACHE = 'blazing-shell-v45';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

@@ -224,7 +224,13 @@
         <button type="button" data-view="calendar">Calendar</button>
         <button type="button" data-view="trailers">Trailers</button>
         <button type="button" data-view="requests">Requests</button>
-        <button type="button" data-view="admin">Admin</button>
+        <!-- ADMIN IS FOR GROWN-UPS. `hidden` in the markup is the fail-closed
+             default, the same as Stream Sources below: app.js syncAdminRow()
+             reveals it only for a grown-up profile (profile.js grownUp(), not a
+             Kids profile and rated at least mature), and showRoute() refuses the
+             route for anyone else. It stays in the markup for the reason the
+             Stream Sources note gives: navparity counts the drawer. -->
+        <button type="button" data-view="admin" hidden>Admin</button>
         <!-- STREAM SOURCES (B2). LAST BEFORE SETTINGS, which is exactly where
              both televisions put it — tvOS NavBar.swift:144 `drawerOrder`, and
              the Roku's own fillDrawer. Not a .topnav chip: it is not in the
@@ -440,8 +446,14 @@
          state written into the markup is a count that drifts from what is
          stored, which is the same reasoning as the Settings rows above. -->
     <section id="library-view" class="view" hidden>
+      <!-- No eyebrow on the screens whose eyebrow only said the heading again
+           ("LIBRARY / Library"): Library, Books & Audio, Calendar, YouTube,
+           Live TV, Stream Sources and Settings. An eyebrow is kept only where it
+           adds a word the heading does not have (Emby / Library, Admin /
+           Dashboard). Requests lost "KillahRequest (Seerr)" and YouTube lost
+           "played through our own resolver" for a plainer reason: they named
+           the plumbing, and a viewer cannot do anything with that. -->
       <div class="page-heading">
-        <p class="eyebrow">Library</p>
         <h1>Library</h1>
         <p id="library-subtitle">Saved titles</p>
       </div>
@@ -452,7 +464,6 @@
 
     <section id="media-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Books &amp; Audio</p>
         <h1>Books &amp; Audio</h1>
         <p>Read or listen. Your place is saved for this profile on this device.</p>
       </div>
@@ -512,52 +523,24 @@
            already lists every device with its pending count and an Approve
            button each. It asks for the admin bearer token once.
 
-           The three panels below it are NOT that. admin.js, which is the only
-           code that fills them, is not loaded by this file and could not work if
-           it were: its first line imports { getConfig } from './locker.js', and
-           locker.js exports nothing at all. So the panels sit empty and the
-           Approve Device button below has never had a handler. Left in place
-           rather than deleted, with this note, so the next person reaches for
-           the dashboard instead of wiring up something that cannot run. -->
+           This panel is the whole screen now. Three more stood under it and
+           none of them could ever work: admin.js, the only code that filled
+           them, is not loaded by this file and imports a getConfig that
+           locker.js does not export. "Device Linking Request" had an Approve
+           Device button with no handler, and "4K Upscale Requests" and
+           "Currently Watching" only said "Nothing to show - this panel has no
+           data source yet". A panel that can only ever be empty is not a
+           feature, so they are deleted rather than explained. -->
       <div class="admin-panel">
         <h2>Approve a device</h2>
-        <p>The fleet console lists every television and browser, which ones are
-           waiting, and approves them. It asks for the admin token once.</p>
+        <p>The device dashboard lists every television and browser, which ones
+           are waiting, and approves them. It asks for the admin token once.</p>
         <p><a class="primary-button" href="https://fleet.lyreosai.com/dashboard"
-              target="_blank" rel="noopener">Open the fleet dashboard</a></p>
+              target="_blank" rel="noopener">Open the device dashboard</a></p>
         <p class="muted">Locked out of a fresh browser instead? Use
            &ldquo;I am the owner&rdquo; on the profile gate and type the
            seven-digit owner PIN &mdash; that approves the browser you are
            holding, with no second device.</p>
-      </div>
-      <div id="admin-linking" class="admin-panel" hidden>
-        <h2>Device Linking Request</h2>
-        <p id="admin-link-text">A new device wants to connect.</p>
-        <button id="admin-approve-btn" class="primary-button">Approve Device</button>
-      </div>
-      <!-- Its own panel, a SIBLING of the activity one. It was opened inside
-           `admin-activity` and before that panel's own heading, so the upscale
-           queue rendered nested in "Currently Watching". -->
-      <!-- These two say so. Admin was the ONE view in the app that rendered a
-           heading over blank space and no message at all: Library says "Open a
-           title and use My list to save it here", a failed Comics/Manga/Games
-           fetch says "Could not reach…", and these said nothing, so an empty
-           panel was indistinguishable from a broken one. The copy is honest
-           about WHY it is empty rather than inventing a source it does not
-           have — see the note above on admin.js. -->
-      <div id="admin-upscale" class="admin-panel">
-        <h2>4K Upscale Requests</h2>
-        <div id="admin-upscale-list" class="grid-list">
-          <p class="empty-copy">Nothing to show &mdash; this panel has no data
-             source yet. It is not an outage.</p>
-        </div>
-      </div>
-      <div id="admin-activity" class="admin-panel">
-        <h2>Currently Watching</h2>
-        <div id="admin-activity-list" class="grid-list">
-          <p class="empty-copy">Nothing to show &mdash; this panel has no data
-             source yet. It is not an outage.</p>
-        </div>
       </div>
     </section>
 
@@ -624,7 +607,6 @@
          Movies/Shows pair on the Emby screen rather than a second kind of tab. -->
     <section id="calendar-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Calendar</p>
         <h1>Calendar</h1>
         <p>What is out, and when, across films, TV, anime and manga.</p>
       </div>
@@ -957,8 +939,7 @@
     <!-- ── Requests View ── -->
     <section id="requests-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">KillahRequest (Seerr)</p>
-        <h1>🚀 Requests</h1>
+        <h1>Requests</h1>
         <p>Search and request movies or shows to be added to the server.</p>
       </div>
       <form id="requests-form" class="search-form" role="search">
@@ -972,7 +953,7 @@
     <section id="trailers-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Trailers</p>
-        <h1>🎬 What to Watch</h1>
+        <h1>What to Watch</h1>
         <p>New in theaters and coming soon. Click any title to preview the trailer.</p>
       </div>
       <div id="trailers-rows" class="rows"></div>
@@ -982,15 +963,18 @@
     <section id="education-view" class="view" hidden>
       <div class="page-heading">
         <p class="eyebrow">Education</p>
-        <h1>📚 Learn Something</h1>
+        <h1>Learn Something</h1>
         <p>Documentaries, courses, and educational content, organized by topic.</p>
       </div>
+      <!-- No emoji on the tabs or on the headings of Requests, Trailers and
+           Education, for the reason the drawer gives above: no other heading or
+           tab in the app wears one, so these read as a different product. -->
       <div class="edu-tabs" role="tablist" aria-label="Education categories">
-        <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">🔬 Science</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="history" aria-selected="false">🏛️ History</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="stem" aria-selected="false">💻 STEM</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="kids" aria-selected="false">🎨 Kids</button>
-        <button class="edu-tab" type="button" role="tab" data-edu-slug="languages" aria-selected="false">🌍 Languages</button>
+        <button class="edu-tab active" type="button" role="tab" data-edu-slug="science" aria-selected="true">Science</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="history" aria-selected="false">History</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="stem" aria-selected="false">STEM</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="kids" aria-selected="false">Kids</button>
+        <button class="edu-tab" type="button" role="tab" data-edu-slug="languages" aria-selected="false">Languages</button>
       </div>
       <p id="edu-status" class="search-status" role="status"></p>
       <div id="edu-results" class="search-results"></div>
@@ -1010,9 +994,8 @@
          played by the app's one <video> element down in #player. -->
     <section id="youtube-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">YouTube</p>
         <h1>YouTube</h1>
-        <p>Shelves, search, channels and playlists — played through our own resolver, never an embed.</p>
+        <p>Shelves, search, channels and playlists.</p>
       </div>
       <form id="yt-search-form" class="search-form" role="search">
         <input id="yt-search-input" name="ytq" type="search" autocomplete="off" placeholder="Search YouTube" />
@@ -1035,7 +1018,6 @@
          catalogue sends people hunting a bug that is not there. -->
     <section id="livetv-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Live TV</p>
         <h1>Live TV</h1>
         <p>Every channel the household subscribes to. Search by name — CNN, BBC, CBS.</p>
       </div>
@@ -1102,7 +1084,6 @@
          that drifts from what was actually fetched. -->
     <section id="sources-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Stream Sources</p>
         <h1>Stream Sources</h1>
         <p>Where a stream in this browser comes from, and the add-on directory behind it.</p>
       </div>
@@ -1111,7 +1092,6 @@
 
     <section id="settings-view" class="view" hidden>
       <div class="page-heading">
-        <p class="eyebrow">Settings</p>
         <h1>Settings</h1>
         <p>Playback, sources, language and parental controls.</p>
       </div>

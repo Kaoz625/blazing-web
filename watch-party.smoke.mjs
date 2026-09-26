@@ -153,11 +153,16 @@ const WITH_TURN = {
   const btn = tile.locator('.wp-tile-toggle');
   check('remote tile has one mute button', (await btn.count()) === 1);
   check('a caller starts audible', (await tile.locator('video').evaluate((v) => v.muted)) === false);
-  check('button reads unmuted', (await btn.textContent()) === '🔊');
+  // An inline SVG, not the 🔊 / 🔇 emoji it used to be: data-icon names the
+  // picture, and the button carries no text of its own for a colour font to draw.
+  const icon = () => btn.evaluate((b) => ({ name: b.dataset.icon, svg: !!b.querySelector('svg'), text: b.textContent.trim() }));
+  const unmutedIcon = await icon();
+  check('button reads unmuted', unmutedIcon.name === 'speaker' && unmutedIcon.svg && unmutedIcon.text === '', JSON.stringify(unmutedIcon));
 
   await btn.click();
   check('clicking mutes that caller', (await tile.locator('video').evaluate((v) => v.muted)) === true);
-  check('button flips to muted', (await btn.textContent()) === '🔇');
+  const mutedIcon = await icon();
+  check('button flips to muted', mutedIcon.name === 'speakerOff' && mutedIcon.svg && mutedIcon.text === '', JSON.stringify(mutedIcon));
   check('aria-pressed reflects it', (await btn.getAttribute('aria-pressed')) === 'true');
   check('tile is marked muted', (await tile.getAttribute('data-muted')) === 'true');
   const sent = await page.evaluate(() => window.__seen.sent.join(''));

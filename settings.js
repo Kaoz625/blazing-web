@@ -44,9 +44,6 @@
 'use strict';
 
 (() => {
-  const FLEET_BASE = window.BLAZING_FLEET_BASE || 'https://fleet.lyreosai.com';
-  const ADDON_BASE = window.BLAZING_API_BASE || 'https://addon.lyreosai.com';
-
   const FILTER_KEY = 'blazing-source-filters-v1';
   const AUTO_NEXT_KEY = 'blazing-auto-next-episode-v1';
   const STRIP_SDH_KEY = 'blazing-hide-sdh-v1';
@@ -483,15 +480,15 @@
       renderPlaylistForm(root);
     }
 
-    /* ── About ── tvOS keeps its four read-only fields below the controls
-       (Sections.swift:516-519) and that is the right place for them. ── */
+    /* ── About ── tvOS keeps its read-only fields below the controls
+       (Sections.swift:516-519) and that is the right place for them. The raw
+       Fleet and Sources URLs are not shown here: they are addresses for us, and
+       a viewer can do nothing with them. ── */
     sectionTitle(root, 'About');
     const about = element('dl', 'settings-about');
     [
       ['Profile', state.profile ? state.profile.name : 'None chosen'],
       ['Rating limit', state.profile ? String(state.profile.maxRating || 'general') : '—'],
-      ['Fleet', FLEET_BASE],
-      ['Sources', ADDON_BASE],
     ].forEach(([term, value]) => {
       about.append(element('dt', '', term), element('dd', '', value));
     });

@@ -541,7 +541,7 @@
           ? `Too many requests just now. Wait about ${secs} second${secs === 1 ? '' : 's'} and press play again.`
           : 'Too many requests just now. Wait a moment and press play again.');
       } else {
-        setStatus('That video could not be opened — the resolver on the server did not answer.');
+        setStatus('That video could not be opened right now. Try again in a minute.');
       }
       telemetry('play_failed', { id: video.id, from: 'youtube', failure });
       return;
@@ -660,7 +660,7 @@
       // before any shelf could possibly exist.
       setStatus(state.loading
         ? 'Loading YouTube…'
-        : 'YouTube did not answer. The shelves come from the fleet, and it is not reachable right now.');
+        : 'YouTube is not answering right now. Check your connection, then try again.');
     } else {
       const shelfCount = state.shelves.filter((s) => s.videos.length).length;
       setStatus(`${shelfCount} shelves${watched.length ? `, ${watched.length} to keep watching` : ''}.`);

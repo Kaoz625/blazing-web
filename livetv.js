@@ -1113,7 +1113,7 @@
     if (!rows) {
       guideStatus.textContent = kidsCapped()
         ? KIDS_CAPPED_COPY
-        : 'No guide data came back. The fleet has listings for a couple of hundred channels.';
+        : 'No guide listings for these channels. Only some channels have a guide.';
       return;
     }
     const { start, end } = state.guideSpan || guideWindow();

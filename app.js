@@ -2109,7 +2109,39 @@ function arrive() {
   arriveDeadman = setTimeout(arriveDown, ARRIVE_DEADMAN_MS);
 }
 
+/* ── Admin is for grown-ups ──────────────────────────────────────────────────
+ * The Admin row sat in every profile's drawer, a Kids profile's included, and
+ * it opens the owner's device console. The rule is the EXISTING grownUp()
+ * (profile.js:170, itself firetv ProfileGateRules.kt:121): not a Kids profile,
+ * and rated at least 'mature'. So a teen is refused too, by the same rule that
+ * keeps a child off the Approve sheet and off Stream Sources. No second rule.
+ *
+ * NOBODY CONNECTED IS A NO, and so is a missing BlazingProfile: profile.js is
+ * loaded before this file, so the only way `rules` is absent is a half-updated
+ * install, which is the moment to show least.
+ *
+ * The row is HIDDEN, never removed, for the reason sources.js syncDrawerRow()
+ * gives: navparity.smoke.mjs counts `.drawer-nav [data-view]`. Hiding it is not
+ * the gate on its own either: showRoute() below refuses the route as well.
+ */
+function adminAllowed() {
+  if (!state.profileId) return false;
+  const grownUp = window.BlazingProfile && window.BlazingProfile.rules && window.BlazingProfile.rules.grownUp;
+  if (typeof grownUp !== 'function') return false;
+  return grownUp({ isKids: state.profileIsKids, maxRating: state.profileCap }) === true;
+}
+
+/** Show or hide the Admin row for whoever is watching now. */
+function syncAdminRow() {
+  const allowed = adminAllowed();
+  $$('button[data-view="admin"]').forEach((button) => { button.hidden = !allowed; });
+  // A profile switch does not re-run the router, so a Kids profile chosen while
+  // Admin is on screen would otherwise inherit it.
+  if (!allowed && state.route === 'admin') showRoute('home');
+}
+
 function showRoute(route, mediaOptions = {}) {
+  if ((route === 'admin' || route === 'link') && !adminAllowed()) route = 'home';
   const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
   const mediaRoute = ['books', 'music', 'podcasts'].includes(route);
@@ -3301,7 +3333,9 @@ async function requestUpscale() {
     // 200 with status "error", or any non-queued body: this did NOT land.
     resetUpscaleButton();
     showToast(
-      plainText(data && data.message, `The upscale service did not accept this request (HTTP ${response.status}).`),
+      // The backend's own sentence wins when it sends one. The fallback is for
+      // the viewer, so it says what to do next and not the status code.
+      plainText(data && data.message, 'The 4K upscale did not start. Try again in a minute.'),
       'error'
     );
   } catch (error) {
@@ -4586,8 +4620,7 @@ async function playSelected() {
     const edu = await resolveEduStream(meta.id);
     if (!isCurrent()) return;
     if (!edu) {
-      detailStatus.textContent = 'This lesson could not be opened. The video ' +
-        'resolver on the server did not answer.';
+      detailStatus.textContent = 'This lesson could not be opened right now. Try again in a minute.';
       return;
     }
     openPlayer(meta.name, edu.url, { streamFormat: edu.streamFormat });
@@ -5871,12 +5904,13 @@ async function loadTrailersView() {
   const rows = await Promise.all(jobs);
 
   if (!rows.some((metas) => metas.length)) {
-    // Say why, rather than showing a page that looks broken. Both routes answer
-    // 200 with no items until the addon is redeployed.
+    // Say so, rather than showing a page that looks broken. Both routes answer
+    // 200 with no items until the addon is redeployed — which is a fact for us,
+    // not for the viewer, so the copy says only what they can do about it.
     // el() takes (tag, className) only — a third argument is silently dropped,
     // which is how this shipped as an empty <p> the first time.
     const note = el('p', 'search-status');
-    note.textContent = 'No trailers yet. This needs the trailer pipeline on the server, which is built but not deployed.';
+    note.textContent = 'No trailers right now. Check back soon.';
     wrap.appendChild(note);
   }
 }
@@ -5923,7 +5957,7 @@ function renderEducation(metas, slug) {
   if (status) {
     status.textContent = metas.length
       ? `${metas.length} in ${slug}`
-      : 'Nothing here yet. The education catalogs are built on the server but not deployed.';
+      : 'Nothing in this topic yet. Try another topic.';
   }
 }
 
@@ -6541,6 +6575,7 @@ function restoreProfileSession() {
   window.BlazingLists?.setProfile(id);
   updateSaveLabels();
   renderLibrary();
+  syncAdminRow();
   return true;
 }
 
@@ -6564,6 +6599,7 @@ document.addEventListener('blazing-profile-selected', (event) => {
   rememberProfileSession(detail);
   updateSaveLabels();
   renderLibrary();
+  syncAdminRow();
   // Search and discovery were filtered for the previous viewer.
   ++searchRequest;
   ++discoverRequest;
@@ -6632,6 +6668,7 @@ document.addEventListener('blazing-profile-signed-out', () => {
   $('#emby-results').replaceChildren();
   renderLibrary();
   updateSaveLabels();
+  syncAdminRow();
 });
 
 /* ---- Comics ------------------------------------------------------------- */
