@@ -139,7 +139,11 @@ const MIN_SUITES = 43;
 // the three orders, the day ordering and the twelve-hour clock are all
 // decisions the client holds — and the Roku got several of them wrong once
 // each before it got them right.
-const MIN_UNITS = 8;
+// Raised 8 -> 9 when caps-uncached.test.mjs landed: a row the debrid service
+// must download first never leads a row that starts now (28 Sep 2026, Toy
+// Story 5 played a 30-second "Downloading to Store" clip twice). Counted on
+// disk before writing it — `ls *.test.mjs | wc -l` answered 9.
+const MIN_UNITS = 9;
 
 const filters = process.argv.slice(2);
 const entries = (await readdir(ROOT)).sort();

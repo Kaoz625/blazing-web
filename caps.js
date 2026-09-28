@@ -894,6 +894,10 @@
       sizeGb: detectSizeGb(blob),
       seeders: detectSeeders(blob),
       foreign: FOREIGN.test(blob),
+      /* The add-on's own verdict, set in stream-normalise.js: `_start` is the
+         field of record, `_cached` its boolean twin. See score() for why it
+         matters. */
+      uncached: !!s && (s._start === 'uncached' || s._cached === false),
       rejected: '',
       score: 0
     };
@@ -1051,6 +1055,25 @@
        penaltyOf() that app.js has had inline since the source list was written;
        it was the only ranking this client had. */
     if (info.foreign) s -= 1200;
+
+    /* NOTHING THAT MUST DOWNLOAD FIRST LEADS ANYTHING THAT STARTS NOW. A torrent
+       the debrid service does not hold yet does not answer with the film: it
+       answers with a status clip ("Downloading to Store…"), and a clip is not an
+       error, so the failover never moves on. 28 Sep 2026, Toy Story 5 on the web:
+       an uncached 2.9 GB 4K AV1 row out-scored every ready row, the player drew a
+       30-second purple card to its end twice, and the member reported the film
+       "couldn't" be watched. Every StremThru status clip measures exactly
+       30.000 s.
+
+       The Roku has ranked DIRECT and CACHED above UNCACHED since StreamRanker's
+       "fast" key; this is the same rule. 20000 clears the widest gap the rest of
+       this function opens between two playable rows (a 2160p row with every
+       bonus is about 10100; an unlabelled foreign AVI over 12 GB is about -3000)
+       and stays above the -60000 a silent row takes, so the order is: ready,
+       then uncached, then silent, then dead, then rejected. The row is kept,
+       not removed — for a brand-new release it can be the only one, and then
+       it is still the one to try. */
+    if (info.uncached) s -= 20000;
 
     /* Bitrate headroom. A 40 GB remux on a link the browser thinks is 5 Mbit is
        a spinner. It is not removed — maxSizeGb already removes the impossible
