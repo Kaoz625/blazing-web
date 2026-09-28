@@ -105,7 +105,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 41 -> 42 when games-hub.smoke.mjs landed with the one games browser
 // that replaces the eight nookie "Game Browser" apps. Same rule as every line
 // above: this number is the real count, always.
-const MIN_SUITES = 42;
+// Raised 42 -> 43 when rating-blocked.smoke.mjs landed: a title the add-on's
+// gate refuses says so in the player, stops the source walk, and sends ONE
+// play_failed that names the title. Counted on disk before writing it.
+const MIN_SUITES = 43;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

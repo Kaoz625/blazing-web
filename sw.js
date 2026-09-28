@@ -180,7 +180,12 @@
 // network-first now, so this is the hygiene bump the note at the fetch handler
 // asks for: it evicts the copies that still paint the banned grey, the emoji
 // buttons and the dead Admin panels from a device's offline fallback.
-const CACHE = 'blazing-shell-v45';
+// v46: the rating refusal (app.js only, no new file). A title above the
+// profile's cap now says so in the player and stops the source walk, and
+// play_failed names the title instead of sending an empty id. Code is
+// network-first, so this is the hygiene bump again: it evicts the app.js that
+// walked 24 refused sources in silence from a device's offline fallback.
+const CACHE = 'blazing-shell-v46';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

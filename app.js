@@ -4711,6 +4711,31 @@ function setPlayerState(kind, message) {
 let playSession = 0;
 let playerWatchdog = null;
 
+/**
+ * WHAT IS PLAYING, for play_failed. Written by openPlayer() and, for the source
+ * label, by tryNextCandidate() as the walk moves down the list.
+ *
+ * The error listener used to read `state.selected`, and every Play path calls
+ * closeDetail() straight after openPlayer() — which sets it to null. So by the
+ * time a load failed there was no title left to name. 28 Sep 2026: a teen
+ * profile ("Tiny") pressed Play on two films and the fleet received 24
+ * play_failed rows, every one of them `{"id": "", "code": "4"}`, while the add-on
+ * log said plainly `[gate] refused tt14858658 tier=mature cap=teen`. Nobody
+ * could have joined those two logs from the client's side.
+ *
+ * Declared up here, beside playSession, and not beside openPlayer(): three
+ * functions above openPlayer write or read these, and a `let` that sits after
+ * its first reader is the temporal-dead-zone trap playingEpisodeId's comment
+ * describes.
+ */
+let playingTitle = { id: '', title: '', type: '', source: '' };
+/**
+ * The one load attempt the next play_failed belongs to: its session, the URL
+ * the element was given, whether it has been reported, and the shared answer
+ * of the status probe (see probePlayback()). One per watchPlayerLoad() call.
+ */
+let playAttempt = null;
+
 /* ---------------------------------------------------------------------------
    B10. AUTOMATIC SOURCE FAILOVER — walk the ranked list, the way the Roku and
    the Fire TV already do.
@@ -4830,6 +4855,113 @@ async function resolveViaProxy(url) {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   WHY A LOAD FAILED, asked of the one server that will say.
+
+   A <video> element turns every HTTP refusal into MediaError code 4 and drops
+   the status and the body on the floor. The add-on's parental gate refuses a
+   title above the profile's cap with a 403 and a plain sentence —
+   `{"error":"This title is above the current profile's rating limit"}`
+   (lib/playback-proxy.js refuseRating, server.js /dl/:token) — and the player
+   showed "This stream cannot play in this browser" instead, then walked every
+   other source of the same title into the same refusal. That is the 28 Sep
+   incident in the note on playingTitle above.
+
+   So on a failed load of one of OUR playback urls, one small fetch of that same
+   url learns the status. Only ours: a third-party host is never probed, because
+   a request the viewer did not make to a host we do not run is not ours to send.
+
+   CORS lets the page read it. MEASURED 28 Sep 2026 against the live add-on with
+   `Origin: https://blazingstream.lyreosai.com` and `Range: bytes=0-0`, using
+   rows from a real `cap=teen` source list for tt14858658 (Blink Twice, R):
+     GET addon.lyreosai.com/play/<capability>  403  access-control-allow-origin: *
+         {"error":"This title is above the current profile's rating limit"}
+     GET addon.lyreosai.com/dl/<token>         403  the same header, the same body
+     GET addon.lyreosai.com/play/<bad>         404  access-control-allow-origin: *
+     OPTIONS .../play/<bad>                    204  access-control-allow-headers: ... Range ...
+     GET blazingstream.lyreosai.com/addon/play/<bad>  404  access-control-allow-origin: *
+   The refusals carry the same CORS headers as the media does, so the status
+   and the JSON body are both readable from the page.
+--------------------------------------------------------------------------- */
+const PLAYBACK_PROBE_TIMEOUT = 6000;
+
+/**
+ * True for the add-on's own playback doors: /play/<capability> and the signed
+ * /dl/<token>, on the add-on host or on the same-origin /addon/ path that
+ * blazingstream serves it through.
+ */
+function ownPlaybackUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    let path = parsed.pathname;
+    if (parsed.origin !== new URL(API_BASE).origin) {
+      if (parsed.origin !== window.location.origin || path.indexOf('/addon/') !== 0) return false;
+      path = path.slice('/addon'.length);
+    }
+    return /^\/(?:play|dl)\/[^/]+$/.test(path);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One byte of [url], for its status. Resolves `{ status, ratingBlocked }`, or
+ * null when it learned nothing. Never rejects — a probe that throws must not
+ * cost the event it was meant to improve.
+ *
+ * `redirect: 'manual'` because /dl answers an ALLOWED title with a 302 to the
+ * debrid host. Following it would send this probe to a host that is not ours,
+ * and the opaque redirect it returns instead is itself the answer: the door
+ * opened, so the gate is not why the film failed.
+ */
+async function probePlayback(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PLAYBACK_PROBE_TIMEOUT);
+  try {
+    const response = await fetch(url, {
+      headers: { Range: 'bytes=0-0' },
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (response.type === 'opaqueredirect' || !response.status) return null;
+    let ratingBlocked = false;
+    if (response.status === 403) {
+      const body = await response.json().catch(() => null);
+      // "rating limit", not the whole sentence: the add-on words it two ways
+      // ("profile's" on /play and /dl, "profile" on /proxy/resolve).
+      ratingBlocked = /rating limit/i.test(String((body && body.error) || ''));
+    } else if (response.body && typeof response.body.cancel === 'function') {
+      // A host that ignores Range sends the whole file. One byte was the ask.
+      response.body.cancel().catch(() => {});
+    }
+    return { status: response.status, ratingBlocked };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * The probe for one attempt, run at most once. The error listener that sends
+ * play_failed and the attempt's own onFail both need the answer, and two
+ * fetches of a capability url would spend two of its rate-limit slots on one
+ * failure.
+ */
+function attemptProbe(attempt) {
+  if (!attempt.probe) {
+    attempt.probe = ownPlaybackUrl(attempt.url) ? probePlayback(attempt.url) : Promise.resolve(null);
+  }
+  return attempt.probe;
+}
+
+/** What the viewer reads when the add-on's gate refused the title. */
+const RATING_BLOCKED_MESSAGE = 'This title is above this profile\'s rating limit. ' +
+  'The account owner can change the rating.';
+
 // Attach the one-shot outcome listeners for a single load attempt. `session`
 // pins them to this openPlayer() call, so a stale listener left over from a
 // closed player (closePlayer() also removes src, which fires `error`) is inert.
@@ -4852,6 +4984,10 @@ function playFailureReason(fallback) {
 }
 
 function watchPlayerLoad(session, originalUrl, canRetry) {
+  // Every caller points the element at `originalUrl` right after this, so this
+  // is the attempt the next `error` belongs to.
+  const attempt = { session, url: originalUrl, reported: false, probe: null };
+  playAttempt = attempt;
   const onReady = () => {
     if (session !== playSession) return;
     clearPlayerWatchdog();
@@ -4874,10 +5010,28 @@ function watchPlayerLoad(session, originalUrl, canRetry) {
     if (session !== playSession) return;
     clearPlayerWatchdog();
     video.removeEventListener('loadedmetadata', onReady);
-    if (canRetry) retryViaProxy(session, originalUrl);
-    else if (!tryNextCandidate(session, 'That link was dead')) {
-      giveUpOnCandidates(session, playFailureReason('This stream cannot play in this browser. Try another source.'));
-    }
+    const moveOn = () => {
+      if (canRetry) retryViaProxy(session, originalUrl);
+      else if (!tryNextCandidate(session, 'That link was dead')) {
+        giveUpOnCandidates(session, playFailureReason('This stream cannot play in this browser. Try another source.'));
+      }
+    };
+    // A third-party url moves on at once, exactly as before: there is nothing
+    // to ask it.
+    if (!ownPlaybackUrl(originalUrl)) { moveOn(); return; }
+    attemptProbe(attempt).then((probe) => {
+      if (session !== playSession) return;
+      if (!probe || !probe.ratingBlocked) { moveOn(); return; }
+      // THE GATE REFUSED THE TITLE, NOT THIS ROW. The cap is checked per title,
+      // so every other source of it gets the same 403 — Tiny's walk did exactly
+      // that, and the viewer watched "trying 2 of N…" toasts for a film that
+      // could never start. Stop here and say why, once.
+      //
+      // Deliberately NOT markDeadLink(): the row is fine. Marking it would sink
+      // a good source for 24 hours after the owner raises the rating.
+      clearCandidates();
+      setPlayerState('error', RATING_BLOCKED_MESSAGE);
+    });
   };
   video.addEventListener('loadedmetadata', onReady, { once: true });
   video.addEventListener('error', onFail, { once: true });
@@ -4974,6 +5128,9 @@ function tryNextCandidate(session, reason) {
 
   candidateIndex = next;
   showToast(`${reason} - trying ${candidateIndex + 1} of ${playbackCandidates.length}…`);
+  // Same title, different host. play_failed names the host that failed, so
+  // v_source_health counts each failure against the source that earned it.
+  playingTitle = { ...playingTitle, source: String(stream._from || '').replace(/^site:/, '') };
 
   const declared = String(stream.streamFormat || '');
   playerHeaders = streamHeaders(stream);
@@ -5245,6 +5402,22 @@ function openPlayer(title, rawUrl, opts) {
     candidateMeta = (opts && opts.meta) || null;
     candidateResume = Math.max(0, Number(opts.startAt) || 0);
   }
+
+  // Remembered NOW, while the caller's state.selected still stands — see the
+  // note on playingTitle for what reading it later cost. `opts.meta` first: the
+  // three ranked-list callers pass it. Emby and the education path pass none
+  // but call closeDetail() only after this returns, so state.selected is still
+  // theirs here. youtube.js, livetv.js and locker.js have no meta at all and
+  // are named by the title they passed. The source is play_start's own
+  // expression, so a play_start and its play_failed land on one host row.
+  const playing = (opts && opts.meta) || state.selected || null;
+  const row = playbackCandidates[candidateIndex];
+  playingTitle = {
+    id: playing ? String(playing.id || '') : '',
+    title: String((playing && playing.name) || title || ''),
+    type: playing ? String(playing.type || '') : '',
+    source: String((row && row._from) || '').replace(/^site:/, ''),
+  };
 
   if (Platform.isAppleTV) {
     window.webkit.messageHandlers.avplayer.postMessage({ url, streamFormat: declared, headers });
@@ -5970,14 +6143,49 @@ $$('.edu-tab').forEach((tab) => {
 
 /* ── remaining telemetry call sites ──────────────────────────────────────── */
 
+/**
+ * play_failed: ONE per failed attempt, naming the title and the host.
+ *
+ * It read `state.selected`, which closeDetail() had already nulled, so every
+ * row said `id: ""` — see the note on playingTitle. It now reads what
+ * openPlayer() remembered.
+ *
+ * ONE PER ATTEMPT, NOT ONE PER EVENT. hls.js re-raises `error` for each fatal
+ * error it meets, and the element can fire again once a watch has moved on, so
+ * the attempt carries a `reported` flag and a torn-down session (closePlayer()
+ * bumps playSession) reports nothing. The attempt's own onFail
+ * (watchPlayerLoad) never sends this event; the two share one probe and this
+ * listener is the only sender. It is registered while this file loads, before
+ * any attempt can exist, so the DOM runs it before that attempt's onFail — and
+ * it copies playingTitle synchronously, before onFail can walk to the next row.
+ *
+ * On one of our playback urls the event waits for the probe, so it can say
+ * WHY: `code: 'rating_blocked'` with `status: 403` when the gate refused the
+ * title, or just the `status` otherwise. A probe that learned nothing sends the
+ * original event unchanged. No url and no key the scrubber in telemetry.js
+ * refuses: flat values only.
+ */
 video.addEventListener('error', () => {
-  const meta = state.selected;
-  telemetry('play_failed', {
-    id: meta ? meta.id : '',
-    source: 'web',
+  const attempt = playAttempt;
+  if (!attempt || attempt.session !== playSession || attempt.reported) return;
+  attempt.reported = true;
+  const props = {
+    id: playingTitle.id,
+    title: playingTitle.title,
+    type: playingTitle.type,
+    source: playingTitle.source,
     code: String(video.error ? video.error.code : 'unknown'),
     message: 'html5 media error',
-  });
+  };
+  const send = (probe) => {
+    if (probe && probe.ratingBlocked) {
+      props.code = 'rating_blocked';
+      props.message = 'above the profile rating limit';
+    }
+    if (probe && probe.status) props.status = probe.status;
+    telemetry('play_failed', props);
+  };
+  attemptProbe(attempt).then(send, () => send(null));
 });
 
 video.addEventListener('ended', () => {
