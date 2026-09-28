@@ -109,7 +109,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // replay.smoke.mjs (BLZ-0109). Same rule: this number is the real count.
 // Raised 44 -> 45 the same day: shelfcinema.smoke.mjs (BLZ-0110). `ls
 // *.smoke.mjs | wc -l` answered 45.
-const MIN_SUITES = 45;
+// Raised 45 -> 47 on 10 Oct 2026: rating-blocked.smoke.mjs (BLZ-0085) reached main, and one more
+// suite had landed without a raise. A title
+// the add-on's gate refuses says so in the player, stops the source walk, and sends ONE
+// play_failed that names the title. `ls *.smoke.mjs | wc -l` answered 47.
+const MIN_SUITES = 47;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

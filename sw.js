@@ -193,7 +193,12 @@
 // index.html and styles.css. v49 has not reached main yet (main is v48), so no bump.
 // Same v49: the shelf cinema (BLZ-0110) in app.js, index.html and styles.css.
 // Still unreleased, so still no bump.
-const CACHE = 'blazing-shell-v49';
+// v50: the rating refusal (BLZ-0085, app.js only, no new file). A title above the
+// profile's cap now says so in the player and stops the source walk, and
+// play_failed names the title instead of sending an empty id. Code is
+// network-first, so this is the hygiene bump: it evicts the app.js that
+// walked 24 refused sources in silence from a device's offline fallback.
+const CACHE = 'blazing-shell-v50';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
