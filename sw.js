@@ -180,7 +180,7 @@
 // network-first now, so this is the hygiene bump the note at the fetch handler
 // asks for: it evicts the copies that still paint the banned grey, the emoji
 // buttons and the dead Admin panels from a device's offline fallback.
-const CACHE = 'blazing-shell-v45';
+const CACHE = 'blazing-shell-v46';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

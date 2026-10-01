@@ -812,10 +812,23 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
     (await page.locator('#game-source-ps5').isVisible()) === true);
 
   await page.click('#game-source-ps5');
+  // BLZ-0088: the press asks where it goes, and sends nothing yet.
+  await page.waitForSelector('#games-target-picker button', { timeout: 8000 });
+  check('the press asks where it goes: 5TB HDD, P5, D5, mac1, mac2',
+    (await page.locator('#games-target-picker button').allTextContents()).join('|') ===
+      '5TB HDD|P5 (internal)|D5 (internal)|mac1|mac2',
+    (await page.locator('#games-target-picker button').allTextContents()).join('|'));
+  check('and nothing is queued before a place is picked',
+    calls.filter((c) => c.path === '/games/ps5/queue').length === 0);
+  await page.click('#games-target-picker [data-target-id="p5"]');
   await page.waitForFunction(
     () => (document.getElementById('game-source-status').textContent || '').includes('Queued'),
     null, { timeout: 8000 });
   const queued = calls.filter((c) => c.path === '/games/ps5/queue').pop();
+  check('the pick goes with the send as target=p5, and the status names it',
+    Boolean(queued) && queued.params.get('target') === 'p5' &&
+      (await text(page.locator('#game-source-status'))).includes('P5 (internal)'),
+    queued ? queued.url : 'no call');
   // A GET, and the old assertion demanding a POST was wrong about the server.
   // JTPlay's QuickJS sandbox exposes exactly one network call, `http.get`, so
   // the add-on serves this as app.get() — a POST-only queue would be a queue

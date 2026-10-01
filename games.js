@@ -1553,8 +1553,7 @@
     const dest = TARGET_LABEL[targetId] || targetId;
     r.dStatus.textContent = res.json.duplicate === true
       ? `That one is already waiting for the Mac. (→ ${dest})`
-      : clean(res.json.message,
-        `Queued. → ${dest}.`);
+      : `Queued. It goes to ${dest}.`;
   }
 
   // ── accounts: the SERVER's state, never a second copy ─────────────────────
