@@ -433,6 +433,17 @@
   const LANE_LABEL = { http: 'Direct download', realdebrid: 'Real-Debrid', torbox: 'TorBox' };
   const LANE_ORDER = ['http', 'realdebrid', 'torbox'];
 
+  // BLZ-0088: download targets (contract order).
+  const TARGET_CHOICES = [
+    { id: 'hdd', label: '5TB HDD' },
+    { id: 'p5', label: 'P5 (internal)' },
+    { id: 'd5', label: 'D5 (internal)' },
+    { id: 'mac1', label: 'mac1' },
+    { id: 'mac2', label: 'mac2' },
+  ];
+  const TARGET_LABEL = Object.fromEntries(TARGET_CHOICES.map((c) => [c.id, c.label]));
+  const LAST_TARGET_KEY = 'blazing-games-last-target';
+
   // A fallback only. The real list is `platforms[]` off /games/sources, which
   // is PLATFORMS in lib/game-sources.js. These are the systems the eight apps
   // covered, used when the registry has not answered yet.
@@ -1374,6 +1385,8 @@
 
     r.dStatus.textContent = '';
     r.dStatus.dataset.lane = '';
+    // Clear any lingering target picker from a previous game press.
+    clearTargetPicker();
     r.dPs5.hidden = false;
     if (typeof r.dialog.showModal === 'function') r.dialog.showModal();
   }
@@ -1436,22 +1449,89 @@
     r.dStatus.textContent = `Started on ${provider}${name ? ` — ${name}` : ''}.`;
   }
 
-  async function handToPs5() {
+  // BLZ-0088: show the five-destination picker; the actual queue call follows
+  // once the user chooses. One click on "Send to PS5" = picker appears; one
+  // click on a target = the game is queued for that target.
+  function handToPs5() {
+    const r = refs();
+    if (!r.dPs5 || !hub.current) return;
+
+    // Idempotent: a second press of "Send to PS5" just re-shows the picker.
+    clearTargetPicker();
+
+    let lastTarget = 'hdd';
+    try { lastTarget = localStorage.getItem(LAST_TARGET_KEY) || 'hdd'; } catch {}
+    if (!TARGET_LABEL[lastTarget]) lastTarget = 'hdd';
+
+    // Hide the source button; the picker takes its place.
+    r.dPs5.hidden = true;
+
+    const picker = el('div', 'games-target-picker');
+    picker.id = 'games-target-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'Send to which destination?');
+    // Phone-width: wrap to a new line; full-width on narrow viewports.
+    picker.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+
+    TARGET_CHOICES.forEach(({ id, label }) => {
+      const btn = el('button', 'secondary-button', label);
+      btn.type = 'button';
+      btn.dataset.targetId = id;
+      if (id === lastTarget) {
+        // Highlight the remembered default so the user can just press Enter.
+        btn.style.outline = '2px solid currentColor';
+        btn.setAttribute('aria-pressed', 'true');
+      }
+      btn.addEventListener('click', () => sendToTarget(id));
+      // Arrow key navigation for TV remotes and D-pads.
+      btn.addEventListener('keydown', (e) => {
+        const items = Array.from(picker.querySelectorAll('button'));
+        const idx = items.indexOf(btn);
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowDown') && idx < items.length - 1) {
+          e.preventDefault(); items[idx + 1].focus();
+        } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowUp') && idx > 0) {
+          e.preventDefault(); items[idx - 1].focus();
+        }
+      });
+      picker.append(btn);
+    });
+
+    // Insert the picker right after the button's parent container.
+    r.dPs5.parentElement.insertAdjacentElement('afterend', picker);
+    r.dStatus.textContent = 'Where should this go?';
+
+    // Auto-focus the last-used option.
+    const defaultBtn = picker.querySelector(`[data-target-id="${lastTarget}"]`) || picker.firstElementChild;
+    if (defaultBtn) defaultBtn.focus();
+  }
+
+  /** Remove picker and restore the Send button. */
+  function clearTargetPicker() {
+    const old = document.getElementById('games-target-picker');
+    if (old) old.remove();
+    const r = refs();
+    if (r.dPs5) r.dPs5.hidden = false;
+  }
+
+  async function sendToTarget(targetId) {
     const r = refs();
     const row = hub.current;
     if (!row) return;
+
+    clearTargetPicker();
+
+    // Remember the choice for next time.
+    try { localStorage.setItem(LAST_TARGET_KEY, targetId); } catch {}
+
     r.dStatus.textContent = 'Handing off…';
-    // A GET, and that is not a style choice. The console side of this is the
-    // JTPlay plugin, whose QuickJS sandbox exposes exactly one network call,
-    // `http.get` — there is no http.post to call. The add-on serves it as
-    // `app.get('/games/ps5/queue')` for that reason and writes down the three
-    // things that make a state-changing GET safe here: LAN only, idempotent on
-    // a ref already queued, and the ref itself is signed. One shape for both
-    // callers.
+    // A GET, not a style choice. The console's JTPlay plugin exposes only
+    // `http.get`; the add-on serves the queue as GET for that reason. It is
+    // LAN-only, idempotent per ref, and the ref is signed.
     const params = new URLSearchParams({ ref: String(row.ref || '') });
     const title = clean(row.title || row.name);
     if (title) params.set('title', title);
     if (row.platform) params.set('platform', clean(row.platform).toLowerCase());
+    params.set('target', targetId);
     const res = await api(`/games/ps5/queue?${params.toString()}`);
     if (res.status === 404) {
       r.dStatus.textContent = clean(res.json && res.json.message,
@@ -1468,12 +1548,13 @@
       return;
     }
     // The route answers `duplicate: true` rather than queueing a second copy,
-    // and it names the folder it will land in. Both are worth repeating: a
-    // second press that silently did nothing reads as a press that failed.
+    // and it names the folder it will land in. Include the target label so the
+    // row shows "→ P5 (internal)" or "→ mac1" — the on-the-way indicator.
+    const dest = TARGET_LABEL[targetId] || targetId;
     r.dStatus.textContent = res.json.duplicate === true
-      ? 'That one is already waiting for the Mac.'
+      ? `That one is already waiting for the Mac. (→ ${dest})`
       : clean(res.json.message,
-        'Queued. The Mac fetches it onto the 5TB, then Blazing Mount installs it on the console.');
+        `Queued. → ${dest}.`);
   }
 
   // ── accounts: the SERVER's state, never a second copy ─────────────────────
