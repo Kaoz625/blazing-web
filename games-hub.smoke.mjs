@@ -100,7 +100,7 @@ const PLATFORMS = [
 ];
 
 /** LANE_LABELS, lib/game-sources.js. `http` is "Direct download", not "Direct". */
-const LANE_LABELS = { http: 'Direct download', realdebrid: 'Real-Debrid', torbox: 'TorBox' };
+const LANE_LABELS = { http: 'Direct download', realdebrid: 'Real-Debrid', torbox: 'TorBox', usenet: 'Usenet (TorBox)' };
 
 // ── the mock registry, in registry list()'s exact shape ──────────────────────
 //
@@ -270,10 +270,10 @@ const browser = await launchBrowser();
  * @param {boolean} options.hasRd      the ADD-ON holds a Real-Debrid key
  * @param {boolean} options.hasTorbox  the ADD-ON holds a TorBox key
  */
-async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTimeouts = 0 } = {}) {
+async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, hasUsenet = false, usenetRows = [], searchTimeouts = 0 } = {}) {
   const debrid = { hasRd, hasTorbox };
   // lanesAvailable(), lib/game-source-routes.js. `http` is true unconditionally.
-  const lanes = { http: true, realdebrid: hasRd, torbox: hasTorbox };
+  const lanes = { http: true, realdebrid: hasRd, torbox: hasTorbox, usenet: hasUsenet };
   // A per-context copy, so a PATCH in one case cannot leak into another.
   const registry = REGISTRY.map((s) => ({ ...s }));
 
@@ -363,7 +363,10 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTi
       const results = RAW
         .filter((r) => askedIds.includes(r.source))
         .map((r) => normalise(r, debrid))
-        .sort((a, b) => b.tier - a.tier);
+        .sort((a, b) => b.tier - a.tier)
+        // Usenet rows rank last on the server (no tier, no format) and the
+        // add-on now reserves them a place on the page.
+        .concat(usenetRows);
       return json(200, {
         query: u.searchParams.get('q') || '',
         platform: u.searchParams.get('platform') || '',
@@ -385,6 +388,16 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, searchTi
     if (u.pathname === '/games/resolve') {
       const ref = u.searchParams.get('ref') || '';
       const lane = ref.split('-').pop();
+      // A Usenet release (BLZ-0052): TorBox downloads the whole release
+      // before there is a file, so the press answers 202 preparing — the
+      // route's own shape, progress 0..1.
+      if (lane === 'usenet') {
+        return json(202, {
+          ok: false, preparing: true, retryAfterSeconds: 30, tried: ['usenet'],
+          source: 'prowlarr', state: 'downloading', progress: 0.42,
+          message: 'TorBox is downloading this game from Usenet. Ask again in a minute.',
+        });
+      }
       if (!LANE_LABELS[lane]) {
         return json(404, {
           error: 'invalid-reference', reason: 'invalid-reference',
@@ -812,6 +825,12 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
     (await page.locator('#game-source-ps5').isVisible()) === true);
 
   await page.click('#game-source-ps5');
+  // BLZ-0088: "Send to PS5" first shows the five-destination picker; the
+  // queue call follows a press on one target.
+  await page.waitForSelector('#games-target-picker [data-target-id="hdd"]', { timeout: 8000 });
+  check('the hand-off asks WHERE first, with the five destinations',
+    (await page.locator('#games-target-picker button').count()) === 5);
+  await page.click('#games-target-picker [data-target-id="hdd"]');
   await page.waitForFunction(
     () => (document.getElementById('game-source-status').textContent || '').includes('Queued'),
     null, { timeout: 8000 });
@@ -993,6 +1012,58 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
   check('"All" with no name asks for a name and sends nothing',
     calls.length === before && /Type a game name, or pick a system/.test(await statusText()), await statusText());
   await ctx.close();
+}
+
+// ── 11: a USENET release shows its lane, is pressable, and says "preparing" ──
+//
+// Measured 2 Oct 2026: the hub kept only http/realdebrid/torbox from the
+// server's `lanes`, so a Usenet row drew as disarmed on a box where TorBox's
+// Usenet lane works. The row is normaliseRow()'s shape for an NZB row.
+{
+  const usenetRow = (lane) => ({
+    source: 'prowlarr', provider: 'Prowlarr', title: 'Cyberpunk 2077 v2.1-RUNE', platform: 'pc',
+    collection: '', region: '', format: '', size: 70000000000,
+    url: lane ? 'ref-prowlarr-usenet' : null, ref: lane ? 'ref-prowlarr-usenet' : '',
+    direct: Boolean(lane), playable: Boolean(lane), info: 'altHUB', cover: '', risk: '', part: 0,
+    tier: 0, lane, delivery: 'nzb', kind: 'indexer',
+  });
+
+  const on = await openHub({ hasTorbox: true, hasUsenet: true, usenetRows: [usenetRow('usenet')] });
+  await search(on.page, 'cyberpunk');
+  const row = on.page.locator('#games-hub-results .games-row').last();
+  const badge = row.locator('.games-lane-badge');
+  check('a Usenet row shows the label "Usenet (TorBox)"',
+    (await text(badge)) === 'Usenet (TorBox)', await text(badge));
+  check('…and is ARMED when the add-on has the Usenet lane',
+    (await badge.getAttribute('data-armed')) === 'true');
+  await row.click();
+  await on.page.waitForSelector('#game-source-dialog[open]', { timeout: 8000 });
+  check('its Download button is enabled',
+    (await on.page.locator('#game-source-lanes button').isDisabled()) === false);
+  await on.page.click('#game-source-lanes button');
+  await on.page.waitForFunction(
+    () => /TorBox is downloading/.test(document.getElementById('game-source-status').textContent || ''),
+    null, { timeout: 8000 });
+  const st = await text(on.page.locator('#game-source-status'));
+  check('a 202 from the Usenet lane says TorBox is downloading, with progress and a wait',
+    /Usenet\. 42% done\. Try again in about 30s/.test(st), st);
+  const resolveCall = on.calls.filter((c) => c.path === '/games/resolve').pop();
+  check('the press asked /games/resolve by the row\'s ref',
+    Boolean(resolveCall) && resolveCall.params.get('ref') === 'ref-prowlarr-usenet',
+    resolveCall ? resolveCall.url : 'no call');
+  await on.page.locator('#game-source-close').click();
+  await on.page.click('[data-games-tab="accounts"]');
+  check('the accounts tab lists the Usenet lane as ready',
+    (await on.page.locator('#games-lane-state .games-lane-badge[data-lane="usenet"]').getAttribute('data-armed')) === 'true');
+  await on.ctx.close();
+
+  const off = await openHub({ hasTorbox: true, hasUsenet: false, usenetRows: [usenetRow(null)] });
+  await search(off.page, 'cyberpunk');
+  const offBadge = off.page.locator('#games-hub-results .games-row').last().locator('.games-lane-badge');
+  check('with NO Usenet lane, the row still names Usenet and is disarmed',
+    (await text(offBadge)) === 'Usenet (TorBox)' && (await offBadge.getAttribute('data-armed')) === 'false',
+    await text(offBadge));
+  await off.ctx.close();
 }
 
 const real = errors.filter((e) => !/Failed to fetch|NetworkError|CORS|load resource/i.test(e));
