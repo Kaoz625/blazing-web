@@ -180,7 +180,10 @@
 // network-first now, so this is the hygiene bump the note at the fetch handler
 // asks for: it evicts the copies that still paint the banned grey, the emoji
 // buttons and the dead Admin panels from a device's offline fallback.
-const CACHE = 'blazing-shell-v46';
+// v47: Usenet game rows (2 Oct 2026). games.js, already in SHELL, learns the
+// add-on's `usenet` lane. Content-only, no new file: the hygiene bump, so an
+// offline fallback stops drawing a working Usenet row as "not armed".
+const CACHE = 'blazing-shell-v47';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

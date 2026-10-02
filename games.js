@@ -430,8 +430,10 @@
   // lib/game-sources.js verbatim, and /games/sources sends the same table as
   // `laneLabels` — so the server's copy wins at runtime (see loadSources) and
   // this one is only the answer before it has replied.
-  const LANE_LABEL = { http: 'Direct download', realdebrid: 'Real-Debrid', torbox: 'TorBox' };
-  const LANE_ORDER = ['http', 'realdebrid', 'torbox'];
+  const LANE_LABEL = {
+    http: 'Direct download', realdebrid: 'Real-Debrid', torbox: 'TorBox', usenet: 'Usenet (TorBox)',
+  };
+  const LANE_ORDER = ['http', 'realdebrid', 'torbox', 'usenet'];
 
   // BLZ-0088: download targets (contract order).
   const TARGET_CHOICES = [
@@ -459,7 +461,7 @@
     catalogueMounted: false,
     sources: [],
     platforms: FALLBACK_PLATFORMS.slice(),
-    lanes: { http: true, realdebrid: false, torbox: false },
+    lanes: { http: true, realdebrid: false, torbox: false, usenet: false },
     laneLabels: Object.assign({}, LANE_LABEL),
     debridEnabled: false,
     sourcesLoaded: false,
@@ -489,6 +491,27 @@
 
   function platformLabel(token) {
     return PLATFORM_LABEL[token] || clean(token).toUpperCase();
+  }
+
+  /**
+   * The SERVER's lane state, from /games/sources or /games/search. Both send
+   * `lanes: { http, realdebrid, torbox, usenet }` (lanesAvailable() in
+   * lib/game-source-routes.js). `usenet` is TorBox's Usenet door. Without it
+   * here a Usenet row drew as disarmed on a box where the lane works.
+   */
+  function applyLanes(lanes) {
+    const l = (lanes && typeof lanes === 'object') ? lanes : {};
+    hub.lanes = {
+      http: l.http !== false,
+      realdebrid: l.realdebrid === true,
+      torbox: l.torbox === true,
+      usenet: l.usenet === true,
+    };
+  }
+
+  /** True for a Usenet release: the server marks it `delivery: 'nzb'`. */
+  function isUsenetRow(row) {
+    return clean(row && row.delivery) === 'nzb' || clean(row && row.lane) === 'usenet';
   }
 
   /** The server's own word for a lane, falling back to ours, then to the id. */
@@ -731,12 +754,7 @@
     // `http` is true whatever the server says about debrid — it is the lane
     // that needs no account, and defaulting it to false here would draw the
     // one always-available lane as dead.
-    const lanes = (d.lanes && typeof d.lanes === 'object') ? d.lanes : {};
-    hub.lanes = {
-      http: lanes.http !== false,
-      realdebrid: lanes.realdebrid === true,
-      torbox: lanes.torbox === true,
-    };
+    applyLanes(d.lanes);
     // THE SERVER NAMES ITS OWN LANES. /games/sources sends `laneLabels`, which
     // is LANE_LABELS out of lib/game-sources.js, so the screen and the add-on
     // cannot drift into two different words for one lane.
@@ -952,7 +970,11 @@
     // to hand it. Dropping the badge would read as "this source is broken",
     // when the true answer is "paste a key into the add-on". So the badge is
     // still drawn, disarmed, and it says which thing is missing.
-    const badge = el('span', 'games-lane-badge', lane ? laneLabel(lane) : 'Needs an account');
+    // A Usenet row with no Usenet lane names its lane anyway, so the badge
+    // says which account is missing instead of a vague "Needs an account".
+    const usenetRow = isUsenetRow(row);
+    const badge = el('span', 'games-lane-badge',
+      lane ? laneLabel(lane) : (usenetRow ? laneLabel('usenet') : 'Needs an account'));
     badge.dataset.lane = lane;
     const armed = Boolean(lane) && hub.lanes[lane] === true;
     badge.dataset.armed = armed ? 'true' : 'false';
@@ -960,7 +982,9 @@
       badge.setAttribute('aria-disabled', 'true');
       badge.title = lane
         ? `The add-on has no ${laneLabel(lane)} account, so this lane cannot fetch yet.`
-        : 'This release needs a Real-Debrid or TorBox account on the add-on.';
+        : (usenetRow
+          ? 'This release is on Usenet, and the add-on has no Usenet (TorBox) lane configured.'
+          : 'This release needs a Real-Debrid or TorBox account on the add-on.');
     }
     box.append(badge);
     return box;
@@ -1254,6 +1278,9 @@
 
     const d = res.json;
     hub.results = Array.isArray(d.results) ? d.results : [];
+    // The search answer carries the lane state too. Take it, so a Usenet row
+    // is armed even when /games/sources has not answered yet.
+    if (d.lanes && typeof d.lanes === 'object') applyLanes(d.lanes);
 
     // A SOURCE THAT FAILED IS NAMED, not quietly dropped. Without this, one
     // dead indexer looks exactly like a thin catalogue and nobody ever finds
@@ -1369,9 +1396,15 @@
 
       let why;
       if (armed) {
-        why = `This release comes down the ${laneLabel(lane)} lane.`;
+        why = `This release comes down the ${laneLabel(lane)} lane.`
+          + (lane === 'usenet'
+            ? ' TorBox downloads the whole release first, so the first press usually says "preparing".'
+            : '');
       } else if (lane) {
         why = `This release needs the ${laneLabel(lane)} lane, and the add-on has no account for it. `
+          + 'A source on the Direct download lane still works with no account at all.';
+      } else if (isUsenetRow(row)) {
+        why = 'This release is on Usenet, and the add-on has no Usenet (TorBox) lane configured. '
           + 'A source on the Direct download lane still works with no account at all.';
       } else {
         // lane === null: laneFor() found nothing that can fetch this row, which
@@ -1404,6 +1437,15 @@
     // it is not a link yet; saying either would be a lie.
     if (res.status === 202 && res.json && res.json.preparing) {
       const wait = Number(res.json.retryAfterSeconds) || 20;
+      if (clean(row.lane) === 'usenet') {
+        // TorBox's Usenet job. Every press asks the SAME job (lib/usenet.js
+        // keys it on the NZB), so pressing again never downloads it twice.
+        const pct = Number(res.json.progress);
+        const done = Number.isFinite(pct) && pct > 0
+          ? ` ${Math.round(pct <= 1 ? pct * 100 : pct)}% done.` : '';
+        r.dStatus.textContent = `TorBox is downloading this from Usenet.${done} Try again in about ${wait}s.`;
+        return;
+      }
       r.dStatus.textContent = `The debrid service is preparing this file. Try again in about ${wait}s.`;
       return;
     }
