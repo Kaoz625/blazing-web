@@ -475,6 +475,13 @@
     seq: 0,
     pendingTimer: 0,
     current: null,
+    // The parts of the game in the open dialog (partSet), and the game's own
+    // part count from /games/library/title, 0 when it is not split.
+    currentSet: [],
+    titleParts: 0,
+    // What each part's press got, by ref, so a second press asks only for
+    // the parts the first one did not get.
+    partState: new Map(),
   };
 
   function el(tag, className, text) {
@@ -519,6 +526,94 @@
     const token = clean(lane);
     if (!token) return '';
     return clean(hub.laneLabels[token]) || LANE_LABEL[token] || token;
+  }
+
+  // ── a game in parts ───────────────────────────────────────────────────────
+  //
+  // ONE PRESS GETS EVERY PART, the rule the PS5 app's Cross follows
+  // (blazing-games-native title_part_set). A split archive opens only when
+  // every part is there. Markus, 2 Oct 2026: "i might miss one or one might
+  // hange and i dont know because we have no visuals into the downloads".
+  //
+  // THE PART NUMBER IS INSIDE THE LABEL. nookie writes "Part 3", the Telegram
+  // source "FPKG · v1.00 · rootz · Part 3", so the labels of one set are never
+  // equal. They are compared with the marker taken out; "Party" is not one.
+  function partKey(collection) {
+    return clean(collection).toLowerCase()
+      .replace(/(^|[^a-z0-9])part[ ._]*\d{1,3}(?!\d)(?: *of *\d{1,3})?/g, '$1')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
+   * The rows that are `row`'s set: the same host, the same label once its
+   * part marker is out, one row per part number, in part order. A row with
+   * no part number is one whole file and is never grouped — two of those are
+   * two versions of the game, not two halves of it.
+   *
+   * OF TWO COPIES OF A PART, the first found stays, unless the other sits
+   * exactly where row's own mirror puts it. The add-on lists a mirror's parts
+   * in order (Part 1..4, then Part 1..4 again), so part p of row's mirror is
+   * row index + (p - row's part). Without it, part 2 of the second mirror
+   * went with parts 1, 3 and 4 of the first.
+   */
+  function partSet(rows, row) {
+    const i = rows.indexOf(row);
+    const own = Number(row && row.part) || 0;
+    if (i < 0 || own <= 0) return [row];
+    const host = clean(row.hoster);
+    const key = partKey(row.collection);
+    const picked = new Map();
+    rows.forEach((r, j) => {
+      const p = Number(r && r.part) || 0;
+      if (p <= 0 || clean(r.hoster) !== host || partKey(r.collection) !== key) return;
+      if (j !== i && p === own) return;
+      if (!picked.has(p)) picked.set(p, j);
+      else if (picked.get(p) !== i && j === i + (p - own)) picked.set(p, j);
+    });
+    return [...picked.entries()].sort((a, b) => a[0] - b[0]).map(([, j]) => rows[j]);
+  }
+
+  /** The list under the dialog's status line: one line per part, what it got. */
+  function partList(set) {
+    const r = refs();
+    let list = document.getElementById('game-source-parts');
+    if (!set) {
+      if (list) list.remove();
+      return null;
+    }
+    if (!list) {
+      list = el('ol', 'games-part-list');
+      list.id = 'game-source-parts';
+      r.dStatus.insertAdjacentElement('afterend', list);
+    }
+    list.replaceChildren(...set.map((part, k) => {
+      const li = el('li', '', `Part ${Number(part.part) || k + 1} of ${set.length}: waiting`);
+      li.dataset.ref = clean(part.ref);
+      return li;
+    }));
+    return list;
+  }
+
+  /** Draw one part's line: its state, its words and, when there is one, its link. */
+  function partLine(list, k, n, part, state, words, url) {
+    const li = list && list.children[k];
+    if (!li) return;
+    li.dataset.state = state;
+    const label = `Part ${Number(part.part) || k + 1} of ${n}`;
+    if (url) {
+      const a = el('a', '', label);
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      // A part he starts by hand is started: the next press leaves it alone.
+      a.addEventListener('click', () => {
+        const got = hub.partState.get(clean(part.ref));
+        if (got) got.started = true;
+      });
+      li.replaceChildren(a, document.createTextNode(`: ${words}`));
+    } else {
+      li.textContent = `${label}: ${words}`;
+    }
   }
 
   /**
@@ -1022,6 +1117,8 @@
     // "SteamRIP"; there is no `sourceLabel` field and never was, and reading
     // one printed the id on every row while looking like it worked.
     if (row.provider || row.source) bits.push(clean(row.provider || row.source));
+    // A split archive's rows look alike; the part number tells them apart.
+    if (Number(row.part) > 0) bits.push(`Part ${Number(row.part)}`);
     if (row.released) bits.push(clean(row.released));
     const size = sizeText(row.size);
     if (size) bits.push(size);
@@ -1190,10 +1287,11 @@
     }
     const d = res.json;
     const risk = clean(d.risk);
+    hub.titleParts = Number(d.parts) > 1 ? Number(d.parts) : 0;
     if (r.warnings && risk) r.warnings.replaceChildren(el('p', 'games-warning', `Warning: ${risk}`));
-    if (Number(d.parts) > 1 && r.warnings) {
+    if (hub.titleParts && r.warnings) {
       r.warnings.append(el('p', 'games-warning',
-        `This game comes in ${Number(d.parts)} parts. Get every part — one part alone will not open.`));
+        `This game comes in ${hub.titleParts} parts. One press on any part gets every part.`));
     }
     hub.results = Array.isArray(d.rows) ? d.rows : [];
     if (!hub.results.length) {
@@ -1236,6 +1334,7 @@
     }
     const mine = ++hub.seq;
     hub.loading = true;
+    hub.titleParts = 0;
     r.results.replaceChildren();
     if (r.warnings) r.warnings.replaceChildren();
     r.status.textContent = 'Searching every source…';
@@ -1316,6 +1415,9 @@
     const r = refs();
     if (!r.dialog) return;
     hub.current = row;
+    const set = partSet(hub.results, row);
+    hub.currentSet = set;
+    const many = set.length > 1;
     r.dTitle.textContent = clean(row.title || row.name, 'Untitled');
 
     const bits = [];
@@ -1338,7 +1440,9 @@
     const fileBits = [];
     if (row.format) fileBits.push(clean(row.format));
     if (row.region) fileBits.push(clean(row.region));
-    if (row.collection) fileBits.push(`in ${clean(row.collection)}`);
+    // A part's collection is "Part 2"; the press gets the whole set.
+    if (many) fileBits.push(`${set.length} parts`);
+    else if (row.collection) fileBits.push(`in ${clean(row.collection)}`);
     r.dFile.textContent = fileBits.join('  ·  ');
 
     // IGDB fills these server-side. Each is drawn only when it is really
@@ -1367,6 +1471,14 @@
 
     const lane = clean(row.lane);
     const armed = Boolean(lane) && hub.lanes[lane] === true;
+    // The catalog says how many parts the game has. Fewer listed here is a
+    // game that will not open, and that is said before anything is fetched.
+    const short = Number(row.part) > 0 && hub.titleParts > set.length
+      ? ` Only ${set.length} of its ${hub.titleParts} parts are listed on this host, so it will not open from here. Pick another host.`
+      : '';
+    const partsWhy = many
+      ? `This game comes in ${set.length} parts. One press gets all ${set.length}.${short}`
+      : short.trim();
 
     // ── THE CONSOLE GETS NO DOWNLOAD BUTTON AT ALL ──────────────────────────
     //
@@ -1381,13 +1493,14 @@
       r.dLanes.replaceChildren(el('p', 'detail-copy',
         'This console cannot fetch its own games: its browser keeps the whole '
         + 'file in memory and runs out on anything large. Send it to the Mac '
-        + 'instead — the Mac pulls it onto the 5TB and Blazing Mount installs it here.'));
+        + 'instead — the Mac pulls it onto the 5TB and Blazing Mount installs it here.'
+        + (partsWhy ? ` ${partsWhy}` : '')));
     } else {
       const go = el('button', 'primary-button');
       go.type = 'button';
       go.id = 'game-source-go';
       go.dataset.lane = lane;
-      go.textContent = 'Download';
+      go.textContent = many ? `Download all ${set.length} parts` : 'Download';
       // DIM AND DISABLED, NOT REMOVED — the same rule as the lane badge. A
       // missing button says "this release is broken"; a disabled one beside
       // the sentence below says which account is missing.
@@ -1413,11 +1526,13 @@
           + 'TorBox account to fetch it with. A source on the Direct download lane still '
           + 'works with no account at all.';
       }
-      r.dLanes.replaceChildren(go, el('p', 'detail-copy', why));
+      r.dLanes.replaceChildren(go, el('p', 'detail-copy', partsWhy ? `${partsWhy} ${why}` : why));
     }
 
     r.dStatus.textContent = '';
     r.dStatus.dataset.lane = '';
+    r.dPs5.textContent = many ? `Send all ${set.length} parts to PS5` : 'Send to PS5';
+    partList(null);
     // Clear any lingering target picker from a previous game press.
     clearTargetPicker();
     r.dPs5.hidden = false;
@@ -1425,6 +1540,10 @@
   }
 
   async function resolveAndFetch(row) {
+    if (hub.currentSet.length > 1 && hub.currentSet.includes(row)) {
+      await resolveParts(hub.currentSet.slice());
+      return;
+    }
     const r = refs();
     r.dStatus.textContent = 'Resolving…';
     const res = await api(`/games/resolve?ref=${encodeURIComponent(String(row.ref || ''))}`);
@@ -1467,6 +1586,27 @@
       return;
     }
 
+    // ONE LINK, SEVERAL FILES: a host's folder page (a rootz folder) is one
+    // row, and /games/resolve sends `parts`, every file it holds, in order.
+    // `url` is only the first, so starting `url` alone got one file of many.
+    const files = (Array.isArray(res.json.parts) ? res.json.parts : [])
+      .map((p, k) => ({ part: Number(p && p.index) || k + 1, ref: '', url: safeDownloadUrl(p && p.url),
+        name: clean(p && p.filename) }))
+      .filter((f) => f.url);
+    if (files.length > 1) {
+      const list = partList(files);
+      const provider = clean(res.json.provider, '') || laneLabel(clean(res.json.lane, 'http'));
+      files.forEach((f, k) => {
+        startFrame(f.url, `File ${f.part} download`);
+        partLine(list, k, files.length, f, 'started',
+          `started from ${provider}${f.name || fileNameFrom(f.url) ? ` — ${f.name || fileNameFrom(f.url)}` : ''}`, f.url);
+      });
+      r.dStatus.dataset.lane = clean(res.json.lane, 'http');
+      r.dStatus.textContent = `This link holds ${files.length} files, and all ${files.length} are downloading. `
+        + 'Keep them in one folder. If your browser asks to allow several downloads, press Allow.';
+      return;
+    }
+
     // An <a download> rather than location.assign: it keeps this page alive so
     // the dialog can report what happened, and it names the file.
     const a = document.createElement('a');
@@ -1489,6 +1629,162 @@
     const name = fileNameFrom(url);
     r.dStatus.dataset.lane = lane;
     r.dStatus.textContent = `Started on ${provider}${name ? ` — ${name}` : ''}.`;
+  }
+
+  /** One download, started in a hidden frame (see resolveParts for why). */
+  function startFrame(url, title) {
+    const frame = el('iframe', 'games-part-frame');
+    frame.hidden = true;
+    frame.title = title;
+    frame.src = url;
+    document.body.append(frame);
+    // Long enough for a slow host to answer; a download the browser has
+    // taken over does not stop when its frame goes.
+    window.setTimeout(() => frame.remove(), 120000);
+  }
+
+  /**
+   * One part asked of /games/resolve: { state, words, url }. state is
+   * 'ready' (a link), 'waiting' (a debrid lane is still fetching it) or
+   * 'failed'. The same answers resolveAndFetch reads, in the same words.
+   */
+  async function resolvePart(part) {
+    const res = await api(`/games/resolve?ref=${encodeURIComponent(String(part.ref || ''))}`);
+    if (res.status === 202 && res.json && res.json.preparing) {
+      const wait = Number(res.json.retryAfterSeconds) || 20;
+      const pct = Number(res.json.progress);
+      const done = Number.isFinite(pct) && pct > 0 ? `${Math.round(pct <= 1 ? pct * 100 : pct)}% done, ` : '';
+      return { state: 'waiting', wait, words: `the debrid service is still fetching it (${done}ask again in about ${wait}s)` };
+    }
+    if (res.status === 404) return { state: 'failed', words: 'this add-on has no /games/resolve route yet' };
+    if (!res.ok || !res.json) return { state: 'failed', words: failureText(res) };
+    if (res.json.ok !== true) {
+      return { state: 'failed', words: clean(res.json.message || res.json.reason, 'no lane could resolve this part') };
+    }
+    const url = safeDownloadUrl(res.json.url);
+    if (!url) return { state: 'failed', words: 'the add-on answered with no usable link' };
+    const provider = clean(res.json.provider, '') || laneLabel(clean(res.json.lane, 'http'));
+    const name = fileNameFrom(url);
+    return { state: 'ready', url, words: `from ${provider}${name ? ` — ${name}` : ''}` };
+  }
+
+  /**
+   * EVERY PART OF A SPLIT GAME, ONE PRESS. Each part is asked in order and
+   * drawn on its own line, so a part that did not come is named rather than
+   * missed. A part a press already got is not asked again.
+   *
+   * A HIDDEN FRAME PER PART, NOT A TAB PER PART. A press may open one new
+   * tab: measured in headless Comet 2 Oct 2026, window.open gave part 1 and
+   * the browser stopped parts 2-4. A frame is not a tab, and four frames gave
+   * four downloads from one press. The browser may ask once to allow several
+   * downloads from this site. Every line keeps its part's link, so a part that
+   * did not start is one press away.
+   */
+  async function resolveParts(set) {
+    const r = refs();
+    const owner = hub.current;
+    const n = set.length;
+    const list = partList(set);
+    const got = [];
+    for (let k = 0; k < n; k++) {
+      const part = set[k];
+      let out = hub.partState.get(clean(part.ref));
+      if (!out || out.state !== 'ready') {
+        r.dStatus.textContent = `Asking for part ${k + 1} of ${n}…`;
+        out = await resolvePart(part);
+        if (hub.current !== owner) return;   // another game is open now
+        hub.partState.set(clean(part.ref), out);
+      }
+      got.push(out);
+      partLine(list, k, n, part, out.state, out.state === 'ready' ? `ready ${out.words}` : out.words, out.url);
+    }
+
+    // A part a press already started is not started again: a second press
+    // is for the parts that did not come, never a second copy of the rest.
+    let ready = 0;
+    got.forEach((out, k) => {
+      if (out.state !== 'ready') return;
+      ready += 1;
+      if (out.started) {
+        partLine(list, k, n, set[k], 'started', `started before ${out.words}`, out.url);
+        return;
+      }
+      startFrame(out.url, `Part ${Number(set[k].part) || k + 1} download`);
+      out.started = true;
+      partLine(list, k, n, set[k], 'started', `started ${out.words}`, out.url);
+    });
+
+    const waiting = got.filter((o) => o.state === 'waiting');
+    const failed = got.map((o, k) => ({ o, k })).filter(({ o }) => o.state === 'failed');
+    const say = [];
+    if (ready === n) {
+      say.push(`All ${n} parts are downloading. Keep them in one folder; the game opens from part 1.`
+        + ' If your browser asks to allow several downloads, press Allow. A part that did not start: press its line below.');
+    } else if (ready) say.push(`${ready} of ${n} parts are downloading.`);
+    if (waiting.length) {
+      const wait = Math.max(...waiting.map((o) => o.wait || 20));
+      say.push(`${waiting.length} still being fetched by the debrid service. Press "Download all ${n} parts" again in about ${wait}s: it asks only for those.`);
+    }
+    if (failed.length) {
+      say.push(`${failed.map(({ k }) => `Part ${Number(set[k].part) || k + 1}`).join(', ')} could not be fetched. The game will not open with a part missing, so try another host.`);
+    }
+    r.dStatus.dataset.lane = clean(owner && owner.lane);
+    r.dStatus.textContent = say.join(' ');
+  }
+
+  /**
+   * EVERY PART TO THE MAC, ONE PRESS: the PS5 app's Cross, on the web. Each
+   * part is one queue request under ONE title, so all of them land in one
+   * folder (folderNameFor on the add-on). The queue keeps one job per ref and
+   * place, so a second press re-sends nothing that is already waiting.
+   */
+  async function sendParts(set, targetId) {
+    const r = refs();
+    const owner = hub.current;
+    const n = set.length;
+    // The PS5 app's guard: a set with a part that cannot go is not sent at
+    // all. The Mac would wait for the missing part and fail the whole game.
+    const bare = set.findIndex((part) => !clean(part.ref));
+    if (bare >= 0) {
+      r.dStatus.textContent = `Part ${Number(set[bare].part) || bare + 1} of this game cannot be sent (it has no reference), so no part was sent.`;
+      return;
+    }
+    const list = partList(set);
+    const title = clean(set[0].title || set[0].name);
+    const dest = TARGET_LABEL[targetId] || targetId;
+    let sent = 0;
+    let stop = '';
+    for (let k = 0; k < n; k++) {
+      const part = set[k];
+      r.dStatus.textContent = `Sending part ${k + 1} of ${n}…`;
+      const params = new URLSearchParams({ ref: String(part.ref) });
+      if (title) params.set('title', title);
+      if (part.platform) params.set('platform', clean(part.platform).toLowerCase());
+      params.set('target', targetId);
+      const res = await api(`/games/ps5/queue?${params.toString()}`);
+      if (hub.current !== owner) return;
+      if (res.ok && res.json && res.json.ok === true) {
+        sent += 1;
+        partLine(list, k, n, part, 'started', res.json.duplicate === true ? 'already waiting for the Mac' : 'queued');
+        continue;
+      }
+      const why = res.status === 403
+        ? 'the hand-off queue only works on the home network'
+        : clean(res.json && (res.json.message || res.json.error), `the hand-off queue refused it (HTTP ${res.status})`);
+      partLine(list, k, n, part, 'failed', why);
+      // No queue, not home, or the game is already on the console: the same
+      // answer waits for every other part, so it is said once.
+      if (res.status === 404 || res.status === 403 || res.status === 409) {
+        for (let m = k + 1; m < n; m++) partLine(list, m, n, set[m], 'failed', 'not sent');
+        stop = why;
+        break;
+      }
+    }
+    // A press again cannot change "already on the console" or "not home",
+    // so those say why instead of asking for one.
+    if (sent === n) r.dStatus.textContent = `All ${n} parts are queued. They go to ${dest}, into one folder.`;
+    else if (stop) r.dStatus.textContent = `${sent} of ${n} parts are queued: ${stop}.`;
+    else r.dStatus.textContent = `${sent} of ${n} parts are queued for ${dest}. Press again to send the rest; a part already waiting is not sent twice.`;
   }
 
   // BLZ-0088: show the five-destination picker; the actual queue call follows
@@ -1564,6 +1860,11 @@
 
     // Remember the choice for next time.
     try { localStorage.setItem(LAST_TARGET_KEY, targetId); } catch {}
+
+    if (hub.currentSet.length > 1 && hub.currentSet.includes(row)) {
+      await sendParts(hub.currentSet.slice(), targetId);
+      return;
+    }
 
     r.dStatus.textContent = 'Handing off…';
     // A GET, not a style choice. The console's JTPlay plugin exposes only

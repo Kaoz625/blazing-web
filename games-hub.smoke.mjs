@@ -270,7 +270,7 @@ const browser = await launchBrowser();
  * @param {boolean} options.hasRd      the ADD-ON holds a Real-Debrid key
  * @param {boolean} options.hasTorbox  the ADD-ON holds a TorBox key
  */
-async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, hasUsenet = false, usenetRows = [], searchTimeouts = 0 } = {}) {
+async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, hasUsenet = false, usenetRows = [], searchTimeouts = 0, titleRows = null, titleParts = 0 } = {}) {
   const debrid = { hasRd, hasTorbox };
   // lanesAvailable(), lib/game-source-routes.js. `http` is true unconditionally.
   const lanes = { http: true, realdebrid: hasRd, torbox: hasTorbox, usenet: hasUsenet };
@@ -398,6 +398,17 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, hasUsene
           message: 'TorBox is downloading this game from Usenet. Ask again in a minute.',
         });
       }
+      // A host's folder page: ONE ref, several files. The route sends
+      // `parts`, every file in order, and `url` is parts[0].url.
+      if (ref.includes('rootzfolder')) {
+        const parts = [1, 2, 3].map((n) => ({
+          index: n, url: `https://cdn.example.test/folder.part${n}.rar`, filename: `Game.part${n}.rar`, size: 0,
+        }));
+        return json(200, {
+          ok: true, lane: 'http', provider: LANE_LABELS.http, source: 'telegram-games', tried: ['http'],
+          url: parts[0].url, filename: parts[0].filename, parts,
+        });
+      }
       if (!LANE_LABELS[lane]) {
         return json(404, {
           error: 'invalid-reference', reason: 'invalid-reference',
@@ -451,6 +462,15 @@ async function openHub({ ps5 = false, hasRd = false, hasTorbox = false, hasUsene
     /* GET /games/library/title — every way to get one game, each row signed. */
     if (u.pathname === '/games/library/title') {
       const title = u.searchParams.get('title') || '';
+      // A case's own rows: case 12's split game, in the live shape.
+      if (titleRows) {
+        return json(200, {
+          title: titleRows[0].title, platform: titleRows[0].platform, cover: '', info: '', risk: '', needsConfirm: false,
+          parts: titleParts, action: 'download',
+          availability: { disk: false, diskKnown: true, locations: [], drive: '', queued: false, cloud: false, ddl: false },
+          count: titleRows.length, rows: titleRows, lanes, debridEnabled: hasRd || hasTorbox,
+        });
+      }
       const risk = title === 'Astro Bot' ? 'fake-crack' : '';
       const row = (n) => ({
         source: 'nookie-ps5', provider: 'PS5 Game Browser', title, platform: 'ps5', collection: `Host ${n}`,
@@ -1071,6 +1091,146 @@ const text = async (locator) => ((await locator.textContent()) || '').replace(/\
     (await text(offBadge)) === 'Usenet (TorBox)' && (await offBadge.getAttribute('data-armed')) === 'false',
     await text(offBadge));
   await off.ctx.close();
+}
+
+// ── 12: a SPLIT game: one press gets every part, and each part is named ─────
+//
+// The add-on writes the part number INTO the label: nookie "Part 1".."Part 4",
+// twice over two mirrors, is the live Zelda TotK answer of 2 Oct 2026 (8 rows,
+// parts 4). Compared raw, no two labels matched, and a press got one part.
+{
+  const zelda = (m, n, tail = 'torbox') => ({
+    source: 'nookie-switch', provider: 'Switch Game Browser', title: 'The Legend of Zelda Tears of The Kingdom',
+    platform: 'switch', collection: `Part ${n}`, region: '', format: 'RAR', size: 0,
+    url: `ref-zelda-m${m}p${n}-${tail}`, ref: `ref-zelda-m${m}p${n}-${tail}`, direct: true, playable: true,
+    info: '', cover: '', risk: '', part: n, tier: 0, lane: 'torbox', hoster: 'torbox',
+    delivery: 'direct', kind: 'module', hash: '',
+  });
+  // Mirror 1's part 3 is still being fetched by TorBox (the mock's 202).
+  const rows = [1, 2, 3, 4].map((n) => zelda(1, n, n === 3 ? 'usenet' : 'torbox'))
+    .concat([1, 2, 3, 4].map((n) => zelda(2, n)));
+  const mirror2 = [1, 2, 3, 4].map((n) => `ref-zelda-m2p${n}-torbox`).join(',');
+  const { ctx, page, calls } = await openHub({ hasTorbox: true, titleRows: rows, titleParts: 4 });
+  const tabs = [];
+  ctx.on('page', (p) => tabs.push(p));
+  const downloads = [];
+  page.on('download', (d) => downloads.push(d.url()));
+  const status = async () => text(page.locator('#game-source-status'));
+
+  await page.click('#games-platform-chips .games-chip[data-platform="ps5"]');
+  await page.waitForFunction(() => document.querySelectorAll('#games-hub-results .games-title-row').length > 0,
+    null, { timeout: 8000 });
+  await page.locator('#games-hub-results .games-title-row').first().click();
+  await page.waitForFunction(() => /\d+ ways? to get/.test(document.getElementById('games-hub-status').textContent || ''),
+    null, { timeout: 8000 });
+  const rel = page.locator('#games-hub-results .games-row:not(.games-title-row)');
+  check('the split game lists its 8 rows', (await rel.count()) === 8, String(await rel.count()));
+  check('each row names its part', /Part 2/.test(await text(rel.nth(1).locator('.games-row-meta'))),
+    await text(rel.nth(1).locator('.games-row-meta')));
+  check('the page says one press gets every part',
+    /comes in 4 parts\. One press on any part gets every part/.test(await text(page.locator('#games-hub-warnings'))),
+    await text(page.locator('#games-hub-warnings')));
+
+  // Part 2 of the SECOND mirror: the set is that mirror's 4, never a mix.
+  await rel.nth(5).click();
+  await page.waitForSelector('#game-source-dialog[open]', { timeout: 8000 });
+  check('the button says it gets all 4 parts', (await text(page.locator('#game-source-go'))) === 'Download all 4 parts',
+    await text(page.locator('#game-source-go')));
+  check('the Mac button says it sends all 4 parts',
+    (await text(page.locator('#game-source-ps5'))) === 'Send all 4 parts to PS5', await text(page.locator('#game-source-ps5')));
+  await page.click('#game-source-go');
+  await page.waitForFunction(() => /parts are (downloading|ready)/.test(document.getElementById('game-source-status').textContent || ''),
+    null, { timeout: 15000 });
+  const asked = calls.filter((c) => c.path === '/games/resolve').map((c) => c.params.get('ref'));
+  check('one press asked for every part of THAT mirror, in part order', asked.join(',') === mirror2, asked.join(','));
+  const lines = page.locator('#game-source-parts li');
+  const states = await lines.evaluateAll((ns) => ns.map((n) => n.dataset.state));
+  check('each part has its own line, started, with its own link',
+    states.join(',') === 'started,started,started,started' && (await page.locator('#game-source-parts li a').count()) === 4,
+    states.join(','));
+  // The measured reason for frames: window.open gave part 1 and the browser
+  // stopped parts 2-4. Four downloads, and not one tab, is the whole point.
+  for (let k = 0; k < 40 && downloads.length < 4; k++) await page.waitForTimeout(100);
+  check('one press started a download for EVERY part, and opened no tab',
+    downloads.length === 4 && tabs.length === 0
+      && [1, 2, 3, 4].every((n) => downloads.some((u) => u.includes(`m2p${n}-`))),
+    `downloads=${downloads.length} tabs=${tabs.length} ${downloads.join(' ')}`);
+  check('the status says all 4 are downloading', /All 4 parts are downloading/.test(await status()), await status());
+  await page.click('#game-source-go');
+  await page.waitForTimeout(800);
+  check('a second press asks for nothing again and downloads no second copy',
+    calls.filter((c) => c.path === '/games/resolve').length === 4 && downloads.length === 4,
+    `resolve=${calls.filter((c) => c.path === '/games/resolve').length} downloads=${downloads.length}`);
+
+  // Send all 4 to the Mac: one queue request a part, one title, one place.
+  await page.click('#game-source-ps5');
+  await page.waitForSelector('#games-target-picker button', { timeout: 8000 });
+  await page.click('#games-target-picker [data-target-id="hdd"]');
+  await page.waitForFunction(() => /parts are queued/.test(document.getElementById('game-source-status').textContent || ''),
+    null, { timeout: 15000 });
+  const q = calls.filter((c) => c.path === '/games/ps5/queue');
+  check('Send queued every part of that mirror, one request each',
+    q.map((c) => c.params.get('ref')).join(',') === mirror2, q.map((c) => c.params.get('ref')).join(','));
+  check('…all under ONE title, so they land in one folder',
+    new Set(q.map((c) => c.params.get('title'))).size === 1 && q[0].params.get('title') === 'The Legend of Zelda Tears of The Kingdom',
+    q.map((c) => c.params.get('title')).join('|'));
+  check('…to the one place picked', q.every((c) => c.params.get('target') === 'hdd'));
+  check('the status says all 4 are queued', /All 4 parts are queued\. They go to 5TB HDD/.test(await status()), await status());
+  await page.locator('#game-source-close').click();
+
+  // Mirror 1: its part 3 is still with TorBox. The press names it and says
+  // when to press again; the three others are not lost.
+  await rel.nth(0).click();
+  await page.waitForSelector('#game-source-dialog[open]', { timeout: 8000 });
+  check('a new dialog starts with no part list', (await page.locator('#game-source-parts').count()) === 0);
+  await page.click('#game-source-go');
+  await page.waitForFunction(() => /still being fetched/.test(document.getElementById('game-source-status').textContent || ''),
+    null, { timeout: 15000 });
+  const m1 = await page.locator('#game-source-parts li').evaluateAll((ns) => ns.map((n) => n.dataset.state));
+  check('the part TorBox still fetches is named as waiting, the other 3 started',
+    m1.join(',') === 'started,started,waiting,started', m1.join(','));
+  check('…and the status says 3 of 4 and when to press again',
+    /3 of 4 parts are downloading\..*1 still being fetched.*again in about 30s/.test(await status()), await status());
+  await ctx.close();
+}
+
+// ── 13: ONE link that holds several files gets every file, not the first ────
+//
+// A rootz folder page is one row, and /games/resolve answers `parts`: every
+// file in it. The page started `url`, which is only parts[0].
+{
+  const folder = {
+    source: 'telegram-games', provider: 'Telegram', title: 'Galactic Wrestling', platform: 'ps4',
+    collection: 'FPKG · rootz', region: '', format: 'fpkg', size: 0,
+    url: 'ref-rootzfolder-http', ref: 'ref-rootzfolder-http', direct: true, playable: true,
+    info: '', cover: '', risk: '', part: 0, tier: 3, lane: 'http', hoster: '',
+    delivery: 'direct', kind: 'module', hash: '',
+  };
+  const { ctx, page } = await openHub({ titleRows: [folder] });
+  const downloads = [];
+  page.on('download', (d) => downloads.push(d.url()));
+  await page.click('#games-platform-chips .games-chip[data-platform="ps5"]');
+  await page.waitForFunction(() => document.querySelectorAll('#games-hub-results .games-title-row').length > 0,
+    null, { timeout: 8000 });
+  await page.locator('#games-hub-results .games-title-row').first().click();
+  await page.waitForFunction(() => /\d+ ways? to get/.test(document.getElementById('games-hub-status').textContent || ''),
+    null, { timeout: 8000 });
+  await page.locator('#games-hub-results .games-row:not(.games-title-row)').first().click();
+  await page.waitForSelector('#game-source-dialog[open]', { timeout: 8000 });
+  check('a one-file row keeps the plain Download button', (await text(page.locator('#game-source-go'))) === 'Download',
+    await text(page.locator('#game-source-go')));
+  await page.click('#game-source-go');
+  await page.waitForFunction(() => /holds 3 files/.test(document.getElementById('game-source-status').textContent || ''),
+    null, { timeout: 8000 });
+  for (let k = 0; k < 40 && downloads.length < 3; k++) await page.waitForTimeout(100);
+  check('a link that holds 3 files downloads all 3',
+    downloads.length === 3 && [1, 2, 3].every((n) => downloads.some((u) => u.endsWith(`folder.part${n}.rar`))),
+    `downloads=${downloads.length} ${downloads.join(' ')}`);
+  check('…and names each file on its own line',
+    (await page.locator('#game-source-parts li').count()) === 3
+      && /Game\.part2\.rar/.test(await text(page.locator('#game-source-parts li').nth(1))),
+    await text(page.locator('#game-source-parts')));
+  await ctx.close();
 }
 
 const real = errors.filter((e) => !/Failed to fetch|NetworkError|CORS|load resource/i.test(e));

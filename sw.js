@@ -183,7 +183,10 @@
 // v47: Usenet game rows (2 Oct 2026). games.js, already in SHELL, learns the
 // add-on's `usenet` lane. Content-only, no new file: the hygiene bump, so an
 // offline fallback stops drawing a working Usenet row as "not armed".
-const CACHE = 'blazing-shell-v47';
+// v48: one press gets every part of a split game (2 Oct 2026). games.js and
+// styles.css, both already in SHELL. Content-only, the hygiene bump, so an
+// offline fallback stops sending one part of four.
+const CACHE = 'blazing-shell-v48';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
