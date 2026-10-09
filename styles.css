@@ -590,7 +590,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   flex-direction: column;
   justify-content: flex-end;
   height: 100%;
-  width: min(620px, 100%);
+  /* 900, not 620, since 9 Oct 2026: the synopsis below needs the room. The
+     bottom scrim spans the whole band, so the wider copy stays readable. */
+  width: min(900px, 100%);
   padding: 0 24px 26px;
 }
 .home-hero-title {
@@ -602,9 +604,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   text-shadow: 0 2px 18px rgba(0,0,0,.75);
 }
 .home-hero-meta { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: .02em; }
+/* 860px and 3 lines: ~360 characters. At 560px a synopsis stopped after ~240.
+   Markus, on the 55" Roku, 8 Oct 2026: "the full description is cut off" — the
+   Roku now fits ~350 (DESIGN-V2 parity, roku channels 6dd9b67). */
 .home-hero-synopsis {
   margin: 10px 0 0;
-  max-width: 560px;
+  max-width: 860px;
   color: var(--muted);
   font-size: var(--fs-body);
   line-height: 1.45;

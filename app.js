@@ -5829,13 +5829,32 @@ async function startDetailTrailer(meta) {
   // Was `!meta.trailerUrl`, which nothing has ever set, so this returned on
   // every title ever opened and the detail trailer has never once played.
   // Same resolve the cards use: our own /proxy/yt-resolve, never a YouTube embed.
-  const url = await resolveTrailerUrl(meta);
+  //
+  // UNLESS the Home hero is playing this very title right now. Then the detail
+  // trailer is the SAME file, carried on from the same second. Markus, 8 Oct
+  // 2026, on the Roku: "if i were to click view details it restarts the trailer
+  // from the begining and it should continue to play the trailer in the new
+  // box". Roku 6dd9b67, Apple TV b2352f1, Fire TV 66cfc59, Samsung 3987a75.
+  const heroSame = () => homeHeroVideo && homeHeroMeta
+    && (homeHeroMeta === meta || (homeHeroMeta.id && homeHeroMeta.id === meta.id))
+    && homeHeroVideo.getAttribute('src') && homeHeroVideo.currentTime > 1;
+  const carried = heroSame() ? homeHeroVideo.getAttribute('src') : '';
+  const url = carried || await resolveTrailerUrl(meta);
   if (!url) return;
   // The dialog may have been closed, or moved to another title, while yt-dlp ran.
   if (state.selected !== meta) return;
   const made = makeTrailerVideo(url);
   const video = made.video;
   detailTrailerDestroy = made.destroy;
+  if (carried) {
+    // Read as late as possible: the hero kept playing while this was built.
+    const from = heroSame() ? homeHeroVideo.currentTime : 0;
+    if (from > 1) {
+      video.addEventListener('loadedmetadata', () => {
+        try { video.currentTime = from; } catch (e) {}
+      }, { once: true });
+    }
+  }
 
   const toggle = el('button', 'detail-mute-btn');
   toggle.type = 'button';
