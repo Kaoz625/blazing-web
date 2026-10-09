@@ -243,9 +243,11 @@ const barKeys = await page.evaluate(() => {
 // left-out loop below into `wanted`, in DESIGN.md's position — after Library and
 // before YouTube — and the loop over `wanted` proves the chip really opens
 // #livetv-view rather than blanking the screen.
-const wanted = ['movies', 'shows', 'anime', 'books', 'roadmaps', 'library', 'livetv', 'youtube', 'games', 'search'];
+// SEARCH MOVED TO THE FRONT on 9 Oct 2026 (DESIGN-V2.md §2.13 in roku channels):
+// Markus could not find it as the last chip on the 55" Roku.
+const wanted = ['search', 'movies', 'shows', 'anime', 'books', 'roadmaps', 'library', 'livetv', 'youtube', 'games'];
 const firstChips = barKeys.filter((k, i) => barKeys.indexOf(k) === i).slice(0, wanted.length);
-check('bar order is Movies, TV Shows, Anime, Books & Audio, Roadmaps, Library, Live TV, YouTube, Games, Search',
+check('bar order is Search, Movies, TV Shows, Anime, Books & Audio, Roadmaps, Library, Live TV, YouTube, Games',
   JSON.stringify(firstChips) === JSON.stringify(wanted), firstChips.join(','));
 check('no Home chip in the bar — it is not in the canonical eleven',
   !barKeys.includes('home'), barKeys.join(','));

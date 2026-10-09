@@ -112,8 +112,10 @@
 
          SEARCH IS IN THIS NAV AS A WORD, AND ALSO SITS OUTSIDE IT AS THE
          MAGNIFIER, AND THOSE ARE TWO DIFFERENT THINGS. The word below is the
-         canonical chip, so it moved from first to last when this bar was put in
-         canonical order. #search-button is NOT a chip — it is a fixed
+         canonical chip. It went from first to last when this bar was put in
+         canonical order, and back to FIRST on 9 Oct 2026, when the canonical
+         order itself changed (DESIGN-V2.md §2.13 in roku channels: Markus could
+         not find Search on the 55" Roku). #search-button is NOT a chip — it is a fixed
          structural anchor, and it CANNOT MOVE, which is measured rather than
          stylistic. Both profile.js:2312 and watch-party.js:954 place their own
          topbar entries with `topbar.insertBefore(node, searchButton)`, which
@@ -125,6 +127,7 @@
          puts it, and it keeps working at 992px and below where styles.css hides this
          whole nav. Reordering the word never touches it. -->
     <nav class="topnav" aria-label="Browse">
+      <button type="button" data-view="search">Search</button>
       <button type="button" data-view="movies">Movies</button>
       <button type="button" data-view="shows">TV Shows</button>
       <button type="button" data-view="anime">Anime</button>
@@ -150,7 +153,6 @@
       <button type="button" data-view="livetv">Live TV</button>
       <button type="button" data-view="youtube">YouTube</button>
       <button type="button" data-view="games">Games</button>
-      <button type="button" data-view="search">Search</button>
     </nav>
     <button id="search-button" class="icon-button search-button" type="button" data-view="search" aria-label="Search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="5.8" /><path d="m15.2 15.2 4.3 4.3" /></svg>

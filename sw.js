@@ -186,7 +186,9 @@
 // v48: one press gets every part of a split game (2 Oct 2026). games.js and
 // styles.css, both already in SHELL. Content-only, the hygiene bump, so an
 // offline fallback stops sending one part of four.
-const CACHE = 'blazing-shell-v48';
+// v49: Search is the first nav chip (9 Oct 2026, DESIGN-V2.md §2.13 in roku
+// channels). index.html is a shell file, so the reorder needs a new cache.
+const CACHE = 'blazing-shell-v49';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
