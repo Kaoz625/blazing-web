@@ -189,6 +189,8 @@
 // v49: Search is the first nav chip (9 Oct 2026, DESIGN-V2.md §2.13 in roku
 // channels); the detail trailer carries on from the Home hero (app.js); the
 // hero synopsis gets 860px (styles.css). All shell files, so a new cache.
+// Same v49: Play Now (BLZ-0108) in app.js, index.html and styles.css. v49 has
+// not reached main yet (main is v48), so no bump.
 const CACHE = 'blazing-shell-v49';
 
 /** How long the code fetch may take before the cached copy is served instead. */

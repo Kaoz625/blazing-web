@@ -348,7 +348,11 @@
         <div class="home-hero-content">
           <p class="eyebrow" id="home-hero-eyebrow">Continue watching</p>
           <h2 class="home-hero-title" id="home-hero-title"></h2>
-          <p class="home-hero-meta" id="home-hero-meta"></p>
+          <!-- Two spans, because app.js writes the year and kind with textContent:
+               the READY TO PLAY tag sits beside those words, not in them, or every
+               reseed would erase it. It shows only when the band's dwell search
+               found a link that answered (Play Now, BLZ-0108). -->
+          <p class="home-hero-meta"><span id="home-hero-ready" class="home-hero-ready" hidden>READY TO PLAY</span><span id="home-hero-meta"></span></p>
           <p class="home-hero-synopsis" id="home-hero-synopsis"></p>
           <div class="home-hero-actions">
             <button type="button" id="home-hero-play" class="primary-button">Play</button>

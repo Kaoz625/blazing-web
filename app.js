@@ -817,6 +817,9 @@ const HERO_TRAILER_DELAY_MS = 1800;
 let homeHeroPriority = 0;
 let homeHeroMeta = null;
 let homeHeroTimer = null;
+/* True when the band is a Continue Watching card. A resume card already
+   carries its place, so Play Now's search (below) leaves it alone. */
+let homeHeroResume = false;
 
 function seedHomeHero(meta, opts) {
   if (!homeHero || !meta) return;
@@ -830,6 +833,10 @@ function seedHomeHero(meta, opts) {
 
   homeHeroPriority = priority;
   homeHeroMeta = meta;
+  homeHeroResume = !!(opts && opts.resume);
+  // The previous title's Play Now goes with it, and any search still in flight
+  // for it is dropped when it answers (forgetHomeWarm bumps the generation).
+  forgetHomeWarm();
   stopHomeHeroTrailer();
 
   homeHeroArt.src = art;
@@ -878,7 +885,11 @@ function syncHomeHeroVisibility() {
   if (!homeHero) return;
   const show = state.route === 'home' && !!homeHeroMeta;
   homeHero.hidden = !show;
-  if (!show) { stopHomeHeroTrailer(); return; }
+  syncHeroPlayLabel();
+  // Leaving Home stops the dwell; coming back starts a new one. A held list
+  // survives the trip — it is still good for this profile and this cap.
+  if (!show) { stopHomeHeroTrailer(); clearHomeWarmTimer(); return; }
+  if (!homeWarm.timer) armHomeWarm(homeHeroMeta);
 
   // COMING BACK TO HOME HAS TO RE-ARM IT, and nothing else does. The branch
   // above tears the <video> right down on the way out — src removed, timer
@@ -919,6 +930,9 @@ function syncHomeHeroVisibility() {
  */
 function resetHomeHero() {
   stopHomeHeroTrailer();
+  // A held Play Now list belongs to the profile it was searched for.
+  forgetHomeWarm();
+  homeHeroResume = false;
   homeHeroPriority = 0;
   homeHeroMeta = null;
   if (homeHeroArt) homeHeroArt.removeAttribute('src');
@@ -1005,6 +1019,293 @@ async function startHomeHeroTrailer(meta) {
   if (p && p.catch) p.catch(() => {});
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   PLAY NOW — THE HERO'S DWELL SEARCH (BLZ-0108)
+
+   Roku 6dd9b67 + 795db9d; Samsung 3ed24e2 (js/homewarm.js, the model for this
+   block); Fire TV 5cef679; Apple TV a1687f9.
+
+   Markus, 9 Oct 2026, on the 55": "if ive stayed on the stream watching the
+   trailer like this on the home screen it should start searching for the
+   sources ... once its loaded and it has a valid working stream it will then
+   show a button that says something like play now".
+
+   WHAT A DWELL IS HERE. The TVs move their hero with the focused card. The web
+   band holds one title (seedHomeHero), so the dwell is the band itself: five
+   seconds with this film in it, on Home, with no sheet and no player over it.
+   Five, the Roku's own rung — the point where the viewer has shown interest.
+
+   FILMS ONLY. An IMDb tt id of type movie. Not a Continue Watching card (it
+   carries its own place), not Emby (it already plays straight from the fleet),
+   not a series (which episode Play means is the sheet's decision).
+
+   THE SAME SEARCH AND THE SAME RANKING THE DETAIL SHEET USES. resolveStreams()
+   with the profile's cap, then rankForPlay(), so Play Now cannot play a
+   different list from the one the viewer would get by waiting on the sheet.
+
+   THEN A REAL ANSWER, NOT A LIST. The top three rows are range-probed
+   (rangeAlive, below). The first that answers goes to the front, and only then
+   does the button read Play Now. No /precache: that asks the debrid provider
+   to pull a torrent, and doing it for every film somebody rests on for five
+   seconds would spend the account's add quota on browsing.
+
+   THE RATING GATE TRAVELS WITH THE LIST. The addon stamps the cap onto every
+   link it mints. The held list records the profile and the cap it was searched
+   under, and heldUsable() refuses it for anybody else. The press itself goes
+   through openDetail() and playSelected(), the one rating-gated play path.
+
+   A LATE ANSWER for a title the band has left is ignored (the generation
+   check). A not-ready answer, and a list spent by the press, are both cleared,
+   so the next dwell searches again.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Five still seconds on a film start its search. The Roku's 5.0 s rung. */
+const HERO_WARM_MS = 5000;
+/** How long one probe may take. The Roku's HttpRangeAlive timeout. */
+const WARM_PROBE_MS = 8000;
+/** How many ranked rows are probed before the answer is "not ready". */
+const WARM_PROBE_TOP = 3;
+
+/* The one held answer. `gen` is bumped whenever the band forgets, so a search
+   that answers after that is dropped on arrival. */
+const homeWarm = { timer: null, gen: 0, asked: '', ready: '', held: null };
+
+/** Is this the kind of hero card Play Now is for? */
+function warmCandidate(meta) {
+  return !!meta && !homeHeroResume && meta.type === 'movie' && !meta.embyId
+    && /^tt\d+$/.test(String(meta.id || ''));
+}
+
+function clearHomeWarmTimer() {
+  clearTimeout(homeWarm.timer);
+  homeWarm.timer = null;
+}
+
+/** Drop everything held, and make any answer still in flight arrive too late. */
+function forgetHomeWarm() {
+  clearHomeWarmTimer();
+  homeWarm.gen += 1;
+  homeWarm.asked = '';
+  homeWarm.ready = '';
+  homeWarm.held = null;
+  syncHeroPlayLabel();
+}
+
+/** Start the five-second dwell for the band's film, unless it is already asked. */
+function armHomeWarm(meta) {
+  clearHomeWarmTimer();
+  if (!warmCandidate(meta) || homeWarm.asked === meta.id) return;
+  homeWarm.timer = setTimeout(() => {
+    homeWarm.timer = null;
+    requestHomeWarm(meta);
+  }, HERO_WARM_MS);
+}
+
+/** A sheet or the player closed over Home: the band is visible again. */
+function rearmHomeWarm() {
+  if (state.route !== 'home' || !homeHeroMeta || (homeHero && homeHero.hidden)) return;
+  if (!homeWarm.timer) armHomeWarm(homeHeroMeta);
+}
+
+function requestHomeWarm(meta) {
+  if (homeHeroMeta !== meta || !warmCandidate(meta)) return;
+  // The band must still be what the viewer is looking at.
+  if (state.route !== 'home' || (homeHero && homeHero.hidden)) return;
+  if (detailDialog.open || !player.hidden) return;
+  if (!state.profileId || !ratingAllowed(meta.contentRating)) return;
+  if (homeWarm.asked === meta.id) return;
+  const id = meta.id;
+  const gen = (homeWarm.gen += 1);
+  homeWarm.asked = id;
+  homeWarm.ready = '';
+  homeWarm.held = null;
+  const cap = streamCapParameter();
+  const profileId = state.profileId;
+  console.log(`[homewarm] searching ahead for ${id}`);
+  searchAheadForPlayNow(meta, cap, profileId, gen)
+    .then((held) => onHomeWarm(held, gen))
+    .catch(() => onHomeWarm({ id, verified: false }, gen));
+}
+
+async function searchAheadForPlayNow(meta, cap, profileId, gen) {
+  const id = meta.id;
+  const result = await resolveStreams(meta, id);
+  rememberSampledStreams(result);
+  const ranked = await rankForPlay(result.streams);
+  let liveUrl = '';
+  let tried = 0;
+  for (const stream of ranked) {
+    if (tried >= WARM_PROBE_TOP) break;
+    if (!stream || !safeHttpsUrl(stream.url)) continue;
+    // A newer search, or a band that moved on, makes the rest of this moot.
+    if (gen !== homeWarm.gen) return { id, verified: false };
+    tried += 1;
+    const probe = await rangeAlive(stream.url);
+    console.log(`[homewarm] probe ${tried}/${WARM_PROBE_TOP} -> HTTP ${probe.code} alive=${probe.alive}`);
+    if (probe.alive) { liveUrl = stream.url; break; }
+  }
+  console.log(`[homewarm] ${ranked.length} playable, verified=${!!liveUrl} for ${id}`);
+  return {
+    id, cap, profileId,
+    streams: promoteLive(ranked, liveUrl),
+    liveUrl,
+    verified: !!liveUrl,
+  };
+}
+
+function onHomeWarm(held, gen) {
+  if (gen !== homeWarm.gen || !held || held.id !== homeWarm.asked) {
+    console.log(`[homewarm] ignoring a late answer for ${held && held.id}`);
+    return;
+  }
+  if (held.verified) {
+    homeWarm.held = held;
+    homeWarm.ready = held.id;
+  } else {
+    // Nothing answered yet. Cleared, so the next dwell asks again: sources
+    // come back, and a film that found nothing once must not be locked out.
+    homeWarm.held = null;
+    homeWarm.ready = '';
+    homeWarm.asked = '';
+  }
+  syncHeroPlayLabel();
+  console.log(held.verified
+    ? `[homewarm] READY ${held.id} - Play Now is live`
+    : `[homewarm] nothing answered for ${held.id} - Play stays`);
+}
+
+/**
+ * Is Play Now live for this hero card? Only for the film whose search found a
+ * link that answered, and only for the profile and cap that search ran under.
+ */
+function homeReadyFor(meta) {
+  return warmCandidate(meta) && homeWarm.ready === meta.id
+    && heldUsable(homeWarm.held, meta.id, streamCapParameter(), state.profileId);
+}
+
+/** Play or Play Now, and the READY TO PLAY tag in the meta line. */
+function syncHeroPlayLabel() {
+  const button = $('#home-hero-play');
+  if (!button) return;
+  const ready = homeReadyFor(homeHeroMeta);
+  button.textContent = ready ? 'Play Now' : 'Play';
+  button.dataset.ready = ready ? 'true' : 'false';
+  const tag = $('#home-hero-ready');
+  if (tag) tag.hidden = !ready;
+}
+
+/**
+ * PLAY NOW. The held list goes to openDetail(), which hands it to
+ * playSelected() the moment the title's rating is settled — the one
+ * rating-gated play path, so the player, its failover down the held list and
+ * progress sync are the same as for any Play press. No second search.
+ *
+ * SPENT ON THE PRESS. Forgotten here, or the band reads Play Now with nothing
+ * behind it when Home comes back.
+ */
+function playNowFromHero(meta) {
+  const held = homeWarm.held;
+  forgetHomeWarm();
+  console.log(`[homewarm] Play Now pressed for ${meta.id}`);
+  telemetry('nav_action', { action: 'hero_play_now', from: 'home' });
+  openDetail(meta, { held });
+}
+
+/**
+ * May this held list be played for `id` by the profile watching NOW? Same
+ * title, same profile, same cap, and a first row with a link. Anything else is
+ * refused, and the caller searches again under the current cap.
+ */
+function heldUsable(held, id, cap, profileId) {
+  return !!held && held.id === id
+    && held.cap === cap
+    && (held.profileId || '') === (profileId || '')
+    && Array.isArray(held.streams) && held.streams.length > 0
+    && !!held.streams[0] && !!safeHttpsUrl(held.streams[0].url);
+}
+
+/**
+ * The same list with `liveUrl`'s row first and the rest in ranked order, so
+ * the player's failover still walks the list the sheet would have shown.
+ */
+function promoteLive(streams, liveUrl) {
+  const list = Array.isArray(streams) ? streams.slice() : [];
+  if (!liveUrl) return list;
+  const at = list.findIndex((stream) => stream && stream.url === liveUrl);
+  if (at > 0) list.unshift(list.splice(at, 1)[0]);
+  return list;
+}
+
+/**
+ * Rank a stream list the way the detail sheet's list does (loadStreams): dead
+ * links and foreign dubs down, BlazingCaps' device ranking, then the viewer's
+ * own filters from Settings. Raw rows out, best first.
+ */
+async function rankForPlay(rows) {
+  let streams = Array.isArray(rows) ? rows.slice() : [];
+  const isDead = deadLinkProbe();
+  const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
+  if (window.BlazingCaps) {
+    const caps = await window.BlazingCaps.probe();
+    const ranked = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) });
+    return window.BlazingSettings
+      ? window.BlazingSettings.filterInfos(ranked.streams).infos.map((info) => info.raw)
+      : ranked.streams.map((info) => info.raw);
+  }
+  const penaltyOf = (s) => {
+    if (deadLinks.includes(s.url)) return 1000;
+    return FOREIGN_DUB.test(`${s.name || ''} ${s.title || ''}`.toLowerCase()) ? 100 : 0;
+  };
+  streams.sort((a, b) => penaltyOf(a) - penaltyOf(b));
+  return window.BlazingSettings ? window.BlazingSettings.filterStreams(streams).streams : streams;
+}
+
+/**
+ * DOES THIS LINK HAND OVER A BYTE? `{ alive, code }`, never throws.
+ *
+ * A CORS fetch with `Range: bytes=0-0`, redirects followed, 8 s, and the body
+ * cancelled by the abort in `finally` — some origins ignore Range and answer
+ * 200 with the whole file (decypharr does), and without the abort a probe
+ * would download a film.
+ *
+ * WHY A CORS FETCH, measured from a page on another origin in headless Comet,
+ * 9 Oct 2026, against the live addon:
+ *   addon /dl/<token>  302 (ACAO *) -> TorBox CDN 206 (ACAO reflects the
+ *                      origin, also "null" after the cross-origin redirect,
+ *                      and it answers the Range preflight)    readable, ~0.3 s
+ *   pixeldrain         403, readable
+ *   a host with no CORS headers                               TypeError
+ * So the addon's own links — the ones a debrid search returns — can be probed
+ * honestly from the browser. A host that sends no CORS headers cannot be
+ * measured from a page at all; its row counts as NOT PROVEN and never turns
+ * the button into Play Now (it still plays through the ordinary Play, because
+ * a <video> needs no CORS). The alternatives were worse: a `no-cors` fetch is
+ * opaque, so a 404 reads exactly like a 206; and a <video> metadata probe
+ * downloads megabytes per row and needs a decoder for each.
+ */
+async function rangeAlive(url, ms = WARM_PROBE_MS) {
+  const target = safeHttpsUrl(url);
+  if (!target) return { alive: false, code: 0 };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const response = await fetch(target, {
+      headers: { Range: 'bytes=0-0' },
+      redirect: 'follow',
+      cache: 'no-store',
+      mode: 'cors',
+      credentials: 'omit',
+      signal: controller.signal,
+    });
+    return { alive: response.status >= 200 && response.status < 300, code: response.status };
+  } catch {
+    return { alive: false, code: 0 };
+  } finally {
+    clearTimeout(timer);
+    try { controller.abort(); } catch { /* already settled */ }
+  }
+}
+
 if (homeHeroMute) {
   homeHeroMute.addEventListener('click', () => {
     // Muted is not a preference, it is the only way a browser will autoplay at
@@ -1021,6 +1322,14 @@ if (homeHeroMute) {
 if ($('#home-hero-play')) {
   $('#home-hero-play').addEventListener('click', () => {
     if (!homeHeroMeta) return;
+    // PLAY NOW is the one exception to everything below (BLZ-0108). The label
+    // says what the press does: the dwell search already found a link that
+    // answered, so the viewer asked for the film itself, and it starts at once
+    // with no second search. See playNowFromHero().
+    if (homeReadyFor(homeHeroMeta)) {
+      playNowFromHero(homeHeroMeta);
+      return;
+    }
     // OPENING A TITLE NEVER STARTS THE FEATURE ANY MORE.
     //
     // This handler was `openDetail(homeHeroMeta); playSelected();` — the ONE
@@ -3624,6 +3933,24 @@ function openDetail(meta, opts) {
   fullMeta.finally(() => {
     if (state.selected !== meta || !ratingAllowed(meta.contentRating)) return;
     detailPlay.disabled = false;
+    // PLAY NOW and the WATCHED REPLAY (BLZ-0108, BLZ-0109). The viewer pressed a
+    // button that says it plays, so the film starts here — through
+    // playSelected(), the same rating-gated path as the Play button, and only
+    // now that the rating above has settled. `held` is a list a probe already
+    // proved; `autoplay` alone is "search as usual and play the best copy".
+    // If nothing starts, the ordinary sheet is drawn so a source can be picked.
+    if (opts && (opts.held || opts.autoplay)) {
+      detailStatus.textContent = 'Starting…';
+      playSelected({ held: opts.held || null, fromStart: opts.fromStart === true, onGiveUp: opts.onGiveUp })
+        .then((played) => {
+          if (played || state.selected !== meta || !detailDialog.open) return;
+          startDetailTrailer(meta);
+          renderEpisodeControls(meta);
+          loadStreams(meta);
+          renderRichSections(meta);
+        });
+      return;
+    }
     // AFTER the line above, never before it: openDetail() disables Play until
     // the meta settles, and a disabled button refuses focus silently — so a
     // focus() up in the synchronous half would look shipped and do nothing.
@@ -4130,6 +4457,8 @@ function closeDetail() {
   $('#detail-streams').innerHTML = '';
   $('#detail-verification')?.replaceChildren();
   clearRichSections();
+  // The Home band is uncovered again: its Play Now dwell may start (BLZ-0108).
+  rearmHomeWarm();
 }
 
 const EDU_ID_PREFIX = 'yt:edu:';
@@ -4590,17 +4919,46 @@ function describeAllRejected(ranked, caps) {
 }
 
 let playRequest = 0;
-async function playSelected() {
+/**
+ * Play the selected title. Resolves true when a player was opened.
+ *
+ * `opts.held` (BLZ-0108 Play Now, BLZ-0109 Watched replay) is a list a probe
+ * already proved. It is played as it stands — no search — but only when
+ * heldUsable() says it was made for THIS title, THIS profile and THIS cap; any
+ * other held list is refused and the ordinary search runs under the current
+ * cap. `opts.fromStart` plays from 0:00 with no Resume offer.
+ */
+async function playSelected(opts = {}) {
   const meta = state.selected;
-  if (!meta) return;
+  if (!meta) return false;
   const request = ++playRequest;
   const profileId = state.profileId;
   let contentId = null;
   const isCurrent = () => request === playRequest && state.selected === meta && profileId === state.profileId
     && (!contentId || (state.selectedEpisode?.id || meta.id) === contentId) && detailDialog.open;
+  const fromStart = opts.fromStart === true;
   await fetchFullMeta(meta, true);
-  if (!isCurrent() || !ratingAllowed(meta.contentRating)) return;
+  if (!isCurrent() || !ratingAllowed(meta.contentRating)) return false;
   contentId = state.selectedEpisode?.id || meta.id;
+  const held = opts.held;
+  if (held && !meta.embyId && !state.selectedEpisode) {
+    if (heldUsable(held, contentId, streamCapParameter(), state.profileId)) {
+      const first = held.streams[0];
+      console.log(`[homewarm] playing the held link for ${contentId}, no search`);
+      openPlayer(meta.name, first.url, {
+        headers: streamHeaders(first),
+        candidates: held.streams,
+        candidateIndex: 0,
+        meta,
+        fromStart,
+        streamFormat: first.streamFormat || '',
+        onGiveUp: opts.onGiveUp,
+      });
+      closeDetail();
+      return true;
+    }
+    console.log(`[homewarm] the held list is not for this profile or cap - searching for ${contentId}`);
+  }
   // Emby needs no stream resolution: the fleet IS the stream, and it forwards
   // Range so the scrub bar works.
   if (meta.embyId && window.BlazingEmby) {
@@ -4610,7 +4968,7 @@ async function playSelected() {
     const url = window.BlazingEmby.streamUrl(meta.embyId);
     openPlayer(meta.name, url);
     closeDetail();
-    return;
+    return true;
   }
   // Education cards carry a "yt:edu:<videoId>" id. There is no /stream route for
   // them — the catalog's own stream entry is a youtube.com/watch PAGE, which no
@@ -4618,20 +4976,20 @@ async function playSelected() {
   if (isEduId(meta.id)) {
     detailStatus.textContent = 'Getting the video…';
     const edu = await resolveEduStream(meta.id);
-    if (!isCurrent()) return;
+    if (!isCurrent()) return false;
     if (!edu) {
       detailStatus.textContent = 'This lesson could not be opened right now. Try again in a minute.';
-      return;
+      return false;
     }
     openPlayer(meta.name, edu.url, { streamFormat: edu.streamFormat });
     closeDetail();
-    return;
+    return true;
   }
   detailStatus.textContent = 'Checking direct streams…';
   try {
     const result = await resolveStreams(meta, contentId);
     let streams = result.streams;
-    if (!isCurrent()) return;
+    if (!isCurrent()) return false;
     rememberSampledStreams(result);
     const isDead = deadLinkProbe();
     const deadLinks = streams.filter((stream) => isDead(stream.url)).map((stream) => stream.url);
@@ -4647,7 +5005,7 @@ async function playSelected() {
     // to be one function with one caller here too.
     if (window.BlazingCaps) {
       const caps = await window.BlazingCaps.probe();
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       streams = window.BlazingCaps.rankStreams(streams, caps, { deadLinks, inspected: (stream) => sampledStreams.has(stream) }).streams.map((i) => i.raw);
     } else {
       const getPenalty = (s) => {
@@ -4662,18 +5020,21 @@ async function playSelected() {
     const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url) && !deadLinks.includes(stream.url)) || streams.find((stream) => stream && safeHttpsUrl(stream.url));
     if (!playable) {
       showSourceFallback(meta, 'No compatible direct stream is available right now.', result.refused);
-      return;
+      return false;
     }
     openPlayer(meta.name, playable.url, {
       headers: streamHeaders(playable),
       candidates: streams,
       candidateIndex: streams.indexOf(playable),
       meta,
+      fromStart,
     });
     closeDetail();
+    return true;
   } catch {
-    if (!isCurrent()) return;
+    if (!isCurrent()) return false;
     detailStatus.textContent = 'Could not check streams. Try again.';
+    return false;
   }
 }
 
@@ -4762,12 +5123,19 @@ let candidateIndex = 0;
 let candidateResume = 0;
 /** The title, so exhaustion can put its source list back up. */
 let candidateMeta = null;
+/**
+ * What to do when every candidate failed, INSTEAD of the source list. Set only
+ * by the Watched replay (BLZ-0109): its one saved link failed in the player, so
+ * the answer is the normal search, not an error over a one-row list.
+ */
+let candidateFallback = null;
 
 function clearCandidates() {
   playbackCandidates = [];
   candidateIndex = 0;
   candidateResume = 0;
   candidateMeta = null;
+  candidateFallback = null;
 }
 
 function clearPlayerWatchdog() {
@@ -5001,6 +5369,12 @@ function giveUpOnCandidates(session, message) {
     ? Math.min(candidateIndex + 1, playbackCandidates.length)
     : 0;
   const meta = candidateMeta;
+  if (candidateFallback) {
+    const fallback = candidateFallback;
+    closePlayer();
+    fallback();
+    return;
+  }
   if (tried > 1 && meta) {
     closePlayer();
     showToast(`Tried ${tried} sources and none of them started. Pick one from the list.`);
@@ -5243,7 +5617,8 @@ function openPlayer(title, rawUrl, opts) {
       ? at
       : Math.max(0, ranked.findIndex((row) => row && row.url === rawUrl));
     candidateMeta = (opts && opts.meta) || null;
-    candidateResume = Math.max(0, Number(opts.startAt) || 0);
+    candidateResume = opts.fromStart ? 0 : Math.max(0, Number(opts.startAt) || 0);
+    candidateFallback = typeof opts.onGiveUp === 'function' ? opts.onGiveUp : null;
   }
 
   if (Platform.isAppleTV) {
@@ -5302,7 +5677,8 @@ function openPlayer(title, rawUrl, opts) {
   }
   startSync({ id: state.selected?.id });
   const profileId = state.profileId;
-  if (profileId && state.selected?.id) {
+  // A Watched replay plays from 0:00: no "Resume from" offer over it.
+  if (profileId && state.selected?.id && !(opts && opts.fromStart)) {
     fetch(`${API_BASE}/api/sync/progress/${state.selected.id}?profileId=${profileId}`)
       .then(r => r.json())
       .then(d => {
@@ -5343,6 +5719,8 @@ function closePlayer() {
   video.load();
   player.hidden = true;
   document.body.classList.remove('no-scroll');
+  // Back on Home, the band's Play Now dwell may start again (BLZ-0108).
+  rearmHomeWarm();
 }
 
 /**
@@ -5692,6 +6070,8 @@ async function loadContinueWatching(explicitProfileId, request = homeRequest) {
           priority: 2,
           eyebrow: 'Continue watching',
           percent: first.percent,
+          // A resume card: Play Now's dwell search skips it (BLZ-0108).
+          resume: true,
         });
       }
     }
@@ -6896,7 +7276,9 @@ $('#detail-copy-toggle').addEventListener('click', (event) => {
   event.currentTarget.textContent = expanded ? 'Show less' : 'Show more';
   detailCopy.classList.toggle('is-collapsed', !expanded);
 });
-$('#detail-play').addEventListener('click', playSelected);
+// An arrow, not `playSelected` itself: the click event must not arrive as its
+// options (it takes a held list now — BLZ-0108).
+$('#detail-play').addEventListener('click', () => { playSelected(); });
 window.BlazingStreamPreferences?.mountDetail($('#detail-stream-preferences'));
 document.addEventListener('blazing-stream-preferences-changed', () => {
   ++playRequest;

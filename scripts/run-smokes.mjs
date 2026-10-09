@@ -105,7 +105,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 41 -> 42 when games-hub.smoke.mjs landed with the one games browser
 // that replaces the eight nookie "Game Browser" apps. Same rule as every line
 // above: this number is the real count, always.
-const MIN_SUITES = 42;
+// Raised 42 -> 43 on 9 Oct 2026: playnow.smoke.mjs (BLZ-0108). Same rule:
+// this number is the real count.
+const MIN_SUITES = 43;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so
