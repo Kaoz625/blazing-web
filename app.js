@@ -1114,6 +1114,17 @@ function requestHomeWarm(meta) {
   // The band must still be what the viewer is looking at.
   if (state.route !== 'home' || (homeHero && homeHero.hidden)) return;
   if (detailDialog.open || !player.hidden || shelfCinema.open) return;
+  startWarmSearch(meta, 'hero');
+}
+
+/**
+ * THE ONE SEARCH SLOT, shared by the band and the shelf cinema (BLZ-0110) the
+ * way the Roku's single AddonTask.doHomeWarm serves whichever card has focus.
+ * One search in flight: a newer film bumps the generation, so the older one
+ * stops probing and its answer is dropped on arrival (onHomeWarm), and the
+ * newer answer is the one held. A film already asked is not asked twice.
+ */
+function startWarmSearch(meta, from) {
   if (!state.profileId || !ratingAllowed(meta.contentRating)) return;
   if (homeWarm.asked === meta.id) return;
   const id = meta.id;
@@ -1121,9 +1132,11 @@ function requestHomeWarm(meta) {
   homeWarm.asked = id;
   homeWarm.ready = '';
   homeWarm.held = null;
+  // Whatever read Play Now for the previous film stops saying so now.
+  syncHeroPlayLabel();
   const cap = streamCapParameter();
   const profileId = state.profileId;
-  console.log(`[homewarm] searching ahead for ${id}`);
+  console.log(`[homewarm] searching ahead for ${id} (${from})`);
   searchAheadForPlayNow(meta, cap, profileId, gen)
     .then((held) => onHomeWarm(held, gen))
     .catch(() => onHomeWarm({ id, verified: false }, gen));
@@ -1206,11 +1219,11 @@ function syncHeroPlayLabel() {
  * SPENT ON THE PRESS. Forgotten here, or the band reads Play Now with nothing
  * behind it when Home comes back.
  */
-function playNowFromHero(meta) {
+function playNowFromHero(meta, from = 'hero') {
   const held = homeWarm.held;
   forgetHomeWarm();
-  console.log(`[homewarm] Play Now pressed for ${meta.id}`);
-  telemetry('nav_action', { action: 'hero_play_now', from: 'home' });
+  console.log(`[homewarm] Play Now pressed for ${meta.id} (${from})`);
+  telemetry('nav_action', { action: from === 'cinema' ? 'cinema_play_now' : 'hero_play_now', from: 'home' });
   openDetail(meta, { held });
 }
 
@@ -3106,6 +3119,10 @@ function attachHoverTrailer(card, meta) {
    a media Play key is Play Now on a READY film. That is why the two pills are
    spans: they name what a key does, they are not controls.
 
+   IT RUNS ITS OWN PLAY NOW SEARCH. The dwell that opens it starts that film's
+   search through the band's slot (startWarmSearch, cinemaWarmCandidate), so
+   READY TO PLAY means a link for THIS card answered the one-byte probe.
+
    THE TRAILER IS NOT RESTARTED. A .row-hero card already plays its own
    trailer in the card from 1.4 s; that very <video> is moved into the cinema
    and back. Any other card gets the Home hero's trailer: the fleet's ytId and
@@ -3151,6 +3168,20 @@ function armShelfCinema(card) {
     shelfCinema.timer = null;
     openShelfCinema(card);
   }, SHELF_CINEMA_MS);
+}
+
+/**
+ * THE CINEMA RUNS ITS OWN PLAY NOW SEARCH, as the dwell on any card does on
+ * the Roku (AddonTask.doHomeWarm), Apple TV and Fire TV: the normal stream
+ * search under the profile's cap, a one-byte probe on the top three, the first
+ * live link moved to the front, no /precache. The band's rules exactly
+ * (startWarmSearch): films with a plain tt id, not Emby, not a series, and not
+ * a Continue Watching card, which carries its own place to resume from.
+ */
+function cinemaWarmCandidate(card, meta) {
+  return !!meta && meta.type === 'movie' && !meta.embyId
+    && /^tt\d+$/.test(String(meta.id || ''))
+    && !card.closest('[data-row-id="continue-watching"]');
 }
 
 /** Is this film the one Play Now holds a link for? (BLZ-0108) */
@@ -3205,6 +3236,10 @@ function openShelfCinema(card) {
   }
   console.log(`[cinema] open for ${meta.id}`);
   telemetry('nav_action', { action: 'shelf_cinema', from: 'home' });
+  // The dwell that opened the cinema starts this film's Play Now search. READY
+  // TO PLAY and the Play Now face appear when it answers (paintShelfCinemaReady
+  // via syncHeroPlayLabel); a film already held reads READY at once.
+  if (cinemaWarmCandidate(card, meta)) startWarmSearch(meta, 'cinema');
 
   const reduced = !!(window.BlazingCaps && window.BlazingCaps.prefersReducedMotion());
   const inCard = CARD_TRAILERS.get(card);
@@ -3225,7 +3260,13 @@ function openShelfCinema(card) {
   fetchFullMeta(meta).then((full) => {
     if (gen !== shelfCinema.gen || !shelfCinema.open) return;
     mergeFullMeta(meta, full);
-    if (!ratingAllowed(meta.contentRating)) { closeShelfCinema('rating'); return; }
+    if (!ratingAllowed(meta.contentRating)) {
+      // Its own Play Now search goes with it: nothing held for a film this
+      // profile may not open.
+      if (homeWarm.asked === meta.id) forgetHomeWarm();
+      closeShelfCinema('rating');
+      return;
+    }
     paintShelfCinemaWords(meta);
   }).catch(() => {});
 }
@@ -7783,7 +7824,7 @@ document.addEventListener('keydown', (event) => {
       || event.keyCode === 415 || event.keyCode === 179 || event.keyCode === 10252;
     if (isPlay && shelfCinemaReady(shelfCinema.meta)) {
       event.preventDefault();
-      playNowFromHero(shelfCinema.meta);
+      playNowFromHero(shelfCinema.meta, 'cinema');
       return;
     }
   }
