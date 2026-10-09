@@ -689,6 +689,31 @@ function describeRefused(refused) {
   return reason ? `${who} — ${reason}.` : `${who}, and none served real media.`;
 }
 
+/**
+ * "NOT OUT YET", in one line, or ''.
+ *
+ * Markus, 8 Oct 2026, on Other Mommy: the sheet said no stream was available for
+ * a film that had not been released for home viewing at all, and its only rows
+ * were dead embed pages. The addon now answers such a film with an EMPTY streams
+ * array and a top-level
+ *   notice: { kind: 'theatrical' | 'upcoming', title: 'Not out yet', text }
+ * It is never a row (notice rows are dropped on purpose), so it rides beside the
+ * list. Roku, Fire TV, Apple TV and Samsung read the same field. Beside real rows
+ * it is ignored; plainText() because, like every other addon string, it is not
+ * ours.
+ */
+function streamNoticeLine(data) {
+  if (!data || typeof data !== 'object') return '';
+  if (Array.isArray(data.streams) && data.streams.length) return '';
+  const notice = data.notice;
+  if (!notice || typeof notice !== 'object') return '';
+  const title = plainText(notice.title).trim().slice(0, 60);
+  const text = plainText(notice.text).trim().slice(0, 200);
+  if (!title && !text) return '';
+  const head = title || 'Not out yet';
+  return text ? `${head}. ${text}` : `${head}.`;
+}
+
 function setBackground(node, value) {
   const image = safeHttpsUrl(value);
   node.style.backgroundImage = image
@@ -4918,7 +4943,7 @@ async function loadStreams(meta) {
     window.BlazingStreamEvidence?.render($('#detail-verification'), result.verification, result.preferences);
     rememberSampledStreams(result);
     if (!streams.length) {
-      showSourceFallback(meta, 'No compatible stream available.', result.refused);
+      showSourceFallback(meta, result.notice || 'No compatible stream available.', result.refused);
       return;
     }
 
@@ -5175,6 +5200,7 @@ async function resolveStreams(meta, contentId = meta.id) {
   return {
     streams: Array.isArray(data.streams) ? data.streams : [],
     refused: Array.isArray(data.refused) ? data.refused : [],
+    notice: streamNoticeLine(data),
     verification: data.verification,
     preferences,
   };
@@ -5348,7 +5374,7 @@ async function playSelected(opts = {}) {
     }
     const playable = streams.find((stream) => stream && safeHttpsUrl(stream.url) && !deadLinks.includes(stream.url)) || streams.find((stream) => stream && safeHttpsUrl(stream.url));
     if (!playable) {
-      showSourceFallback(meta, 'No compatible direct stream is available right now.', result.refused);
+      showSourceFallback(meta, (!streams.length && result.notice) || 'No compatible direct stream is available right now.', result.refused);
       return false;
     }
     openPlayer(meta.name, playable.url, {
