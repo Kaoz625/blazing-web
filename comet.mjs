@@ -140,6 +140,54 @@ async function waitForStartupTab(browser, ms) {
 }
 
 /**
+ * A newPage() THAT CANNOT HANG FOR EVER — the second half of the startup race.
+ *
+ * waitForStartupTab() above closes the race only when Comet's own onboarding
+ * tab appears inside its 8 s window. Under load it can come later: on 9 Oct
+ * 2026 a full run at load ~100 hung posters and profileart exactly as before,
+ * and profileart hung again alone at load ~15 — trace ends in
+ * "browserContext.newPage started", then the onboarding page's own
+ * domcontentloaded/load/networkidle, and no "newPage succeeded".
+ *
+ * So a newPage() that has not returned in BLAZING_COMET_NEWPAGE_MS (15 s; a
+ * normal one takes well under a second even under load) is abandoned and
+ * asked again. The onboarding now owns the tab it took, so the second ask is
+ * an ordinary about:blank. A page from the abandoned ask that turns up late is
+ * closed, never handed to the harness. Three tries, then a real error that
+ * names the cause instead of a silent 240 s runner kill.
+ */
+const NEWPAGE_MS = Number(process.env.BLAZING_COMET_NEWPAGE_MS) || 15000;
+
+function guardNewPage(target) {
+  const ask = target.newPage.bind(target);
+  target.newPage = async (...args) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const pending = ask(...args);
+      let timer;
+      const late = new Promise((resolve) => { timer = setTimeout(resolve, NEWPAGE_MS, null); });
+      const page = await Promise.race([pending, late]).finally(() => clearTimeout(timer));
+      if (page) return page;
+      pending.then((stray) => stray.close().catch(() => {}), () => {});
+      console.warn(`[comet] newPage() gave no page in ${NEWPAGE_MS}ms (try ${attempt}/3) — asking again`);
+    }
+    throw new Error(`[comet] newPage() never returned in 3 tries of ${NEWPAGE_MS}ms — Comet's startup tab took it`);
+  };
+}
+
+function guardContexts(browser) {
+  for (const context of browser.contexts()) guardNewPage(context);
+  const open = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const context = await open(...args);
+    guardNewPage(context);
+    return context;
+  };
+  // Browser.newPage() is covered too: it calls this.newContext() and then that
+  // context's newPage() (playwright-core lib/client/browser.js), so it reaches
+  // the guarded pair above. Guarding it again would nest two retry loops.
+}
+
+/**
  * A drop-in for `await chromium.launch()`.
  *
  * Returns a Playwright Browser with the SAME shape the harnesses already use —
@@ -241,6 +289,7 @@ export async function launchBrowser({ timeoutMs = Math.max(1000, Math.min(180000
     throw error;
   }
   await waitForStartupTab(browser, Number(process.env.BLAZING_COMET_STARTUP_TAB_MS) || 8000);
+  guardContexts(browser);
   const disconnect = browser.close.bind(browser);
   // Shadow the prototype method so every existing `await browser.close()` also
   // reaps the process group and the scratch profile. Without this the harness
