@@ -426,6 +426,22 @@ const crossTypeNames = new Set(
   [...new Set((Array.isArray(mv) ? mv : []).map((m) => String(m.name || '').trim().toLowerCase()))]
     .filter((n) => (Array.isArray(sr) ? sr : []).some((s) => String(s.name || '').trim().toLowerCase() === n))
 );
+// THE SAME NAME, TWO FILMS. "In der Sache J. Robert Oppenheimer" is a 1964
+// film (tt0058228) AND a 1981 one (tt0876466); the fleet's own movie list
+// carries both, and two cards is right. This check failed on that pair from
+// 2 Oct 2026 and held the GitHub Pages deploy back with it. A name that the
+// fleet's OWN lists already hold under two different ids is two productions,
+// not a merge failure. An Emby copy of a Cinemeta film is still caught: it is
+// not in these lists twice, it is the Emby list adding a second card.
+const idsByName = new Map();
+for (const m of [...(Array.isArray(mv) ? mv : []), ...(Array.isArray(sr) ? sr : [])]) {
+  const n = String(m.name || '').trim().toLowerCase();
+  const id = String(m.id || m.imdb_id || '');
+  if (!n || !id) continue;
+  if (!idsByName.has(n)) idsByName.set(n, new Set());
+  idsByName.get(n).add(id);
+}
+for (const [n, ids] of idsByName) if (ids.size > 1) crossTypeNames.add(n);
 const dupes = await page.evaluate((excluded) => {
   const names = [...document.querySelectorAll('#search-results > *')]
     .map((c) => (c.innerText || '').split('\n')[0].trim().toLowerCase())
