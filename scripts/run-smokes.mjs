@@ -17,7 +17,7 @@
 //   node scripts/run-smokes.mjs home locker      just the ones whose name matches
 
 import { readdir } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -224,7 +224,24 @@ function run(file) {
     // playwright action does not unwind, and a browser asked politely to stop
     // can take its time. There is nothing to clean up that outliving the run
     // would help.
+    //
+    // THE BROWSER IS NOT IN THAT GROUP. comet.mjs spawns Comet `detached`, as
+    // its own group leader, so its close() can reap the gpu and network
+    // helpers — and that same setsid takes it out of this suite's group. So
+    // the group kill alone left every timed-out suite's Comet running:
+    // measured 9 Oct 2026, three orphans (parent pid 1) after two 240 s
+    // timeouts and one 120 s alarm. Kill the group of each direct child of
+    // the suite first, while it is still the suite's child and findable.
     const killTree = () => {
+      let kids = [];
+      try {
+        kids = execFileSync('pgrep', ['-P', String(child.pid)], { encoding: 'utf8' })
+          .split('\n').map(Number).filter((pid) => pid > 1);
+      } catch { /* pgrep exits 1 when there are none */ }
+      for (const pid of kids) {
+        try { process.kill(-pid, 'SIGKILL'); }
+        catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+      }
       try { process.kill(-child.pid, 'SIGKILL'); }
       catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
     };

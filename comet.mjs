@@ -111,6 +111,35 @@ async function cdpReady(port, timeoutMs) {
 }
 
 /**
+ * WAIT FOR COMET'S OWN FIRST TAB BEFORE A HARNESS OPENS ONE.
+ *
+ * A fresh profile makes Comet open chrome://perplexity-onboarding/ by itself,
+ * --no-first-run or not, 1.3-3.5 s after spawn (measured 9 Oct 2026, 8 fresh
+ * profiles). CDP answers before that. If a harness calls newPage() inside the
+ * gap, Comet puts the onboarding INTO that new tab: the about:blank Playwright
+ * is waiting for never commits, and newPage() never returns. No app file has
+ * been requested at that point, so the suite hangs silently until the runner's
+ * 240 s kill — profile-flow and sources did exactly that, on whichever branch
+ * the timing happened to land.
+ *
+ * Once the onboarding tab exists it stays in its own tab, so every later
+ * newPage() is a normal about:blank. The wait is bounded and costs nothing
+ * when Comet was slower than the tab (the usual case under load).
+ *
+ * Two things that do NOT work, both measured: --skip-onboarding-for-testing
+ * and a seeded Local State (perplexity.onboarding_completed) both skip it,
+ * but Comet then opens chrome://newtab and a live perplexity.ai sidecar
+ * instead — real network traffic from a fixture run.
+ */
+async function waitForStartupTab(browser, ms) {
+  const context = browser.contexts()[0];
+  if (!context || context.pages().length) return;
+  await context.waitForEvent('page', { timeout: ms }).catch(() => {
+    // A Comet that opens no tab of its own has nothing to race with.
+  });
+}
+
+/**
  * A drop-in for `await chromium.launch()`.
  *
  * Returns a Playwright Browser with the SAME shape the harnesses already use —
@@ -211,6 +240,7 @@ export async function launchBrowser({ timeoutMs = Math.max(1000, Math.min(180000
     hardStop();
     throw error;
   }
+  await waitForStartupTab(browser, Number(process.env.BLAZING_COMET_STARTUP_TAB_MS) || 8000);
   const disconnect = browser.close.bind(browser);
   // Shadow the prototype method so every existing `await browser.close()` also
   // reaps the process group and the scratch profile. Without this the harness
