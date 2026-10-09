@@ -2191,7 +2191,8 @@ function buildListSection(spec, metas) {
 function buildListItem(spec, meta) {
   const item = el('div', 'list-item');
   const actions = el('div', 'list-actions');
-  item.append(buildCard(meta), actions);
+  // A Watched film replays the link that finished it (BLZ-0109, openWatched).
+  item.append(buildCard(meta, spec.list === 'watched' ? openWatched : undefined), actions);
   drawListRemove(actions, spec, meta);
   return item;
 }
@@ -5676,6 +5677,8 @@ function openPlayer(title, rawUrl, opts) {
     return;
   }
   startSync({ id: state.selected?.id });
+  // Watch for the point a finished film's link is kept (BLZ-0109).
+  armReplayWatch(session, opts && opts.meta, rawUrl, declared);
   const profileId = state.profileId;
   // A Watched replay plays from 0:00: no "Resume from" offer over it.
   if (profileId && state.selected?.id && !(opts && opts.fromStart)) {
@@ -6102,6 +6105,157 @@ function startSync(meta) {
 function stopSync() {
   if (syncInterval) clearInterval(syncInterval);
   syncInterval = null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE WATCHED REPLAY (BLZ-0109). Roku 9754f91 (Store.brs SaveReplayLink),
+   Samsung c0298b8, Fire TV 26abc38, Apple TV 68593e3.
+
+   Markus, 8 Oct 2026: "ive watched list those should be the easiest thing to
+   replay". A film that finished had nothing left to replay it with, so opening
+   it from Watched searched every addon again from nothing.
+
+   THE THRESHOLD IS 95%. This file has no point where Continue Watching drops a
+   title — the web draws whatever the fleet or the add-on hands it — so the
+   number is the Roku's: RemoveContinue clears a title at progress >= 95
+   (MainScene.brs onScrobble), and Samsung's player saves at the same 95%. Every
+   client keeps the finishing link at the same moment.
+
+   PER PROFILE, NEWEST FIRST, 30 AT MOST, in localStorage. Each entry is
+   {videoId, url, label, format} — the Roku's fields — plus the rating cap the
+   profile had when it was saved. A /dl/ link is signed for 14 days and
+   resolves from the info hash when pressed, so it usually outlives the debrid
+   file behind it; it is still never trusted blindly (openWatched probes it).
+   Lose this store and the cost is one ordinary search, never a wrong answer.
+
+   NEVER REPLAYED UNDER ANOTHER CAP. The addon stamps the cap onto the link it
+   mints; a link saved under one cap is never handed to a profile whose cap is
+   different now. The ordinary open runs instead, and its search asks under
+   the current cap.
+   ══════════════════════════════════════════════════════════════════════════ */
+const REPLAY_SAVE_PERCENT = 95;
+const REPLAY_MAX = 30;
+const REPLAY_STORE = 'blazing-replay-links-v1:';
+
+/** The film on screen and the link playing it, until it is saved or closed. */
+let replayWatch = null;
+
+/**
+ * Called by openPlayer() for every <video> play. Only a FILM played from a
+ * search (a tt id, with the source list behind it) is watched: Emby, Live TV,
+ * YouTube, the locker and episodes never reach the Watched replay.
+ */
+function armReplayWatch(session, meta, rawUrl, declared) {
+  replayWatch = null;
+  if (!meta || meta.type !== 'movie' || meta.embyId || !/^tt\d+$/.test(String(meta.id || ''))) return;
+  if (!state.profileId) return;
+  replayWatch = { session, videoId: meta.id, profileId: state.profileId, url: rawUrl, format: declared || '' };
+}
+
+function readReplayLinks(profileId) {
+  if (!profileId) return [];
+  try {
+    const list = JSON.parse(localStorage.getItem(REPLAY_STORE + encodeURIComponent(profileId)) || '[]');
+    return Array.isArray(list) ? list.filter((e) => e && typeof e === 'object' && e.videoId && e.url) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveReplayLink(profileId, entry) {
+  if (!profileId || !entry || !entry.videoId || !safeHttpsUrl(entry.url)) return;
+  const out = [entry];
+  for (const old of readReplayLinks(profileId)) {
+    if (out.length >= REPLAY_MAX) break;
+    if (old.videoId !== entry.videoId) out.push(old);
+  }
+  try {
+    localStorage.setItem(REPLAY_STORE + encodeURIComponent(profileId), JSON.stringify(out));
+  } catch {
+    // A browser that cannot store this replays by searching, as it did before.
+  }
+}
+
+/** The saved link for this title and profile, or null. */
+function replayLinkFor(profileId, videoId) {
+  return readReplayLinks(profileId).find((e) => e.videoId === videoId) || null;
+}
+
+/** 95% reached (or the end): keep the link that got the film there. Once. */
+function checkReplayThreshold() {
+  const watch = replayWatch;
+  if (!watch || watch.session !== playSession || player.hidden) return;
+  if (watch.profileId !== state.profileId) { replayWatch = null; return; }
+  const duration = Number(video.duration);
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  if ((Number(video.currentTime) / duration) * 100 < REPLAY_SAVE_PERCENT) return;
+  replayWatch = null;
+  // The row that is ACTUALLY playing: the failover may have walked down the
+  // list since the player opened.
+  const stream = playbackCandidates.length ? playbackCandidates[candidateIndex] : null;
+  const url = (stream && stream.url) || watch.url;
+  saveReplayLink(watch.profileId, {
+    videoId: watch.videoId,
+    url,
+    label: stream ? qualityOf(stream) : '',
+    format: (stream && stream.streamFormat) || watch.format || '',
+    cap: streamCapParameter(),
+    savedAt: Date.now(),
+  });
+  console.log(`[replay] kept the link that finished ${watch.videoId}`);
+}
+video.addEventListener('timeupdate', checkReplayThreshold);
+video.addEventListener('ended', checkReplayThreshold);
+
+/**
+ * A FILM IN LIBRARY -> WATCHED REPLAYS THE LAST LINK THAT FINISHED IT.
+ * Roku MainScene.onMyListsChosen -> onResumeRequested (9754f91).
+ *
+ *   no saved link, or one saved under another cap  -> the ordinary sheet
+ *   the saved link answers (one byte, 8 s)          -> plays from 0:00, no search
+ *   the saved link is dead, or fails in the player  -> the normal search, and
+ *                                                      its best copy from 0:00
+ *
+ * Shows always open the sheet: "the show" names no one episode. Every play here
+ * goes through openDetail() and playSelected(), the rating-gated play path.
+ */
+let replayRequest = 0;
+async function openWatched(meta) {
+  if (!meta) return;
+  const saved = meta.type === 'movie' && state.profileId ? replayLinkFor(state.profileId, meta.id) : null;
+  const cap = streamCapParameter();
+  if (!saved || saved.cap !== cap || !ratingAllowed(meta.contentRating)) {
+    if (saved && saved.cap !== cap) console.log(`[replay] ${meta.id}: saved under cap ${saved.cap || 'none'}, not ${cap} - opening as usual`);
+    openDetail(meta);
+    return;
+  }
+  const request = ++replayRequest;
+  const profileId = state.profileId;
+  console.log(`[replay] Watched -> saved link for ${meta.id}`);
+  showToast(`Picking up ${meta.name}…`);
+  const probe = await rangeAlive(saved.url);
+  // A stale answer must not drag the viewer into a film they moved away from.
+  if (request !== replayRequest || profileId !== state.profileId || state.route !== 'library'
+    || detailDialog.open || !player.hidden) return;
+  const search = () => openDetail(meta, { autoplay: true, fromStart: true });
+  if (!probe.alive) {
+    console.log(`[replay] saved link did not answer (HTTP ${probe.code}) for ${meta.id} - searching again`);
+    showToast(`That saved link has expired. Finding a fresh one for ${meta.name}…`);
+    search();
+    return;
+  }
+  console.log(`[replay] saved link answered (HTTP ${probe.code}) - replaying ${meta.id} from 0:00`);
+  openDetail(meta, {
+    held: {
+      id: meta.id, cap, profileId, liveUrl: saved.url, verified: true,
+      streams: [{ url: saved.url, name: saved.label || 'Last played', streamFormat: saved.format || undefined }],
+    },
+    fromStart: true,
+    onGiveUp: () => {
+      showToast(`That saved link stopped working. Finding a fresh one for ${meta.name}…`);
+      search();
+    },
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
