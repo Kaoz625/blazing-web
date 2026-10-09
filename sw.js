@@ -191,6 +191,8 @@
 // hero synopsis gets 860px (styles.css). All shell files, so a new cache.
 // Same v49: Play Now (BLZ-0108) and the Watched replay (BLZ-0109) in app.js,
 // index.html and styles.css. v49 has not reached main yet (main is v48), so no bump.
+// Same v49: the shelf cinema (BLZ-0110) in app.js, index.html and styles.css.
+// Still unreleased, so still no bump.
 const CACHE = 'blazing-shell-v49';
 
 /** How long the code fetch may take before the cached copy is served instead. */

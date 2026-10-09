@@ -1106,6 +1106,29 @@
 
   </main>
 
+  <!-- THE SHELF CINEMA (BLZ-0110, app.js). Five still seconds on a card in any
+       Home row put that card's picture, trailer and words over the whole
+       screen, laid out like the Home hero. It takes NO focus and NO pointer:
+       focus and the mouse stay on the card underneath, so Enter still opens
+       Details, a move ends it, and Back/Escape gives the row back. That is
+       why the two pills are spans, not buttons — they name what the keys do. -->
+  <div id="shelf-cinema" class="shelf-cinema" hidden aria-hidden="true">
+    <div class="shelf-cinema-media">
+      <img id="shelf-cinema-art" class="shelf-cinema-art" alt="" decoding="async">
+      <div id="shelf-cinema-video" class="shelf-cinema-video"></div>
+    </div>
+    <div class="home-hero-scrim"></div>
+    <div class="shelf-cinema-content">
+      <p class="home-hero-title" id="shelf-cinema-title"></p>
+      <p class="home-hero-meta"><span id="shelf-cinema-ready" class="home-hero-ready" hidden>READY TO PLAY</span><span id="shelf-cinema-meta"></span></p>
+      <p class="home-hero-synopsis" id="shelf-cinema-synopsis"></p>
+      <div class="home-hero-actions">
+        <span id="shelf-cinema-play" class="primary-button shelf-cinema-pill" hidden>Play Now</span>
+        <span id="shelf-cinema-info" class="primary-button shelf-cinema-pill">View Details</span>
+      </div>
+    </div>
+  </div>
+
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
     <article class="detail-card">
       <button id="detail-close" class="detail-close icon-button" type="button" aria-label="Close details">

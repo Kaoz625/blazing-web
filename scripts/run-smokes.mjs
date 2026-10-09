@@ -107,7 +107,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // above: this number is the real count, always.
 // Raised 42 -> 44 on 9 Oct 2026: playnow.smoke.mjs (BLZ-0108) and
 // replay.smoke.mjs (BLZ-0109). Same rule: this number is the real count.
-const MIN_SUITES = 44;
+// Raised 44 -> 45 the same day: shelfcinema.smoke.mjs (BLZ-0110). `ls
+// *.smoke.mjs | wc -l` answered 45.
+const MIN_SUITES = 45;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

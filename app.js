@@ -929,6 +929,8 @@ function syncHomeHeroVisibility() {
  * film is not.
  */
 function resetHomeHero() {
+  // The rows are about to be rebuilt; a cinema over one of them goes first.
+  closeShelfCinema('reset');
   stopHomeHeroTrailer();
   // A held Play Now list belongs to the profile it was searched for.
   forgetHomeWarm();
@@ -1111,7 +1113,7 @@ function requestHomeWarm(meta) {
   if (homeHeroMeta !== meta || !warmCandidate(meta)) return;
   // The band must still be what the viewer is looking at.
   if (state.route !== 'home' || (homeHero && homeHero.hidden)) return;
-  if (detailDialog.open || !player.hidden) return;
+  if (detailDialog.open || !player.hidden || shelfCinema.open) return;
   if (!state.profileId || !ratingAllowed(meta.contentRating)) return;
   if (homeWarm.asked === meta.id) return;
   const id = meta.id;
@@ -1192,6 +1194,7 @@ function syncHeroPlayLabel() {
   button.dataset.ready = ready ? 'true' : 'false';
   const tag = $('#home-hero-ready');
   if (tag) tag.hidden = !ready;
+  paintShelfCinemaReady();
 }
 
 /**
@@ -1476,6 +1479,7 @@ function updateSaveLabels() {
 }
 
 function openDrawer() {
+  closeShelfCinema('drawer');
   drawerLayer.hidden = false;
   menuButton.setAttribute('aria-expanded', 'true');
   $('#drawer button[data-view]')?.focus();
@@ -2451,6 +2455,7 @@ function syncAdminRow() {
 }
 
 function showRoute(route, mediaOptions = {}) {
+  closeShelfCinema('route');
   if ((route === 'admin' || route === 'link') && !adminAllowed()) route = 'home';
   const browseRoute = ['home', 'movies', 'shows'].includes(route);
   state.route = route;
@@ -3001,6 +3006,7 @@ function attachHoverTrailer(card, meta) {
     // fetching segments for ever, and a row of 20 cards would leave 20 running.
     if (player) { player.destroy(); player = null; }
     if (wrap) { wrap.remove(); wrap = null; }
+    CARD_TRAILERS.delete(card);
     card.classList.remove('card-previewing');
   };
 
@@ -3043,6 +3049,9 @@ function attachHoverTrailer(card, meta) {
       wrap = el('div', 'card-trailer-wrap');
       wrap.appendChild(made.video);
       card.appendChild(wrap);
+      // So the shelf cinema can carry THIS video full screen instead of
+      // starting the trailer again (BLZ-0110).
+      CARD_TRAILERS.set(card, { video: made.video, destroy: made.destroy, url, wrap });
       card.classList.add('card-previewing');
       // FORCE THE STYLE, DO NOT WAIT FOR A FRAME. `.card-trailer-wrap` is
       // opacity 0 with a 400ms transition and `.visible` is what turns it on;
@@ -3074,6 +3083,280 @@ function attachHoverTrailer(card, meta) {
   card.addEventListener('focusout', stop);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THE SHELF CINEMA (BLZ-0110)
+
+   Markus, 9 Oct 2026, on the Roku: "when i go to the next row it doesnt fully
+   do what the continue watching row does with the trailers where it takes the
+   full screen it seems like it trys to though."
+
+   Five still seconds on a card in ANY Home row — not only a .row-hero row —
+   put that card's still, trailer and words over the whole viewport, laid out
+   like the Home hero: the same washes (.home-hero-scrim), the same title, meta
+   line (READY TO PLAY when Play Now holds a link for this film) and 3-line
+   synopsis at the hero's width. Roku HomeScreen.brs enterShelfCinema, Apple TV
+   ShelfCinema (blazing-tvos 2494ac4), Fire TV ShelfCinema.kt (firetv aec1482).
+
+   IT TAKES NO FOCUS AND NO POINTER, Apple TV's design. The layer is
+   pointer-events:none with nothing focusable in it, so the card underneath
+   keeps both, and every key keeps the meaning it already has on Home: Enter
+   opens Details (and the trailer carries on into it — shelfCinemaCarry), an
+   arrow moves to the next card and ends the cinema (dpad.js moves focus, the
+   card loses it), Back/Escape gives the row back with focus where it was, and
+   a media Play key is Play Now on a READY film. That is why the two pills are
+   spans: they name what a key does, they are not controls.
+
+   THE TRAILER IS NOT RESTARTED. A .row-hero card already plays its own
+   trailer in the card from 1.4 s; that very <video> is moved into the cinema
+   and back. Any other card gets the Home hero's trailer: the fleet's ytId and
+   the BlazingCaps tier. prefers-reduced-motion: no moving picture at all.
+
+   IT ENDS when the card loses focus or the pointer, on Back/Escape, when a
+   sheet, the player, the drawer or another page opens, when the rows are
+   rebuilt (resetHomeHero), and when the page scrolls the card away.
+   ══════════════════════════════════════════════════════════════════════════ */
+const SHELF_CINEMA_MS = 5000;
+/** card element -> the meta buildCard() drew it from. */
+const CARD_META = new WeakMap();
+/** card element -> its in-card trailer, while one is playing. */
+const CARD_TRAILERS = new WeakMap();
+const shelfCinemaLayer = $('#shelf-cinema');
+/* `card` is the card being dwelt on (or the one Back dismissed, so it does not
+   come straight back while the pointer still wanders over it). `gen` drops an
+   answer that lands after the cinema it was for has closed. */
+const shelfCinema = {
+  card: null, meta: null, timer: null, open: false, gen: 0, top: 0,
+  video: null, own: null, borrowed: null, url: '', resumeBand: false,
+};
+/** What a closing cinema was playing, so Details can carry on from it. */
+let shelfCinemaCarry = null;
+
+const cardOf = (node) => (node && node.closest ? node.closest('.card') : null);
+
+/** Anything over Home, or not Home at all: no cinema. */
+function shelfCinemaBlocked() {
+  if (state.route !== 'home') return true;
+  if (document.querySelector('dialog[open]')) return true;
+  if (!player.hidden) return true;
+  if (drawerLayer && !drawerLayer.hidden) return true;
+  const gate = document.querySelector('.bp-layer');
+  return !!(gate && !gate.hidden);
+}
+
+function armShelfCinema(card) {
+  if (!card || shelfCinema.card === card) return;
+  closeShelfCinema('moved');
+  shelfCinema.card = card;
+  shelfCinema.timer = setTimeout(() => {
+    shelfCinema.timer = null;
+    openShelfCinema(card);
+  }, SHELF_CINEMA_MS);
+}
+
+/** Is this film the one Play Now holds a link for? (BLZ-0108) */
+function shelfCinemaReady(meta) {
+  return !!meta && homeWarm.ready === meta.id
+    && heldUsable(homeWarm.held, meta.id, streamCapParameter(), state.profileId);
+}
+
+function paintShelfCinemaReady() {
+  if (!shelfCinema.open) return;
+  const ready = shelfCinemaReady(shelfCinema.meta);
+  $('#shelf-cinema-ready').hidden = !ready;
+  $('#shelf-cinema-play').hidden = !ready;
+  // Play Now leads when it is there; otherwise View Details is the white pill.
+  const info = $('#shelf-cinema-info');
+  info.classList.toggle('primary-button', !ready);
+  info.classList.toggle('secondary-button', ready);
+}
+
+function paintShelfCinemaWords(meta) {
+  $('#shelf-cinema-title').textContent = meta.name || '';
+  $('#shelf-cinema-meta').textContent = [meta.releaseInfo, meta.type === 'series' ? 'Series' : 'Film']
+    .filter(Boolean).join('  ·  ');
+  $('#shelf-cinema-synopsis').textContent = meta.description || '';
+  const art = safeHttpsUrl(meta.background) || safeHttpsUrl(meta.poster);
+  const img = $('#shelf-cinema-art');
+  if (art) img.src = art; else img.removeAttribute('src');
+  paintShelfCinemaReady();
+}
+
+function openShelfCinema(card) {
+  if (!shelfCinemaLayer || shelfCinema.card !== card || shelfCinema.open) return;
+  if (!card.isConnected || !rowsWrap.contains(card) || shelfCinemaBlocked()) return;
+  // Still the card the viewer is on, by focus or by pointer.
+  if (!(card.matches(':hover') || card.contains(document.activeElement))) return;
+  const meta = CARD_META.get(card);
+  if (!meta || !ratingAllowed(meta.contentRating)) return;
+  const gen = (shelfCinema.gen += 1);
+  shelfCinema.open = true;
+  shelfCinema.meta = meta;
+  shelfCinema.top = card.getBoundingClientRect().top;
+  paintShelfCinemaWords(meta);
+  shelfCinemaLayer.hidden = false;
+  // Flush, so the fade has an opacity:0 to start from (see the same note in
+  // attachHoverTrailer).
+  void shelfCinemaLayer.offsetWidth;
+  shelfCinemaLayer.classList.add('open');
+  // One moving picture at a time: the band's trailer waits behind the cinema.
+  if (homeHeroVideo && !homeHeroVideo.paused) {
+    try { homeHeroVideo.pause(); } catch (e) {}
+    shelfCinema.resumeBand = true;
+  }
+  console.log(`[cinema] open for ${meta.id}`);
+  telemetry('nav_action', { action: 'shelf_cinema', from: 'home' });
+
+  const reduced = !!(window.BlazingCaps && window.BlazingCaps.prefersReducedMotion());
+  const inCard = CARD_TRAILERS.get(card);
+  if (!reduced && inCard && inCard.video && inCard.video.isConnected) {
+    // The card's own trailer, moved — not restarted.
+    shelfCinema.borrowed = inCard;
+    shelfCinema.video = inCard.video;
+    shelfCinema.url = inCard.url;
+    $('#shelf-cinema-video').replaceChildren(inCard.video);
+    inCard.video.classList.add('playing');
+    const p = inCard.video.play();
+    if (p && p.catch) p.catch(() => {});
+  } else if (!reduced) {
+    startShelfCinemaTrailer(meta, gen);
+  }
+
+  // The catalog meta is often missing its synopsis; fill it as the hero does.
+  fetchFullMeta(meta).then((full) => {
+    if (gen !== shelfCinema.gen || !shelfCinema.open) return;
+    mergeFullMeta(meta, full);
+    if (!ratingAllowed(meta.contentRating)) { closeShelfCinema('rating'); return; }
+    paintShelfCinemaWords(meta);
+  }).catch(() => {});
+}
+
+/** The Home hero's trailer for a card that was not playing one of its own. */
+async function startShelfCinemaTrailer(meta, gen) {
+  const live = () => gen === shelfCinema.gen && shelfCinema.open;
+  await fetchFullMeta(meta).then((full) => mergeFullMeta(meta, full)).catch(() => {});
+  if (!live()) return;
+  const ytId = meta.trailerYt || await fleetTrailerYtId(meta);
+  if (!ytId || !live()) return;
+  const caps = window.BlazingCaps ? await window.BlazingCaps.probe() : null;
+  if (!live()) return;
+  const url = window.BlazingCaps
+    ? window.BlazingCaps.trailerUrl(FLEET_BASE, ytId, caps)
+    : `${FLEET_BASE}/trailer/play/${encodeURIComponent(ytId)}?muxed=1&c=mp4&h=480`;
+  const made = makeTrailerVideo(url);
+  made.video.addEventListener('playing', () => {
+    if (live()) made.video.classList.add('playing');
+  }, { once: true });
+  made.video.addEventListener('error', () => made.video.classList.remove('playing'), { once: true });
+  shelfCinema.own = made;
+  shelfCinema.video = made.video;
+  shelfCinema.url = url;
+  $('#shelf-cinema-video').replaceChildren(made.video);
+  const p = made.video.play();
+  if (p && p.catch) p.catch(() => {});
+}
+
+/**
+ * End the dwell, and the cinema if it is up. `reason` is logged, and 'back'
+ * keeps the card as the dismissed one: focus is still on it, and the cinema
+ * must not come straight back while the pointer moves over its children.
+ */
+function closeShelfCinema(reason) {
+  clearTimeout(shelfCinema.timer);
+  shelfCinema.timer = null;
+  const card = shelfCinema.card;
+  if (shelfCinema.open) {
+    shelfCinema.open = false;
+    shelfCinema.gen += 1;
+    const video = shelfCinema.video;
+    const meta = shelfCinema.meta;
+    const at = video ? Number(video.currentTime) : 0;
+    shelfCinemaCarry = video && shelfCinema.url && meta
+      ? { id: meta.id, url: shelfCinema.url, time: Number.isFinite(at) ? at : 0, until: Date.now() + 30000 }
+      : null;
+    const borrowed = shelfCinema.borrowed;
+    if (borrowed && video) {
+      video.classList.remove('playing');
+      // Back into the card it came from, if that card still holds it — the
+      // in-card preview carries on, and the card's own stop() tears it down
+      // when focus or the pointer leaves, as it always has.
+      if (card && card.isConnected && CARD_TRAILERS.get(card) === borrowed && card.contains(borrowed.wrap)) {
+        borrowed.wrap.appendChild(video);
+        const p = video.play();
+        if (p && p.catch) p.catch(() => {});
+      } else {
+        try { video.pause(); } catch (e) {}
+        video.remove();
+        try { borrowed.destroy(); } catch (e) {}
+      }
+    } else if (shelfCinema.own) {
+      try { shelfCinema.own.destroy(); } catch (e) {}
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch (e) {}
+      video.remove();
+    }
+    $('#shelf-cinema-video').replaceChildren();
+    shelfCinemaLayer.classList.remove('open');
+    shelfCinemaLayer.hidden = true;
+    if (shelfCinema.resumeBand && homeHeroVideo && homeHeroVideo.getAttribute('src') && state.route === 'home') {
+      const p = homeHeroVideo.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+    console.log(`[cinema] closed (${reason})`);
+  }
+  shelfCinema.resumeBand = false;
+  shelfCinema.video = null;
+  shelfCinema.own = null;
+  shelfCinema.borrowed = null;
+  shelfCinema.url = '';
+  shelfCinema.meta = null;
+  shelfCinema.card = reason === 'back' ? card : null;
+  // The band is uncovered again: its Play Now dwell may start (BLZ-0108).
+  if (reason !== 'moved') rearmHomeWarm();
+}
+
+/**
+ * What the cinema was playing for this title, taken once, for the detail
+ * trailer to carry on from (startDetailTrailer). 30 s, then it is stale.
+ */
+function takeShelfCinemaCarry(meta) {
+  const carry = shelfCinemaCarry;
+  if (!carry || !meta || carry.id !== meta.id || Date.now() > carry.until) return null;
+  shelfCinemaCarry = null;
+  return carry;
+}
+
+/* Delegated, so every row Home ever draws is covered — Continue Watching,
+   SDUI rows and the catalog shelves alike — without a listener per card. */
+if (rowsWrap && shelfCinemaLayer) {
+  rowsWrap.addEventListener('focusin', (event) => {
+    const card = cardOf(event.target);
+    if (card) armShelfCinema(card);
+  });
+  rowsWrap.addEventListener('mouseover', (event) => {
+    const card = cardOf(event.target);
+    if (!card || (event.relatedTarget && card.contains(event.relatedTarget))) return;
+    // A REAL move. When the page scrolls under a still pointer the browser
+    // re-reports what is under it, with no movement; that must not steal the
+    // dwell from the card the remote has focused.
+    if (!event.movementX && !event.movementY) return;
+    armShelfCinema(card);
+  });
+  const leave = (event) => {
+    const card = cardOf(event.target);
+    if (!card || card !== shelfCinema.card) return;
+    if (event.relatedTarget && card.contains(event.relatedTarget)) return;
+    closeShelfCinema('left');
+  };
+  rowsWrap.addEventListener('focusout', leave);
+  rowsWrap.addEventListener('mouseout', leave);
+  // Scrolling the card away ends it. Measured on the card, not on scrollY:
+  // a row that loads above it shifts scrollY through scroll anchoring while
+  // the card stays exactly where the viewer sees it.
+  window.addEventListener('scroll', () => {
+    if (!shelfCinema.open || !shelfCinema.card) return;
+    if (Math.abs(shelfCinema.card.getBoundingClientRect().top - shelfCinema.top) > 24) closeShelfCinema('scroll');
+  }, { passive: true });
+}
+
 /**
  * Every card carries the hero-expansion markup, always — buildCard() never
  * branches on which row it's headed for. A .row-hero ancestor is what makes
@@ -3099,6 +3382,7 @@ function attachHoverTrailer(card, meta) {
 function buildCard(meta, onSelect) {
   const card = el('button', 'card');
   card.type = 'button';
+  CARD_META.set(card, meta);
   card.setAttribute('aria-label', `View ${meta.name}`);
   const image = el('img', 'card-image');
   image.loading = 'lazy';
@@ -3862,6 +4146,9 @@ function setDetailCopy(text) {
  * because that is the part Markus asked to keep.
  */
 function openDetail(meta, opts) {
+  // The shelf cinema gives way to the sheet; startDetailTrailer() carries its
+  // trailer on from the same second (BLZ-0110).
+  closeShelfCinema('detail');
   if (!ratingAllowed(meta.contentRating)) return showToast('This title is not available for this profile.', 'error');
   state.selected = meta;
   $('#detail-verification')?.replaceChildren();
@@ -5587,6 +5874,7 @@ function needsForbiddenHeader(headers) {
 let playerHeaders = {};
 
 function openPlayer(title, rawUrl, opts) {
+  closeShelfCinema('player');
   window.BlazingMediaLibrary?.pause();
   // CLEARED ON EVERY CALL, and re-set only by the episode row that pressed
   // Play. This is the whole of auto-next's "is this even the thing the queue
@@ -6372,7 +6660,10 @@ async function startDetailTrailer(meta) {
   const heroSame = () => homeHeroVideo && homeHeroMeta
     && (homeHeroMeta === meta || (homeHeroMeta.id && homeHeroMeta.id === meta.id))
     && homeHeroVideo.getAttribute('src') && homeHeroVideo.currentTime > 1;
-  const carried = heroSame() ? homeHeroVideo.getAttribute('src') : '';
+  // Or the SHELF CINEMA was playing it a moment ago (BLZ-0110): same file,
+  // same second. Taken once; the cinema already closed when the sheet opened.
+  const fromCinema = heroSame() ? null : takeShelfCinemaCarry(meta);
+  const carried = heroSame() ? homeHeroVideo.getAttribute('src') : (fromCinema ? fromCinema.url : '');
   const url = carried || await resolveTrailerUrl(meta);
   if (!url) return;
   // The dialog may have been closed, or moved to another title, while yt-dlp ran.
@@ -6382,7 +6673,7 @@ async function startDetailTrailer(meta) {
   detailTrailerDestroy = made.destroy;
   if (carried) {
     // Read as late as possible: the hero kept playing while this was built.
-    const from = heroSame() ? homeHeroVideo.currentTime : 0;
+    const from = fromCinema ? fromCinema.time : (heroSame() ? homeHeroVideo.currentTime : 0);
     if (from > 1) {
       video.addEventListener('loadedmetadata', () => {
         try { video.currentTime = from; } catch (e) {}
@@ -7479,6 +7770,23 @@ document.addEventListener('keydown', (event) => {
   // key event, nothing closed it, and nothing closed the player or drawer
   // either. Without this, a remote user who opens a title has no way back.
   const isBack = event.key === 'Escape' || event.key === 'Back' || event.key === 'GoBack' || event.keyCode === 461;
+  // THE SHELF CINEMA FIRST (BLZ-0110). Nothing else can be open under it, and
+  // Back gives the row back with focus still on the card. A media Play key on
+  // a READY film is Play Now, as Play/Pause is on the Apple TV.
+  if (shelfCinema.open) {
+    if (isBack || event.keyCode === 10009) {
+      event.preventDefault();
+      closeShelfCinema('back');
+      return;
+    }
+    const isPlay = event.key === 'MediaPlayPause' || event.key === 'MediaPlay'
+      || event.keyCode === 415 || event.keyCode === 179 || event.keyCode === 10252;
+    if (isPlay && shelfCinemaReady(shelfCinema.meta)) {
+      event.preventDefault();
+      playNowFromHero(shelfCinema.meta);
+      return;
+    }
+  }
   if (!isBack) return;
   // TOPMOST FIRST. The filmography and the company catalogue both sit OVER the
   // detail sheet, so "close the detail sheet" is the wrong answer while one of

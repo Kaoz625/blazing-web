@@ -655,6 +655,55 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .home-hero-mute { right: 14px; bottom: 16px; }
 }
 
+/* THE SHELF CINEMA (BLZ-0110, app.js). The Home hero's composition over the
+   whole viewport: the same still, the same two washes (.home-hero-scrim), the
+   same words at the same width. Roku enterShelfCinema, Apple TV ShelfCinema.
+
+   z-index 50: over the sticky top bar (20), under the player (60) and the
+   toasts (80). pointer-events none, and nothing in it can take focus — the card
+   under it keeps both, which is the whole design (see app.js). The page colour
+   behind the picture, so no row shows through a still that has not loaded. */
+.shelf-cinema {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  background: var(--bg);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms cubic-bezier(.215, .61, .355, 1);
+}
+.shelf-cinema.open { opacity: 1; }
+.shelf-cinema-media { position: absolute; inset: 0; z-index: 0; }
+.shelf-cinema-art,
+.shelf-cinema-video video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+}
+/* Invisible until it paints frames, exactly as .home-hero-video: a trailer
+   that 404s or stalls leaves the still, never a black hole. */
+.shelf-cinema-video video { opacity: 0; transition: opacity 700ms ease; }
+.shelf-cinema-video video.playing { opacity: 1; }
+.shelf-cinema-content {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: min(900px, 100%);
+  padding: 0 24px max(40px, 7vh);
+}
+/* Faces, not buttons. Same pill as the hero's buttons; a span has no default
+   display, so it is given the one a <button> has. */
+.shelf-cinema-pill { display: inline-flex; align-items: center; }
+.shelf-cinema-pill.secondary-button { color: #fff; }
+.shelf-cinema-pill[hidden] { display: none; }
+
 /* NO MOVING PICTURE AT ALL when the viewer has asked for none. This is the
    whole rule, not a slower fade: app.js checks the same media query before it
    ever requests a trailer, so under `reduce` the fleet is never called and the
@@ -663,6 +712,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .home-hero-video { display: none; }
   .home-hero-video.playing { opacity: 0; }
+  .shelf-cinema { transition: none; }
+  .shelf-cinema-video { display: none; }
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
