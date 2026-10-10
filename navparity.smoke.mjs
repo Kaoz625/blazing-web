@@ -53,7 +53,8 @@ const META = (n, pre) => ({
   })),
 });
 
-// All destinations, in nav order. `heading: false` is the ONE deliberate exemption.
+// All destinations, in nav order. `heading: false` marks the deliberate exemptions
+// (Search, and Live TV since BLZ-0113 — each says why).
 const VIEWS = [
   { id: 'home', heading: 'Home' },
   { id: 'movies', heading: 'Movies' },
@@ -79,10 +80,13 @@ const VIEWS = [
   // book/audio room — YouTube is neither, so naming it there would move a
   // number that means something else.
   { id: 'youtube', heading: true },
-  // `true`, not 'Live TV', for the same reason as YouTube right above: a string
-  // heading also joins the `titles` set counted at the end, and that count is
-  // the BROWSE routes plus the book/audio room. Live TV is neither.
-  { id: 'livetv', heading: true },
+  // The SECOND deliberate exemption (BLZ-0113, 10 Oct 2026). Live TV is drawn
+  // in binged's layout (DESIGN-V2.md §2.14 in roku channels): its rail is the
+  // header, the first row title or the league chips sit at y 128, and a page
+  // title would push every row down a line on a screen measured without one.
+  // The view still carries an h1 for screen readers (.sr-only), which is why
+  // the measured, VISIBLE heading reads back empty.
+  { id: 'livetv', heading: false },
   { id: 'trailers', heading: true },
   { id: 'requests', heading: true },
   { id: 'education', heading: true },
