@@ -747,6 +747,27 @@
     return PICTURE_MODES[(i + 1) % PICTURE_MODES.length];
   }
 
+  /**
+   * §2.14.7 LEFT/RIGHT in the player: the previous/next FEED of the channel
+   * (a game's home and away broadcasts, a network's backup streams), wrapping.
+   * Null when there is nothing to switch to — one feed, or a count not known.
+   */
+  function nextFeed(feed, step, feeds) {
+    const count = Number(feeds);
+    if (!Number.isInteger(count) || count < 2) return null;
+    const at = Number.isInteger(feed) && feed >= 0 && feed < count ? feed : 0;
+    return wrap(at, step, count);
+  }
+
+  /** The overlay's feed chip: "Feed 2/5 · Yankees". Empty for a one-feed channel. */
+  function feedLabel(feed, feeds, label) {
+    const count = Number(feeds);
+    if (!Number.isInteger(count) || count < 2) return '';
+    const at = Number.isInteger(feed) && feed >= 0 && feed < count ? feed : 0;
+    const name = text(label);
+    return name ? `Feed ${at + 1}/${count} · ${name}` : `Feed ${at + 1}/${count}`;
+  }
+
   /* ── B23. The grid maths (GuideTimeline.slots, clause for clause) ── */
 
   /** The window: the current half hour, and `minutes` from it. */
@@ -2579,6 +2600,10 @@
     observer: null,
     keysWired: false,
     programme: null,
+    feed: 0,         // the feed the playing ticket was minted for (0-based)
+    feeds: 0,        // how many the fleet says the channel has (/live/ticket)
+    label: '',       // that feed's name, when the fleet has one
+    wantFeed: null,  // a feed asked for and not answered yet (fast LEFT/RIGHT)
   };
 
   function playerNode() { return byId('player'); }
@@ -2599,22 +2624,40 @@
     tune(index, true);
   }
 
-  async function tune(index, first) {
+  /**
+   * Mint a ticket and hand it to the player. `feed` is null for a new channel
+   * (the fleet picks feed 0 and says how many there are) and a number for a
+   * LEFT/RIGHT on the channel already playing (/live/ticket/:id?feed=N,
+   * blazing-fleet 6d0c503).
+   */
+  async function tune(index, first, feed = null) {
     const ch = live.channels[index];
     if (!ch) return;
     const gen = ++live.gen;
+    const sameChannel = feed !== null && index === live.index;
     live.index = index;
     live.programme = ch.now || null;
-    if (!first) showOverlay('Connecting…');
+    if (!sameChannel) { live.feed = 0; live.feeds = 0; live.label = ''; }
+    live.wantFeed = sameChannel ? feed : null;
+    if (sameChannel) showOverlay(`Switching to feed ${feed + 1}/${live.feeds}…`);
+    else if (!first) showOverlay('Connecting…');
     else toast(`Tuning ${firstLine(ch)}…`);
-    const ticket = await liveFetch(`/live/ticket/${encodeURIComponent(ch.id)}`);
+    const ticket = await liveFetch(`/live/ticket/${encodeURIComponent(ch.id)}`, sameChannel ? { feed } : {});
     if (gen !== live.gen) return;
+    live.wantFeed = null;
     if (!ticket || !plainText(ticket.url)) {
       const why = storedCredentials() ? `${firstLine(ch)} isn't working right now.` : NO_PROFILE_COPY;
       if (first || !live.active) toast(why);
-      else showOverlay(`${why} ▲▼ for another channel.`);
+      else showOverlay(`${why} ${sameChannel ? '◀▶ for another feed, ' : ''}▲▼ for another channel.`);
       return;
     }
+    const feeds = intOf(ticket.feeds);
+    if (feeds !== null && feeds > 0) live.feeds = feeds;
+    const got = intOf(ticket.feed);
+    live.feed = got !== null && got >= 0 ? got : (sameChannel ? feed : 0);
+    live.label = plainText(ticket.label);
+    // A feed the channel no longer has comes back as feed 0, and says so.
+    const note = sameChannel && live.feed !== feed ? `Feed ${feed + 1} is gone — back to feed ${live.feed + 1}.` : '';
     if (!window.BlazingPlayer || typeof window.BlazingPlayer.open !== 'function') {
       toast('The player is not ready yet. Try again in a moment.');
       return;
@@ -2627,7 +2670,7 @@
     if (!player || player.hidden) { live.active = false; return; }
     enterLive();
     applyPicture();
-    showOverlay('');
+    showOverlay(note);
     scheduleStopReread();
   }
 
@@ -2635,6 +2678,10 @@
     const player = playerNode();
     if (!player) return;
     live.active = true;
+    // "Tuning ESPN…" has done its job: the overlay says it from here, and the
+    // toast would otherwise sit on top of the overlay's key hints.
+    const { toast: note } = refs();
+    if (note) { clearTimeout(timers.toast); note.hidden = true; }
     player.classList.add('lt-live');
     ensureOverlay();
     if (!live.keysWired) {
@@ -2717,8 +2764,16 @@
     }
     const chips = element('div', 'lt-ov-chips');
     chips.appendChild(element('span', 'lt-ov-chip', `${live.index + 1}/${live.channels.length} · ${live.row}`));
+    const feedChip = feedLabel(live.feed, live.feeds, live.label);
+    if (feedChip) {
+      const node = element('span', 'lt-ov-chip lt-ov-feed', feedChip);
+      node.dataset.feed = String(live.feed);
+      chips.appendChild(node);
+    }
     chips.appendChild(element('span', 'lt-ov-chip', PICTURE_LABEL[pictureMode()]));
-    chips.appendChild(element('span', 'lt-ov-hint', '▲▼ channel · OK pause · MENU (M) picture'));
+    chips.appendChild(element('span', 'lt-ov-hint', feedChip
+      ? '▲▼ channel · ◀▶ feed · OK pause · MENU (M) picture'
+      : '▲▼ channel · OK pause · MENU (M) picture'));
     panel.appendChild(chips);
     overlay.appendChild(panel);
     if (note) overlay.appendChild(element('p', 'lt-ov-note', note));
@@ -2804,12 +2859,17 @@
       return;
     }
     if (key === 'left' || key === 'right') {
-      // Feeds: the web is handed ONE stream per ticket (/live/ticket picks the
-      // first candidate). Choosing another needs a fleet change — see the
-      // BLZ-0113 report. Until then LEFT/RIGHT just bring the overlay up.
       consume(event);
-      showOverlay('');
+      stepFeed(key === 'left' ? -1 : 1);
     }
+  }
+
+  /** LEFT/RIGHT: the channel's previous/next feed, wrapping (§2.14.7). */
+  function stepFeed(delta) {
+    const from = live.wantFeed !== null ? live.wantFeed : live.feed;
+    const next = nextFeed(from, delta, live.feeds);
+    if (next === null) { showOverlay(live.feeds === 1 ? 'This channel has one feed.' : ''); return; }
+    tune(live.index, false, next);
   }
 
   /* ══════════════════════════════════════════════════════════════════════════
@@ -2944,6 +3004,8 @@
       guidePage,
       visibleSlots,
       nextPicture,
+      nextFeed,
+      feedLabel,
       GUIDE_MAX_PAGES,
     },
   };

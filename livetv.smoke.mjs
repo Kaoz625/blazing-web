@@ -94,6 +94,9 @@ const ROWS = {
     { key: 'tv-news', title: 'News', kind: 'channels', color: null, count: 1, items: [cnn] },
   ],
 };
+// ESPN has three feeds (a game's home, away and Spanish broadcasts); every
+// other channel has one.
+const FEEDS = { 'ch-espn': ['Home', 'Away', null] };
 const SPORTS = {
   leagues: [{ key: 'EPL', name: 'Premier League', count: 1 }, { key: 'NFL', name: 'NFL', count: 1 }],
   live: [leeds.game],
@@ -137,7 +140,14 @@ async function openLive({ cap = 'adult', name = 'Mark', fleet }) {
     if (url.pathname === '/accounts/me') return json(route, { account: { id: 'a' }, device: { id: 'dev-live', enrollmentStatus: 'approved' } });
     if (url.pathname === '/profiles') return json(route, { profiles: [{ id: 'p-live', name, maxRating: cap, hasPin: false, isKids: cap === 'general' }] });
     if (url.pathname.startsWith('/live/ticket/')) {
-      return json(route, { ticket: 'abc123def456abc123def456abc12345', url: '/live/play/abc123def456abc123def456abc12345', format: 'hls' });
+      // blazing-fleet 6d0c503: ?feed=N pins the ticket to one feed and the
+      // answer says { feed, feeds, label }; out of range answers feed 0.
+      const id = decodeURIComponent(url.pathname.slice('/live/ticket/'.length));
+      const labels = FEEDS[id] || [null];
+      const want = Number.parseInt(url.searchParams.get('feed') || '0', 10);
+      const feed = Number.isInteger(want) && want >= 0 && want < labels.length ? want : 0;
+      const ticket = `abc123def456abc123def456abc1234${5 + feed}`;
+      return json(route, { ticket, url: `/live/play/${ticket}`, format: 'hls', feed, feeds: labels.length, label: labels[feed] });
     }
     return fleet(route, url);
   });
@@ -289,10 +299,43 @@ try {
   ok(rec.seen.some((u) => u === '/live/ticket/ch-espn' || u.startsWith('/live/ticket/ch-espn?')), 'a ticket was minted for that channel');
   await page.waitForTimeout(300);
   ok(await page.locator('#livetv-overlay').isVisible(), 'the live overlay is up over the player');
-  await press(page, 'ArrowDown');
+  const feedChip = () => page.locator('#livetv-overlay .lt-ov-feed').innerText().catch(() => '');
+  ok(await feedChip() === 'Feed 1/3 · Home', 'the overlay says which feed of how many, from the first ticket', await feedChip());
+
+  // ── feeds: LEFT/RIGHT (§2.14.7, blazing-fleet 6d0c503) ──
+  const tickets = () => rec.seen.filter((u) => u.startsWith('/live/ticket/'));
+  await press(page, 'ArrowRight');
   await page.waitForFunction(() => window.__played.length > 1, null, { timeout: 10000 });
-  played = await page.evaluate(() => window.__played[1]);
+  await page.waitForTimeout(150);
+  ok(/^\/live\/ticket\/ch-espn\?.*feed=1\b/.test(tickets().at(-1)), 'RIGHT mints a ticket for the NEXT feed', tickets().at(-1));
+  played = await page.evaluate(() => window.__played.at(-1));
+  ok(played.url.endsWith('/live/play/abc123def456abc123def456abc12346'), 'and swaps the player to that feed\'s source', played.url);
+  ok(played.title === 'ESPN', 'on the same channel');
+  ok(await feedChip() === 'Feed 2/3 · Away', 'the overlay shows the new feed and its name', await feedChip());
+  // FEED_SHOT=/path.png keeps a picture of the overlay after the RIGHT press.
+  if (process.env.FEED_SHOT) await page.screenshot({ path: process.env.FEED_SHOT });
+  await press(page, 'ArrowLeft');
+  await page.waitForTimeout(250);
+  await press(page, 'ArrowLeft');
+  await page.waitForFunction(() => window.__played.length > 3, null, { timeout: 10000 });
+  await page.waitForTimeout(150);
+  ok(/feed=2\b/.test(tickets().at(-1)), 'LEFT from feed 1 wraps round to the last feed', tickets().at(-1));
+  ok(await feedChip() === 'Feed 3/3', 'a feed with no name is just its number', await feedChip());
+  ok(!tickets().some((u) => /token/i.test(u)), 'no ticket request carries the token');
+
+  const playedSoFar = await page.evaluate(() => window.__played.length);
+  await press(page, 'ArrowDown');
+  await page.waitForFunction((n) => window.__played.length > n, playedSoFar, { timeout: 10000 });
+  played = await page.evaluate(() => window.__played.at(-1));
   ok(played.title === 'ESPN2', 'DOWN in the player is the next channel IN THE ROW', played.title);
+  ok(!/feed=/.test(tickets().at(-1)), 'a new channel starts on its first feed (no ?feed)', tickets().at(-1));
+  await page.waitForTimeout(150);
+  ok(await page.locator('#livetv-overlay .lt-ov-feed').count() === 0, 'a one-feed channel shows no feed chip');
+  const count = tickets().length;
+  await press(page, 'ArrowRight');
+  await page.waitForTimeout(300);
+  ok(tickets().length === count, 'RIGHT on a one-feed channel asks the fleet nothing');
+  ok(/one feed/.test(await page.locator('#livetv-overlay').innerText()), 'and says the channel has one feed');
   await press(page, 'Escape');
   await page.waitForTimeout(300);
   ok(await page.locator('#player').isHidden(), 'BACK closes the player');

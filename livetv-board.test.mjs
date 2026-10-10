@@ -367,3 +367,23 @@ test('visibleSlots: clipped to the page, nothing zero-width', () => {
   const vis = rules.visibleSlots(slots, t(30), t(120));
   assert.equal(vis.map((s) => `${s.title}:${s.startMs / MIN}-${s.stopMs / MIN}`).join(' '), 'A:30-60 B:60-120');
 });
+
+/* ── §2.14.7 Feeds (LEFT/RIGHT, /live/ticket/:id?feed=N) ─────────────────── */
+
+test('nextFeed: (feed ± 1 + feeds) % feeds, nothing to switch on one feed', () => {
+  assert.equal(rules.nextFeed(0, 1, 5), 1);
+  assert.equal(rules.nextFeed(4, 1, 5), 0, 'RIGHT on the last feed wraps to the first');
+  assert.equal(rules.nextFeed(0, -1, 5), 4, 'LEFT on the first feed wraps to the last');
+  assert.equal(rules.nextFeed(2, -1, 3), 1);
+  assert.equal(rules.nextFeed(0, 1, 1), null, 'one feed: nothing to switch to');
+  assert.equal(rules.nextFeed(0, 1, 0), null, 'a count not known yet: nothing to switch to');
+  assert.equal(rules.nextFeed(9, 1, 3), 1, 'a feed outside the count is read as feed 0');
+});
+
+test('feedLabel: "Feed 2/5 · Yankees", a bare number without a name, nothing for one feed', () => {
+  assert.equal(rules.feedLabel(1, 5, 'Yankees'), 'Feed 2/5 · Yankees');
+  assert.equal(rules.feedLabel(2, 3, null), 'Feed 3/3');
+  assert.equal(rules.feedLabel(0, 3, '  '), 'Feed 1/3');
+  assert.equal(rules.feedLabel(0, 1, 'Main'), '');
+  assert.equal(rules.feedLabel(0, 0, ''), '');
+});
