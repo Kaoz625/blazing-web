@@ -88,3 +88,14 @@ defect (firetv DetailActivity.kt:879-881).
   handled. NOT CONFIRMED either way.
 - DEFECT 4 — latent; firetv DetailActivity.kt:191 has no gate at its door.
 - DEFECT 5 — structural; no server-side rating gate on the addon video routes.
+
+---
+## 10 Oct 2026 — claude-main-tvos-web, BLZ-0113: Live TV in the binged layout (branch livetv-binged ONLY)
+
+Working on: web Live TV rebuilt to binged's layout (DESIGN-V2 §2.14): rail, LOGO-card rows, Guide, Sports, Teams, Favorites, Search, live player overlay.
+Last action: pushed branch livetv-binged. NOT merged to main — main deploys GitHub Pages; Markus decides the merge.
+Next step: Markus approves -> merge livetv-binged into main. Before that: `node --test *.test.mjs` and `node livetv.smoke.mjs` (73/73) on the branch.
+Key files: livetv.js (rewritten; pure rules in window.BlazingLiveTv.rules), index.html (#livetv-view = rail + pane), styles.css (.lt-* block), sw.js (v51), livetv-board.test.mjs (new), livetv.smoke.mjs (rewritten).
+Keys: livetv.js owns arrows/OK/Back inside #livetv-view and consumes what it handles; UP from the top row is left to dpad.js. Back = Escape/Back/GoBack/461/10009. Hold OK (600 ms) or Play/Pause = favourite. While #player shows, Live TV leaves every key to the player.
+Fallbacks: /live/rows 404 -> /live/groups + /live/channels + /live/now; /live/sports 404 -> from Games Today; View All 404 -> /live/channels?group=. 404 only.
+Blockers: (1) feed LEFT/RIGHT cannot work on the web: /live/ticket/:id always takes the first candidate — needs ?feed=N plus a feed count in the ticket answer. (2) The live overlay and channel up/down run only on the HTML5 #player; the native shells (Apple TV avplayer, Android bridge, Tizen avplay, BlazeOS) hand off and never show #player.

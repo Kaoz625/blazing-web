@@ -198,7 +198,12 @@
 // play_failed names the title instead of sending an empty id. Code is
 // network-first, so this is the hygiene bump: it evicts the app.js that
 // walked 24 refused sources in silence from a device's offline fallback.
-const CACHE = 'blazing-shell-v50';
+// v51: Live TV in the binged layout (BLZ-0113, DESIGN-V2.md §2.14 in roku
+// channels): livetv.js was rewritten, index.html's #livetv-view is a rail and
+// a pane now, and styles.css holds the new .lt-* block. No new file, but all
+// three are SHELL files and they only work as a set — an offline fallback
+// holding v50's index.html has no #livetv-pane for the new livetv.js to draw in.
+const CACHE = 'blazing-shell-v51';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;

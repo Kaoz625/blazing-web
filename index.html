@@ -1013,50 +1013,28 @@
       <div id="yt-rows" class="rows yt-rows"></div>
     </section>
 
-    <!-- ── Live TV ──
-         SEARCH SITS ABOVE THE GROUP CHIPS ON PURPOSE, and it is not a style
-         choice. Browsing this index from the top is nearly worthless: one page
-         of 500 measured 470 placeholder rows ("- NO EVENT STREAMING - | 8K
-         EXCLUSIVE | BR: DISNEY+ PPV 101") to 30 real ones. Search asks the
-         SERVER, so it reaches all 38,899 channels rather than whatever paged
-         in. livetv.js hides the decoration-only rows but still reports the
-         server's own total — see its header for why under-reporting a
-         catalogue sends people hunting a bug that is not there. -->
-    <section id="livetv-view" class="view" hidden>
-      <div class="page-heading">
-        <h1>Live TV</h1>
-        <p>Every channel the household subscribes to. Search by name — CNN, BBC, CBS.</p>
-      </div>
-      <!-- B23. TWO PANELS, ONE ROUTE. Fire TV reaches its grid guide through a
-           "Guide" card on the Live TV screen and comes back with Back; this is
-           the same door, and it keeps the guide inside #livetv-view so the cap,
-           the device credential and the ticket/play pair are all shared with
-           the channel grid rather than copied into a second screen. -->
-      <div id="livetv-channels-panel">
-        <form id="livetv-search-form" class="search-form" role="search">
-          <input id="livetv-search-input" name="ltq" type="search" autocomplete="off" placeholder="Search channels" />
-          <button class="primary-button" type="submit">Search</button>
-          <button type="button" id="livetv-guide-open" class="secondary-button" aria-expanded="false">Guide</button>
-        </form>
-        <nav id="livetv-groups" class="livetv-groups" aria-label="Channel groups"></nav>
-        <p id="livetv-status" class="search-status" role="status"></p>
-        <div id="livetv-results" class="search-results livetv-results"></div>
-        <button type="button" id="livetv-load-more" class="primary-button" hidden>Load more</button>
-      </div>
-
-      <div id="livetv-guide-panel" hidden>
-        <div class="livetv-guide-bar">
-          <button type="button" id="livetv-guide-close" class="secondary-button">Channels</button>
-          <p id="livetv-guide-status" class="search-status" role="status"></p>
+    <!-- ── Live TV — DESIGN-V2 §2.14, the binged layout ──
+         Markus, 10 Oct 2026: "our live tv section should resemble this across
+         the board". A LEFT RAIL (Channels · Guide · Sports · Teams · Favorites ·
+         Search) beside one content pane, the same frame the Apple TV and the
+         Roku draw. livetv.js builds the rail's buttons and every screen inside
+         #livetv-pane, and owns the arrows, OK, hold-OK and Back inside this
+         view; dpad.js still carries focus between this view and the nav bar.
+         The heading is for screen readers and navparity.smoke.mjs: the rail is
+         the "where am I" on this screen, as it is on every television. -->
+    <section id="livetv-view" class="view livetv" hidden>
+      <div class="page-heading sr-only"><h1>Live TV</h1></div>
+      <nav id="livetv-rail" class="lt-rail" aria-label="Live TV sections">
+        <div class="lt-rail-panel">
+          <div id="livetv-rail-items" class="lt-rail-items"></div>
+          <p class="lt-rail-live" hidden><span class="lt-dot" data-dot="good"></span><span id="livetv-live-count" class="lt-rail-label"></span></p>
         </div>
-        <!-- ONE scroller, with the channel column and the time ruler pinned
-             inside it by position:sticky. Fire TV synchronises four scroll
-             views by hand because Android gives it no other way; its own
-             header records that per-row scrollers made rows jump, overlap and
-             disappear on the stick, so that machinery is the bug, not the
-             behaviour. -->
-        <div id="livetv-guide-grid" class="livetv-guide-grid"></div>
+      </nav>
+      <div class="lt-main">
+        <p id="livetv-status" class="lt-status" role="status" hidden></p>
+        <div id="livetv-pane" class="lt-pane"></div>
       </div>
+      <p id="livetv-toast" class="lt-toast" role="status" hidden></p>
     </section>
 
     <!-- SETTINGS (B32). This client had no settings screen at all — no view, no

@@ -53,6 +53,9 @@
   --accent: #FF3D47;
   --accent-strong: #E11D2B;
   --accent-glow: rgba(255,61,71, 0.35);
+  /* DESIGN-V2 §2.5 `good`: cached, positive, "live now", a followed team.
+     ONE green. Live TV (§2.14) is its first user on this client. */
+  --good: #4CD48A;
   --radius: 16px;
   /* THE FOCUS CURVE. Roku ramps focusPercent LINEARLY over its own ~0.25s
      animation and shapes the VALUE with an outCubic (Theme.brs
@@ -2755,267 +2758,653 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .yt-section { flex: 0 0 auto; }
 }
 
-/* ── Live TV ────────────────────────────────────────────────────────────────
-   A channel is not a poster. Every other grid in this app is built around
-   2:3 artwork; a live channel has a wide, transparent, often square logo and
-   a name that has to be readable because the logos are inconsistent and many
-   are missing entirely (and every http one is dropped as mixed content — see
-   livetv.js safeHttpsUrl). So these tiles are wide, the art box is fixed and
-   letterboxed with `object-fit: contain`, and the NAME is the primary label
-   rather than a caption under an image. */
-.livetv-groups {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  max-width: 1100px;
-  margin: 16px auto 4px;
-  padding: 0 var(--gutter);
+/* ── Live TV — DESIGN-V2 §2.14, the binged layout ───────────────────────────
+   A left rail (Channels · Guide · Sports · Teams · Favorites · Search) beside
+   one content track, the frame the Apple TV and the Roku draw. Every size
+   below is the contract's number on the 1920 canvas times --lt, which is 1px
+   on a 1920 screen (a television, or a full-width desktop) and shrinks with
+   the window down to 0.6px; a phone gets its own column further down. So the
+   LOGO card is 372 wide on a TV, as on every other client, and still four
+   across in a 1280 window.
+
+   Colours are the §2.5 tokens only: --surface plates, --surface-focus
+   (surfaceHi) for the raised and the selected, --focus-fill for a focused
+   row, --accent for focus, live and progress, --good for "live now" and
+   followed teams. Nothing here is grey. */
+#livetv-view,
+.lt-overlay {
+  --lt: clamp(0.6px, calc(100vw / 1920), 1px);
+  --lt-head: calc(40 * var(--lt));
+  --lt-body: calc(26 * var(--lt));
+  --lt-meta: calc(22 * var(--lt));
+  --lt-whisper: calc(18 * var(--lt));
+  --lt-trail: calc(90 * var(--lt));
+  /* §2.14.3: the guide's channel column, x 176 … 600. */
+  --lt-glead: calc(424 * var(--lt));
 }
-.livetv-chip {
-  min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: 9px 16px;
-  font-size: var(--fs-body);
-  font-weight: var(--fw-bold);
-  color: var(--muted);
-  background: var(--surface);
-  transition: color var(--settle), background var(--settle), border-color var(--settle), box-shadow var(--settle);
-}
-.livetv-chip:hover { color: #fff; background: var(--surface-focus); }
-/* aria-pressed IS the state, so the styling reads the same attribute a screen
-   reader does — there is no second `.active` class to keep in step with it. */
-.livetv-chip[aria-pressed="true"] {
-  color: #fff;
-  background: linear-gradient(140deg, var(--accent), var(--accent-strong));
-  border-color: var(--accent);
-  box-shadow: 0 6px 18px var(--accent-glow);
-}
-.livetv-chip:focus-visible, .livetv-card:focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 3px;
+#livetv-view { --lt-top: 96px; }
+#livetv-view:not([hidden]) {
+  display: grid;
+  grid-template-columns: calc(112 * var(--lt)) minmax(0, 1fr);
+  column-gap: calc(64 * var(--lt));
+  align-items: start;
+  min-height: calc(100vh - var(--lt-top));
+  padding-top: 12px;
 }
 
-.livetv-results {
-  display: grid;
-  /* 230px was sized for a tile whose second line said "News · Guide". B33 put
-     "10:31 AM Premier League Darts" there instead, and a programme nobody can
-     read is the same as no programme. */
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
-  max-width: 1100px;
-  margin: 20px auto 0;
-  padding: 0 var(--gutter);
+/* ── The rail (§2.14.1) ── */
+.lt-rail {
+  position: sticky;
+  top: var(--lt-top);
+  z-index: 15;
+  height: calc(100vh - var(--lt-top) - 12px);
 }
-.livetv-card {
-  /* `.card` is a 132px-wide 2:3 POSTER box, and `.livetv-card` never said
-     otherwise — so despite everything the comment above promises, every Live TV
-     tile has been drawn as a poster with its text column squeezed to about
-     60px. That was survivable while the second line said "News · Guide"; it is
-     not survivable now that the line says what is ON, because "10:28 AM
-     Premier League Darts" arrived as "10:28 A…". The grid track decides the
-     width of a channel tile. */
-  width: auto;
-  aspect-ratio: auto;
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  /* Three rows in the right column now: name, the on-now line, the bar. */
-  grid-template-rows: auto auto auto;
-  column-gap: 12px;
-  align-items: center;
-  /* 44px is the floor every control in this app meets; three rows beside a
-     64px logo clears it comfortably. Grown from 76px when the on-now line and
-     its progress bar became the third row (B33). */
-  min-height: 88px;
-  padding: 10px 12px;
-  text-align: left;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+.lt-rail-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(112 * var(--lt));
+  overflow: hidden;
+  border-radius: 0 calc(16 * var(--lt)) calc(16 * var(--lt)) 0;
   background: var(--surface);
-  transition: background var(--focus-ease), border-color var(--focus-ease), transform var(--focus-ease);
+  transition: width var(--settle);
 }
-.livetv-card:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.2); transform: translateY(-2px); }
-.livetv-card-art {
-  grid-row: 1 / 4;
+/* It slides OVER the content; the content never moves. A 96 px t^1.6 ramp
+   (0 -> 60%) sits on its right edge while it is open. */
+.lt-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(400 * var(--lt));
+  width: 96px;
+  background: linear-gradient(90deg, rgba(0,0,0,.6), rgba(0,0,0,.42) 20%, rgba(0,0,0,.27) 40%, rgba(0,0,0,.14) 60%, rgba(0,0,0,.05) 80%, rgba(0,0,0,0));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--settle);
+}
+.lt-rail.is-open .lt-rail-panel, .lt-rail:hover .lt-rail-panel { width: calc(400 * var(--lt)); }
+.lt-rail.is-open::after, .lt-rail:hover::after { opacity: 1; }
+.lt-rail-items { display: flex; flex-direction: column; padding-top: calc(16 * var(--lt)); }
+.lt-rail-item {
+  display: flex;
+  align-items: center;
+  width: calc(80 * var(--lt));
+  height: calc(80 * var(--lt));
+  margin: 0 0 calc(16 * var(--lt)) calc(16 * var(--lt));
+  padding: 0;
+  border: 0;
+  border-radius: calc(16 * var(--lt));
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background var(--settle), color var(--settle), width var(--settle);
+}
+.lt-rail.is-open .lt-rail-item, .lt-rail:hover .lt-rail-item { width: calc(368 * var(--lt)); }
+.lt-icon {
+  flex: 0 0 auto;
+  width: calc(40 * var(--lt));
+  height: calc(40 * var(--lt));
+  margin-left: calc(20 * var(--lt));
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lt-rail-label {
+  margin-left: calc(28 * var(--lt));
+  font-size: var(--lt-body);
+  opacity: 0;
+  transition: opacity var(--settle);
+}
+.lt-rail.is-open .lt-rail-label, .lt-rail:hover .lt-rail-label { opacity: 1; }
+.lt-rail-item[aria-current="page"] { background: var(--surface-focus); color: #fff; }
+.lt-rail-item:hover, .lt-rail-item:focus, .lt-rail-item:focus-visible { outline: none; background: var(--focus-fill); color: #fff; }
+.lt-rail-live {
+  position: absolute;
+  left: calc(50 * var(--lt));
+  bottom: calc(40 * var(--lt));
+  display: flex;
+  align-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--lt-meta);
+  white-space: nowrap;
+}
+.lt-rail-live .lt-rail-label { margin-left: calc(16 * var(--lt)); font-size: var(--lt-meta); }
+
+.lt-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: calc(12 * var(--lt));
+  height: calc(12 * var(--lt));
+  min-width: 7px;
+  min-height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.lt-dot[data-dot="accent"] { background: var(--accent); }
+.lt-dot[data-dot="good"] { background: var(--good); }
+
+/* ── The content track ── */
+.lt-main { min-width: 0; }
+.lt-status { margin: 0 var(--lt-trail) calc(24 * var(--lt)) 0; color: var(--muted); font-size: var(--lt-body); }
+.lt-pane { min-width: 0; padding-bottom: calc(64 * var(--lt)); }
+.lt-row { margin-bottom: calc(64 * var(--lt)); scroll-margin-top: var(--lt-top); }
+.lt-row-head { display: flex; align-items: center; gap: calc(16 * var(--lt)); margin-right: var(--lt-trail); }
+.lt-row-title { margin: 0; color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); line-height: 1.15; letter-spacing: -.01em; }
+.lt-row-count { color: var(--muted); font-size: var(--lt-meta); }
+.lt-track {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-top: calc(24 * var(--lt));
+  padding: calc(8 * var(--lt)) var(--lt-trail) calc(8 * var(--lt)) 0;
+  scrollbar-width: none;
+}
+.lt-track::-webkit-scrollbar, .lt-chips::-webkit-scrollbar { display: none; }
+
+/* ── The LOGO card (§2.14.2): slot 372, art 360 × 203 inset 6 ── */
+.lt-card {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: calc(372 * var(--lt));
+  margin: 0 calc(48 * var(--lt)) 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+.lt-card:focus, .lt-card:focus-visible { outline: none; }
+.lt-slot {
+  display: block;
+  padding: calc(6 * var(--lt));
+  border-radius: calc(22 * var(--lt));
+  transition: transform var(--focus-ease), box-shadow var(--focus-ease);
+}
+.lt-plate {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 48px;
-  border-radius: var(--radius);
-  background: rgba(0,0,0,.45);
-  font-size: var(--fs-body);
-  font-weight: var(--fw-bold);
-  color: var(--muted);
+  width: calc(360 * var(--lt));
+  height: calc(203 * var(--lt));
   overflow: hidden;
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface-focus);
+  transition: opacity var(--focus-ease);
 }
-/* `contain`, never `cover`: these logos are wordmarks on transparent
-   backgrounds and cropping one cuts the name in half. */
-.livetv-card-art img { width: 100%; height: 100%; object-fit: contain; }
-.livetv-card-name {
-  align-self: end;
-  font-size: var(--fs-body);
-  font-weight: var(--fw-bold);
-  color: #fff;
-  /* Provider names are long and full of separators. Two lines, then ellipsis —
-     one line hid the part that distinguishes "CA - CNN HD" from "CHL: CNN HD". */
+/* `light: true` from the fleet: a dark logo on our near-black would vanish. */
+.lt-plate.is-light { background: #EDEDED; }
+.lt-logo { display: block; width: auto; height: auto; max-width: calc(252 * var(--lt)); max-height: calc(114 * var(--lt)); object-fit: contain; }
+.lt-plate-name {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
-}
-/* B33. The "on now" line. It is ONE line whatever it holds — the programme when
-   the fleet has a listing, the country and group when it does not — and the
-   progress bar below it always takes its 4px whether or not a fill is drawn.
-   Reserving both is what stops the whole grid jumping under the pointer when a
-   guide answer lands for one card in fifty; tvOS reserves the same two boxes
-   (LiveView.swift:597-614) for the same reason. */
-.livetv-card-meta {
-  align-self: center;
-  font-size: var(--fs-caption);
+  padding: 0 calc(24 * var(--lt));
+  color: var(--text-body);
+  font-size: var(--lt-head);
   font-weight: var(--fw-semibold);
-  color: var(--muted);
-  min-height: 1.3em;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-/* A real listing is brighter than a fallback, so the eye finds what is ON. */
-.livetv-card-meta[data-live="true"] { color: #fff; }
-.livetv-card-progress {
-  grid-column: 2;
-  align-self: start;
-  height: 4px;
-  margin-top: 6px;
-  border-radius: 2px;
-  background: rgba(255,255,255,.12);
-  overflow: hidden;
-}
-.livetv-card-progress-fill {
-  display: block;
-  width: 0;
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
-}
-
-/* ── B23. The grid guide ────────────────────────────────────────────────────
-   Three hours at 8px a minute, which is Fire TV's GuideActivity number. The
-   channel column and the time ruler are pinned with position:sticky inside the
-   ONE scroller, so horizontal and vertical alignment cannot drift — there is
-   nothing to keep in step. */
-.livetv-guide-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 var(--gutter);
-}
-.livetv-guide-bar .search-status { margin: 0; padding: 0; }
-.livetv-guide-grid {
-  max-width: 1100px;
-  margin: 16px auto 0;
-  padding: 0 var(--gutter);
-  overflow: auto;
-  max-height: 68vh;
-  border-radius: var(--radius);
-}
-.livetv-guide-inner {
-  display: block;
-  width: max-content;
-  min-width: 100%;
-}
-.livetv-guide-head {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  height: 36px;
-  background: var(--bg);
-  border-bottom: 1px solid rgba(255,255,255,.12);
-}
-.livetv-guide-corner {
-  position: sticky;
-  left: 0;
-  z-index: 4;
-  flex: 0 0 190px;
-  width: 190px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: var(--fs-caption);
-  font-weight: var(--fw-bold);
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  background: var(--bg);
-}
-.livetv-guide-times { display: flex; width: var(--livetv-timeline-width); }
-.livetv-guide-time {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  padding: 0 8px;
-  font-size: var(--fs-caption);
-  font-weight: var(--fw-semibold);
-  color: var(--muted);
-  border-left: 1px solid rgba(255,255,255,.08);
-}
-.livetv-guide-row { display: flex; height: 56px; }
-.livetv-guide-name {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  flex: 0 0 190px;
-  width: 190px;
-  padding: 0 12px;
-  font-size: var(--fs-caption);
-  font-weight: var(--fw-bold);
-  color: #fff;
-  background: var(--bg);
-  border-top: 1px solid rgba(255,255,255,.06);
-  /* Provider names are long. Two lines then ellipsis, as the cards do. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
+  line-height: 1.2;
+  text-align: center;
   -webkit-box-orient: vertical;
-  overflow: hidden;
-  align-content: center;
+  -webkit-line-clamp: 2;
 }
-.livetv-guide-track { display: flex; width: var(--livetv-timeline-width); }
-.livetv-guide-block {
-  flex: 0 0 auto;
+.lt-plate.is-light .lt-plate-name { color: #111; }
+.lt-progress { position: absolute; right: calc(12 * var(--lt)); bottom: calc(12 * var(--lt)); left: calc(12 * var(--lt)); height: calc(4 * var(--lt)); min-height: 3px; }
+.lt-progress-fill { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.lt-bar {
+  display: block;
+  height: calc(6 * var(--lt));
+  min-height: 3px;
+  margin: calc(4 * var(--lt)) calc(6 * var(--lt)) 0;
+  border-radius: calc(3 * var(--lt));
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--focus-ease);
+}
+.lt-cap1 {
+  display: flex;
+  align-items: center;
+  gap: calc(10 * var(--lt));
   min-width: 0;
-  height: 100%;
-  overflow: hidden;
-  padding: 6px 8px;
-  text-align: left;
-  font-size: var(--fs-caption);
-  font-weight: var(--fw-semibold);
-  color: #fff;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  transition: background var(--focus-ease), border-color var(--focus-ease);
+  margin: calc(10 * var(--lt)) calc(6 * var(--lt)) 0;
+  color: var(--text-body);
+  font-size: var(--lt-body);
+  white-space: nowrap;
 }
-.livetv-guide-block:hover { background: var(--surface-focus); border-color: rgba(255,255,255,.22); }
-.livetv-guide-block:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
-/* A filled gap is still pressable — it tunes the channel, which is the whole
-   point of a guide row with no listings in it — but it must not read as a
-   programme. */
-.livetv-guide-block[data-empty="true"] { color: var(--quiet); background: rgba(255,255,255,.03); }
+.lt-cap1-text { overflow: hidden; text-overflow: ellipsis; }
+.lt-heart { flex: 0 0 auto; width: calc(24 * var(--lt)); height: calc(24 * var(--lt)); min-width: 12px; min-height: 12px; fill: var(--accent); stroke: none; }
+.lt-cap2 {
+  display: block;
+  min-height: 1.3em;
+  margin: calc(4 * var(--lt)) calc(6 * var(--lt)) 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--lt-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lt-cap2[data-live="true"] { color: var(--accent); }
 
-@media (max-width: 640px) {
-  .livetv-results { grid-template-columns: 1fr; }
-  .livetv-guide-corner, .livetv-guide-name { flex-basis: 132px; width: 132px; }
-  .livetv-guide-grid { max-height: 60vh; }
-  .livetv-groups {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+/* §2.6, the focus law. Engagement is a class livetv.js sets while focus is
+   in the pane (a television always has something focused; a pointer often
+   does not, and a page must never sit dimmed with nothing to un-dim it). No
+   :has() — the webOS and Tizen engines this ships in do not all have it.
+     focused 1.00 / 1.00 + halo + bar · sibling in the row 0.65 / 0.93 · cold 0.45 / 0.93 */
+.lt-pane.lt-engaged .lt-slot { transform: scale(.93); }
+.lt-pane.lt-engaged .lt-plate { opacity: .45; }
+.lt-pane.lt-engaged .lt-hot .lt-plate { opacity: .65; }
+.lt-pane .lt-card:focus .lt-slot, .lt-pane .lt-card:hover .lt-slot {
+  transform: scale(1);
+  box-shadow: inset 0 0 0 calc(6 * var(--lt)) var(--accent);
+}
+.lt-pane .lt-card:focus .lt-slot .lt-plate, .lt-pane .lt-card:hover .lt-slot .lt-plate { opacity: 1; }
+.lt-card:focus .lt-bar, .lt-card:hover .lt-bar { opacity: 1; }
+.lt-card:focus .lt-cap1, .lt-card:hover .lt-cap1 { color: #fff; }
+
+/* A Games Today card: away crest — score — home crest. */
+.lt-face { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 calc(28 * var(--lt)); }
+.lt-face-mid { display: flex; flex-direction: column; align-items: center; gap: calc(8 * var(--lt)); }
+.lt-face-score { color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); white-space: nowrap; }
+.lt-face-when { color: var(--text-body); font-size: var(--lt-body); text-align: center; }
+.lt-crest { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; }
+.lt-crest img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.lt-crest-big { width: calc(96 * var(--lt)); height: calc(96 * var(--lt)); }
+.lt-crest-80 { width: calc(80 * var(--lt)); height: calc(80 * var(--lt)); }
+.lt-crest-40 { width: calc(40 * var(--lt)); height: calc(40 * var(--lt)); min-width: 20px; min-height: 20px; }
+.lt-crest-32 { width: calc(32 * var(--lt)); height: calc(32 * var(--lt)); min-width: 18px; min-height: 18px; }
+.lt-crest-abbr { color: var(--text-body); font-size: var(--lt-meta); font-weight: var(--fw-bold); }
+.lt-pill {
+  display: inline-flex;
+  align-items: center;
+  height: calc(34 * var(--lt));
+  padding: 0 calc(12 * var(--lt));
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--lt-meta);
+  font-weight: var(--fw-semibold);
+  letter-spacing: .02em;
+}
+.lt-pill[data-tone="dim"] { background: var(--surface-focus); color: var(--muted); }
+
+.lt-viewall .lt-plate { flex-direction: column; gap: calc(8 * var(--lt)); background: var(--surface); box-shadow: inset 0 0 0 2px var(--border); }
+.lt-viewall-label { color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); }
+.lt-viewall-count { color: var(--muted); font-size: var(--lt-meta); }
+
+/* View All and Search: the same cards, 4 across. */
+.lt-grid {
+  display: grid;
+  grid-template-columns: repeat(4, calc(372 * var(--lt)));
+  column-gap: calc(48 * var(--lt));
+  row-gap: calc(40 * var(--lt));
+  margin-top: calc(24 * var(--lt));
+  padding-top: calc(8 * var(--lt));
+}
+.lt-grid .lt-card { margin: 0; }
+
+/* ── Chips (§2.14.4): META pills, r16 ── */
+.lt-chips {
+  display: flex;
+  gap: calc(16 * var(--lt));
+  overflow-x: auto;
+  margin-bottom: calc(40 * var(--lt));
+  padding: calc(4 * var(--lt)) var(--lt-trail) calc(4 * var(--lt)) 0;
+  scrollbar-width: none;
+}
+.lt-chip {
+  flex: 0 0 auto;
+  height: calc(56 * var(--lt));
+  min-height: 32px;
+  padding: 0 calc(24 * var(--lt));
+  border: 0;
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+  color: var(--text-body);
+  font-size: var(--lt-meta);
+  white-space: nowrap;
+  transition: background var(--settle), color var(--settle);
+}
+.lt-chip.is-selected { background: var(--surface-focus); color: #fff; }
+.lt-chip:hover, .lt-chip:focus, .lt-chip:focus-visible { outline: none; background: var(--focus-fill); color: #fff; }
+.lt-row-head .lt-back { margin-left: auto; }
+.lt-more { margin-top: calc(32 * var(--lt)); }
+
+/* ── Sports: SCORE cards 520 × 232, 3 across, and the schedule plates ── */
+.lt-scores {
+  display: grid;
+  grid-template-columns: repeat(3, calc(520 * var(--lt)));
+  gap: calc(24 * var(--lt));
+  margin-top: calc(24 * var(--lt));
+}
+.lt-track-scores .lt-score { flex: 0 0 auto; margin-right: calc(24 * var(--lt)); }
+.lt-score {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: calc(520 * var(--lt));
+  height: calc(232 * var(--lt));
+  padding: calc(20 * var(--lt)) calc(24 * var(--lt));
+  border: 0;
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  transition: background var(--settle), box-shadow var(--focus-ease);
+}
+.lt-score:hover, .lt-score:focus, .lt-score:focus-visible {
+  outline: none;
+  background: var(--surface-focus);
+  box-shadow: inset 0 0 0 calc(6 * var(--lt)) var(--accent);
+}
+.lt-score-top { display: flex; align-items: center; gap: calc(14 * var(--lt)); color: var(--muted); font-size: var(--lt-meta); }
+.lt-score-when { color: var(--text-body); }
+.lt-score-clock { margin-left: auto; color: var(--text-body); }
+.lt-score-team { display: flex; align-items: center; gap: calc(16 * var(--lt)); color: var(--text-body); font-size: var(--lt-body); }
+.lt-score-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lt-score-pts { color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); }
+.lt-score-foot { min-height: 1.2em; overflow: hidden; color: var(--muted); font-size: var(--lt-meta); text-overflow: ellipsis; white-space: nowrap; }
+/* A game with no stream yet is dimmed to textDim (§2.14.4). */
+.lt-score.is-off .lt-score-team, .lt-score.is-off .lt-score-when, .lt-sched.is-off .lt-sched-team { color: var(--muted); }
+.lt-score.is-off .lt-crest, .lt-sched.is-off .lt-crest { opacity: .6; }
+
+.lt-sched-plate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: calc(32 * var(--lt));
+  margin: calc(24 * var(--lt)) var(--lt-trail) 0 0;
+  padding: calc(8 * var(--lt)) calc(24 * var(--lt));
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+}
+.lt-sched {
+  display: grid;
+  grid-template-columns: calc(150 * var(--lt)) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(16 * var(--lt));
+  min-height: calc(106 * var(--lt));
+  padding: calc(12 * var(--lt));
+  border: 0;
+  border-bottom: 2px solid var(--border);
+  border-radius: calc(8 * var(--lt));
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  transition: background var(--settle);
+}
+.lt-sched:nth-last-child(-n+2) { border-bottom-color: transparent; }
+.lt-sched:hover, .lt-sched:focus, .lt-sched:focus-visible { outline: none; background: var(--focus-fill); }
+.lt-sched-when { display: flex; flex-direction: column; gap: calc(4 * var(--lt)); }
+.lt-sched-day { color: var(--muted); font-size: var(--lt-meta); }
+.lt-sched-time { color: #fff; font-size: var(--lt-body); }
+.lt-sched-teams { display: flex; flex-direction: column; gap: calc(8 * var(--lt)); min-width: 0; }
+.lt-sched-team { display: flex; align-items: center; gap: calc(12 * var(--lt)); overflow: hidden; color: var(--text-body); font-size: var(--lt-body); white-space: nowrap; }
+.lt-sched-net { display: flex; align-items: center; justify-content: flex-end; gap: calc(10 * var(--lt)); max-width: calc(260 * var(--lt)); color: var(--muted); font-size: var(--lt-meta); text-align: right; }
+.lt-sched:focus .lt-sched-day, .lt-sched:focus .lt-sched-net, .lt-sched:focus .lt-sched-team { color: #fff; }
+
+/* ── Teams (§2.14.5): 120 × 120 crest plates, 8 across ── */
+.lt-crests {
+  display: grid;
+  grid-template-columns: repeat(8, calc(180 * var(--lt)));
+  column-gap: calc(30 * var(--lt));
+  row-gap: calc(32 * var(--lt));
+  margin-top: calc(24 * var(--lt));
+}
+.lt-crest-tile { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; }
+.lt-crest-tile:focus, .lt-crest-tile:focus-visible { outline: none; }
+.lt-crest-plate {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(120 * var(--lt));
+  height: calc(120 * var(--lt));
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+  transition: box-shadow var(--focus-ease), background var(--settle);
+}
+.lt-crest-tile.is-followed .lt-crest-plate { box-shadow: inset 0 0 0 calc(6 * var(--lt)) var(--good); }
+.lt-crest-tile:hover .lt-crest-plate, .lt-crest-tile:focus .lt-crest-plate { background: var(--surface-focus); box-shadow: inset 0 0 0 calc(6 * var(--lt)) var(--accent); }
+.lt-check {
+  position: absolute;
+  top: calc(-8 * var(--lt));
+  right: calc(-8 * var(--lt));
+  display: grid;
+  place-items: center;
+  width: calc(32 * var(--lt));
+  height: calc(32 * var(--lt));
+  min-width: 18px;
+  min-height: 18px;
+  border-radius: 50%;
+  background: var(--good);
+  color: var(--bg);
+  font-size: var(--lt-meta);
+  font-weight: var(--fw-bold);
+}
+.lt-crest-name { max-width: 100%; margin-top: calc(12 * var(--lt)); overflow: hidden; color: var(--text-body); font-size: var(--lt-body); text-overflow: ellipsis; white-space: nowrap; }
+.lt-crest-abbr-line { color: var(--muted); font-size: var(--lt-meta); }
+.lt-crest-tile:focus .lt-crest-name { color: #fff; }
+
+/* ── Messages, Search, the toast ── */
+.lt-message { max-width: calc(1300 * var(--lt)); padding-top: calc(16 * var(--lt)); }
+.lt-message-title { margin: 0 0 calc(16 * var(--lt)); color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); }
+.lt-message-body { margin: 0; color: var(--muted); font-size: var(--lt-body); line-height: 1.45; }
+.lt-search { display: flex; align-items: center; gap: calc(24 * var(--lt)); margin: 0 var(--lt-trail) calc(16 * var(--lt)) 0; }
+.lt-search-input {
+  width: calc(900 * var(--lt));
+  max-width: 100%;
+  height: calc(80 * var(--lt));
+  min-height: 40px;
+  padding: 0 calc(28 * var(--lt));
+  border: 2px solid var(--border);
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+  color: #fff;
+  font-size: var(--lt-body);
+}
+.lt-search-input:focus, .lt-search-input:focus-visible { outline: none; border-color: var(--accent); background: var(--surface-focus); }
+.lt-search-status { color: var(--muted); font-size: var(--lt-meta); }
+.lt-toast {
+  position: fixed;
+  bottom: calc(48px + var(--safe-bottom));
+  left: 50%;
+  z-index: 70;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  padding: calc(14 * var(--lt)) calc(28 * var(--lt));
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-focus);
+  box-shadow: inset 0 0 0 2px var(--border), 0 12px 32px rgba(0,0,0,.5);
+  color: #fff;
+  font-size: var(--lt-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* ── Guide (§2.14.3): preview on top, grid below ── */
+.lt-guide { display: flex; flex-direction: column; height: calc(100vh - var(--lt-top) - 24px); min-height: calc(640 * var(--lt)); margin-right: var(--lt-trail); }
+.lt-guide-top { display: flex; flex: 0 0 auto; height: calc(360 * var(--lt)); }
+.lt-preview {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: calc(640 * var(--lt));
+  height: calc(360 * var(--lt));
+  overflow: hidden;
+  border-radius: calc(16 * var(--lt));
+  background: #000;
+  box-shadow: inset 0 0 0 2px var(--border);
+}
+.lt-preview-art { display: flex; align-items: center; justify-content: center; width: calc(320 * var(--lt)); height: calc(120 * var(--lt)); }
+.lt-preview-art img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.lt-preview-hint { margin: calc(28 * var(--lt)) 0 0; color: var(--muted); font-size: var(--lt-whisper); }
+.lt-preview-video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; object-fit: contain; }
+.lt-details { display: flex; flex: 1; flex-direction: column; min-width: 0; margin-left: calc(64 * var(--lt)); }
+.lt-details-title {
+  display: -webkit-box;
+  margin: calc(4 * var(--lt)) 0 calc(12 * var(--lt));
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--lt-head);
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.lt-details-meta { display: flex; flex-wrap: wrap; gap: calc(14 * var(--lt)); margin: 0 0 calc(14 * var(--lt)); color: var(--text-body); font-size: var(--lt-meta); }
+.lt-live-word { color: var(--accent); font-weight: var(--fw-semibold); }
+.lt-details-desc {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-body);
+  font-size: var(--lt-body);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.lt-details-foot { display: flex; gap: calc(18 * var(--lt)); margin: auto 0 0; color: var(--muted); font-size: var(--lt-meta); }
+.lt-details-name { color: #fff; }
+.lt-guide-clock { position: relative; flex: 0 0 auto; height: calc(56 * var(--lt)); margin-top: calc(28 * var(--lt)); }
+.lt-guide-now-label { position: absolute; bottom: calc(12 * var(--lt)); left: 0; color: var(--accent); font-size: var(--lt-meta); font-weight: var(--fw-semibold); }
+.lt-guide-mark { position: absolute; bottom: calc(12 * var(--lt)); color: var(--muted); font-size: var(--lt-meta); white-space: nowrap; }
+.lt-guide-now-dot { position: absolute; bottom: calc(-6 * var(--lt)); z-index: 3; width: calc(12 * var(--lt)); height: calc(12 * var(--lt)); min-width: 7px; min-height: 7px; margin-left: calc(-6 * var(--lt)); border-radius: 50%; background: var(--accent); }
+.lt-guide-body { position: relative; flex: 1; min-height: 0; }
+.lt-guide-rows { position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; padding-top: calc(8 * var(--lt)); scrollbar-width: none; }
+.lt-guide-rows::-webkit-scrollbar { display: none; }
+.lt-guide-now-line { position: absolute; top: 0; bottom: 0; z-index: 3; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.lt-grow { display: flex; height: calc(92 * var(--lt)); min-height: 44px; margin-bottom: calc(8 * var(--lt)); }
+.lt-gch {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: calc(16 * var(--lt));
+  width: calc(408 * var(--lt));
+  min-width: 0;
+  margin-right: calc(16 * var(--lt));
+  padding: 0 calc(16 * var(--lt));
+  border-radius: calc(8 * var(--lt));
+  background: var(--surface);
+}
+.lt-gch-num { flex: 0 0 auto; width: calc(36 * var(--lt)); color: var(--muted); font-size: var(--lt-meta); }
+.lt-gch-logo { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; width: calc(120 * var(--lt)); height: calc(48 * var(--lt)); }
+.lt-gch-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.lt-gch-name { min-width: 0; overflow: hidden; color: #fff; font-size: var(--lt-body); text-overflow: ellipsis; white-space: nowrap; }
+.lt-gcells { position: relative; flex: 0 0 auto; width: calc(1224 * var(--lt)); height: 100%; }
+.lt-gcell {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 calc(20 * var(--lt));
+  overflow: hidden;
+  border: 0;
+  border-radius: calc(8 * var(--lt));
+  background: var(--surface);
+  color: var(--text-body);
+  font-size: var(--lt-body);
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--settle), color var(--settle);
+}
+.lt-gcell-title { overflow: hidden; text-overflow: ellipsis; }
+.lt-gcell.is-now { background: var(--surface-focus); color: #fff; }
+.lt-gcell.is-now::before { content: ""; flex: 0 0 auto; width: calc(10 * var(--lt)); height: calc(10 * var(--lt)); min-width: 6px; min-height: 6px; margin-right: calc(12 * var(--lt)); border-radius: 50%; background: var(--accent); }
+.lt-gcell[data-empty="true"] { color: var(--muted); }
+.lt-gcell:hover, .lt-gcell:focus, .lt-gcell:focus-visible { outline: none; background: var(--focus-fill); color: #fff; }
+.lt-gcell.is-now:focus::before, .lt-gcell.is-now:hover::before { background: #fff; }
+
+/* ── The live player overlay (§2.14.7), inside #player ── */
+.player.lt-live .player-title { visibility: hidden; }
+.lt-overlay { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.lt-overlay::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: calc(380 * var(--lt));
+  /* t^1.6 from 0 to 85%, sampled every tenth. */
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.021) 10%, rgba(0,0,0,.065) 20%, rgba(0,0,0,.124) 30%, rgba(0,0,0,.196) 40%, rgba(0,0,0,.28) 50%, rgba(0,0,0,.376) 60%, rgba(0,0,0,.48) 70%, rgba(0,0,0,.595) 80%, rgba(0,0,0,.718) 90%, rgba(0,0,0,.85) 100%);
+}
+.lt-ov-logo {
+  position: absolute;
+  top: calc(72 * var(--lt));
+  left: calc(72 * var(--lt));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(136 * var(--lt));
+  height: calc(80 * var(--lt));
+  border-radius: calc(16 * var(--lt));
+  background: var(--surface);
+}
+.lt-ov-logo.is-light { background: #EDEDED; }
+.lt-ov-logo img { max-width: calc(104 * var(--lt)); max-height: calc(56 * var(--lt)); object-fit: contain; }
+.lt-ov-logo-name { padding: 0 8px; color: #fff; font-size: var(--lt-meta); text-align: center; }
+.lt-ov-panel { position: absolute; right: calc(72 * var(--lt)); bottom: calc(70 * var(--lt)); left: calc(72 * var(--lt)); display: flex; flex-direction: column; gap: calc(14 * var(--lt)); }
+.lt-ov-line1 { display: flex; align-items: center; gap: calc(16 * var(--lt)); min-width: 0; }
+.lt-ov-line1 .lt-pill { height: calc(40 * var(--lt)); padding: 0 calc(14 * var(--lt)); }
+.lt-ov-name { overflow: hidden; color: #fff; font-size: var(--lt-head); font-weight: var(--fw-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.lt-ov-line2 { margin: 0; overflow: hidden; color: var(--text-body); font-size: var(--lt-body); text-overflow: ellipsis; white-space: nowrap; }
+.lt-ov-progress { display: flex; align-items: center; gap: calc(20 * var(--lt)); }
+.lt-ov-bar { position: relative; width: calc(600 * var(--lt)); height: calc(6 * var(--lt)); min-height: 3px; overflow: hidden; border-radius: 3px; background: rgba(255,255,255,.2); }
+.lt-ov-fill { display: block; height: 100%; background: var(--accent); }
+.lt-ov-until { color: var(--muted); font-size: var(--lt-meta); }
+.lt-ov-chips { display: flex; flex-wrap: wrap; align-items: center; gap: calc(12 * var(--lt)); }
+.lt-ov-chip { display: inline-flex; align-items: center; height: calc(40 * var(--lt)); padding: 0 calc(16 * var(--lt)); border-radius: calc(16 * var(--lt)); background: var(--surface); color: #fff; font-size: var(--lt-meta); }
+.lt-ov-hint { margin-left: calc(8 * var(--lt)); color: var(--muted); font-size: var(--lt-whisper); }
+.lt-ov-note { position: absolute; top: calc(70 * var(--lt)); left: 50%; max-width: 80%; margin: 0; padding: calc(14 * var(--lt)) calc(28 * var(--lt)); border-radius: var(--radius-pill); background: var(--surface-focus); color: #fff; font-size: var(--lt-body); transform: translateX(-50%); }
+
+/* ── A phone: the rail becomes a strip of tabs above one column ── */
+@media (max-width: 760px) {
+  #livetv-view, .lt-overlay {
+    --lt: 0.5px;
+    --lt-head: 20px;
+    --lt-body: 15px;
+    --lt-meta: 13px;
+    --lt-whisper: 12px;
+    --lt-trail: 12px;
+    --lt-glead: 132px;
   }
-  .livetv-groups::-webkit-scrollbar { display: none; }
-  .livetv-chip { flex: 0 0 auto; }
+  #livetv-view:not([hidden]) { display: block; padding-left: 12px; }
+  .lt-rail { position: static; height: auto; margin-bottom: 16px; }
+  .lt-rail::after, .lt-rail-live { display: none; }
+  .lt-rail-panel, .lt-rail.is-open .lt-rail-panel, .lt-rail:hover .lt-rail-panel { position: static; width: auto; overflow-x: auto; background: none; scrollbar-width: none; }
+  .lt-rail-items { flex-direction: row; gap: 8px; padding: 0 12px 0 0; }
+  .lt-rail-item, .lt-rail.is-open .lt-rail-item, .lt-rail:hover .lt-rail-item { flex: 0 0 auto; width: auto; height: 40px; margin: 0; padding: 0 14px 0 0; background: var(--surface); }
+  .lt-icon { width: 20px; height: 20px; margin-left: 10px; }
+  .lt-rail-label { margin-left: 8px; opacity: 1; }
+  .lt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; margin-right: 12px; }
+  .lt-grid .lt-card, .lt-grid .lt-plate { width: 100%; }
+  .lt-scores { grid-template-columns: minmax(0, 1fr); margin-right: 12px; }
+  .lt-scores .lt-score { width: 100%; }
+  .lt-score { width: 280px; height: auto; min-height: 132px; gap: 8px; }
+  .lt-sched-plate { grid-template-columns: minmax(0, 1fr); }
+  .lt-sched:nth-last-child(2) { border-bottom-color: var(--border); }
+  .lt-crests { grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 8px; margin-right: 12px; }
+  .lt-guide { height: auto; margin-right: 12px; }
+  .lt-guide-top { flex-direction: column; height: auto; }
+  .lt-preview { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+  .lt-details { margin: 12px 0 0; }
+  .lt-details-foot { margin-top: 12px; }
+  .lt-guide-mark, .lt-guide-now-dot { display: none; }
+  .lt-guide-body { min-height: 60vh; overflow-x: auto; }
+  .lt-guide-rows { position: relative; inset: auto; width: max-content; overflow: visible; }
+  .lt-gch { width: 120px; margin-right: 12px; padding: 0 8px; }
+  .lt-gch-logo { display: none; }
 }
 
 /* ============================================================
