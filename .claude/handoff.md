@@ -131,3 +131,27 @@ Blockers / needs Markus:
   add-on's /games/resolve link target (services/addon/lib/game-source-routes.js).
   Local-file play works regardless. Download/Send-to-PS5 unaffected (not fetch).
 - Which systems/cores to feature, and DEPLOY approval (branch is undeployed).
+
+---
+
+## 2026-10-14 — BLZ-0120 web emulator, phase 1 done (claude-web-emu-0120, Claude Opus 5.5)
+
+Working on: the in-browser retro emulator, moved onto main as branch `blz-0120-web-emulator`, all 27 EmulatorJS systems, wired to the add-on's play relay. NOT merged, NOT deployed (the coordinator merges and deploys).
+Last action: full `npm test` on the final commit, failing suites compared against origin/main, branch pushed.
+Next step: coordinator: `cd ~/NYCT/blazing-web && git fetch && git checkout main && git merge --ff-only origin/blz-0120-web-emulator && git push` (pages.yml gates and deploys main only).
+Key files: emulator.js (detect/verdict, TOKENS + free-text RULES, BIOS/threads/.pkg refusals, `<url>#/<raw name>`, disc hint), games.js (playButton, isRetroRow, playUrl, headPlay, playFailureText, resolveForPlay), emulator.smoke.mjs (54 checks, hermetic), index.html (#emulator-overlay, #emulator-hint), styles.css (.emulator-*), sw.js (v52), scripts/run-smokes.mjs (floor 48).
+Blockers: none for the merge.
+
+Commits on the branch (from origin/main 4de93ea):
+- 24b1b1d a57fc8c cherry-picked alone (f45253b and the old base NOT brought).
+- 8d7dea3 the 13 Oct handoff section, appended.
+- b88ce74 all 27 systems from the REAL catalog text (the old exact-token map matched 0 live rows), refusals, playPath, DESIGN-V2 overlay CSS.
+- a2bed02 the add-on relay contract (blazing a25d7b3e): HEAD before the player opens; 413/503/502/504 in plain words; 404 token = one fresh resolve; resolve on every press; raw name fragment (EmulatorJS 4.2.3 never decodes %XX); disc-loading hint.
+- d2382eb e057962 cherry-picked per Markus 14 Oct — EMPTY: main already has every line (29cf204 games.js byte-identical + games-hub case 11; 26b2805 case 7's picker press).
+- 5df9a6b emulator.smoke hermetic: its first context was POSTing heartbeats to the PRODUCTION fleet with the fixture's fake token.
+
+What cannot play here, by design, with one plain sentence in the UI (button disabled): PSP (needs SharedArrayBuffer = COOP/COEP headers; checked at run time), Sega CD, ColecoVision, 3DO, Famicom Disk System, PC Engine CD, Neo Geo (BIOS a public repo cannot ship), NoPayStation .pkg rows.
+
+Tests (MacBook, headless Comet 154): `node scripts/run-smokes.mjs emulator` 1/1 (54 checks, 3 runs in a row; mutation-tested); `node scripts/run-smokes.mjs games` 2/2 (games-hub 107 checks incl. case 7's picker press and case 11 Usenet). Full `npm test` on 5df9a6b: 38/58 passed in 881.6s (10/10 unit files pass). The SAME run on origin/main 4de93ea right after, same machine: 34/57 passed in 945.5s. 14 suites fail in both; the 6 that failed only on the branch were re-run alone on both trees: edu-play, fleet-heartbeat, youtube-play and manga pass alone on the branch; locker and notice fail alone on main too.
+
+Local test note: on this MacBook (headless Comet 154) several suites flake run to run ("Execution context was destroyed", page.goto ERR_ABORTED, timeouts), on main too; CI (Linux Chromium) is green on main. Measured: emulator.smoke's first context sent LIVE requests to the production fleet (fixed in 5df9a6b by stubbing, as games-hub does). The likely reload mechanism, inferred from the code and not observed directly: prepareProfile's addInitScript rewrites the device key in EVERY frame, so once live fleet answers changed the stored credentials, that rewrite fires a `storage` event and profile.js reloads the page. Suites without a fleet catch-all stub are exposed.
