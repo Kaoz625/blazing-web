@@ -88,3 +88,34 @@ defect (firetv DetailActivity.kt:879-881).
   handled. NOT CONFIRMED either way.
 - DEFECT 4 — latent; firetv DetailActivity.kt:191 has no gate at its door.
 - DEFECT 5 — structural; no server-side rating gate on the addon video routes.
+
+---
+
+## 2026-10-13 — In-browser retro emulator (web-emu agent, Claude Opus 4.8)
+
+Working on: play a retro ROM in the browser (phone/PC/TV), no install.
+Last action: committed + pushed branch `blz-web-emulator` (commit a57fc8c). NOT
+deployed, NOT merged (pages.yml deploys only on push to main).
+Next step: run the suite — `cd blazing-web && npm install && node scripts/run-smokes.mjs emulator`
+  (playwright is NOT installed here; the Comet harness was not run this session).
+
+Key files:
+- emulator.js (new) — window.BlazingEmulator.open/close/coreFor; EmulatorJS 4.2.3
+  in a srcdoc iframe; cores from cdn.emulatorjs.org, lazy, only on launch.
+- games.js — "Play in browser" button in openDialog (~1416), resolveForPlay (~1513);
+  resolves via the existing /games/resolve, hands the link to the player.
+- index.html — #emulator-overlay markup + deferred <script>.
+- styles.css — .emulator-* overlay (house full-screen pattern, live tokens).
+- sw.js — emulator.js in SHELL, CACHE v46 -> v47.
+- emulator.smoke.mjs (new) + run-smokes floor 43 -> 44.
+
+What I verified: node --check on every touched file; coreFor() mapping proven on
+the real emulator.js in Node (all 20 cases pass, incl. retro/zip/disc -> picker).
+What I did NOT run: the Comet/Playwright smoke suite (not installed; hub warns of
+Comet reaper collisions). emulator.smoke.mjs is written but UNEXECUTED.
+
+Blockers / needs Markus:
+- CORS: in-browser play of a CATALOG ROM needs Access-Control-Allow-Origin on the
+  add-on's /games/resolve link target (services/addon/lib/game-source-routes.js).
+  Local-file play works regardless. Download/Send-to-PS5 unaffected (not fetch).
+- Which systems/cores to feature, and DEPLOY approval (branch is undeployed).
