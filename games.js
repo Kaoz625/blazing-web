@@ -1526,29 +1526,15 @@
           + 'TorBox account to fetch it with. A source on the Direct download lane still '
           + 'works with no account at all.';
       }
-      // IN-BROWSER PLAY. A retro release whose system EmulatorJS can run gets a
-      // "Play in browser" button beside Download — no install, straight into the
-      // game on a phone, PC or TV browser. It is progressive: no emulator.js, or
-      // no system this release maps to, means no button and the screen is exactly
-      // as it was. It is shown only when the release can actually be FETCHED
-      // (`armed`), the same gate the Download button obeys: a direct/http retro
-      // release is always armed and needs no account, so this is its natural home;
-      // a release behind a debrid lane with no key cannot be fetched OR played, so
-      // offering Play there would be a dead-end press. The ROM link is resolved on
-      // press, the same /games/resolve the Download button uses.
+      // IN-BROWSER PLAY. A release on one of the 27 systems EmulatorJS runs gets
+      // a "Play in browser" button beside Download — no install, straight into
+      // the game on a phone, PC or TV browser. emulator.js decides (verdict());
+      // see playButton() below for the four answers it can give.
       const nodes = [go];
-      const playCore = armed && window.BlazingEmulator
-        && window.BlazingEmulator.coreFor({ platform: row.platform, format: row.format });
-      if (playCore) {
-        const play = el('button', 'secondary-button');
-        play.type = 'button';
-        play.id = 'game-source-play';
-        play.dataset.core = playCore;
-        play.textContent = 'Play in browser';
-        play.addEventListener('click', () => resolveForPlay(row));
-        nodes.push(play);
-      }
+      const play = playButton(row, { armed, many });
+      if (play) nodes.push(play.button);
       nodes.push(el('p', 'detail-copy', partsWhy ? `${partsWhy} ${why}` : why));
+      if (play && play.note) nodes.push(play.note);
       r.dLanes.replaceChildren(...nodes);
     }
 
@@ -1810,6 +1796,83 @@
     else r.dStatus.textContent = `${sent} of ${n} parts are queued for ${dest}. Press again to send the rest; a part already waiting is not sent twice.`;
   }
 
+  // ── in-browser play ───────────────────────────────────────────────────────
+
+  /**
+   * Is this row plainly a retro game even when it names no machine? Its
+   * platform is one of the add-on's two buckets, or its source holds nothing
+   * else (Minerva covers only `retro` and `arcade`). NOT the chip that is
+   * pressed: measured 14 Oct 2026, a search under the Retro chip also answers
+   * NYC Games' Wii, 3DS and Vita rows, because the filter picks SOURCES.
+   */
+  function isRetroRow(row) {
+    const bucket = (v) => v === 'retro' || v === 'arcade';
+    if (bucket(clean(row && row.platform).toLowerCase())) return true;
+    const sid = clean(row && row.source);
+    const source = hub.sources.find((s) => clean(s && s.id) === sid);
+    const covers = source && Array.isArray(source.platforms)
+      ? source.platforms.map((p) => clean(p).toLowerCase()).filter(Boolean) : [];
+    return covers.length > 0 && covers.every(bucket);
+  }
+
+  /**
+   * The "Play in browser" button for one release, or null for none.
+   *
+   * emulator.js verdict() gives one of four answers, and this draws each:
+   *   - a system it runs: the button, which resolves and plays on press;
+   *   - plainly retro but no machine named: the button, and the player asks
+   *     which machine before anything boots (it never guesses a core);
+   *   - a system that cannot start ON THIS PAGE (a BIOS file we cannot ship,
+   *     PSP's threads, a .pkg): the button DISABLED, with the one sentence that
+   *     says why — the house rule for a lane with no key, "dim and disabled, not
+   *     removed", and far better than a black screen after a long download;
+   *   - a machine nothing here runs: no button, and the dialog is as it was.
+   * It is also disabled when the release cannot be fetched at all (`armed`,
+   * the gate the Download button obeys — the sentence beside it already says
+   * which account is missing) and for a game in several parts, which no
+   * emulator can open one part of.
+   */
+  function playButton(row, { armed, many }) {
+    const emu = window.BlazingEmulator;
+    if (!emu || typeof emu.verdict !== 'function') return null;
+    const v = emu.verdict({
+      platform: row.platform, collection: row.collection, format: row.format, retro: isRetroRow(row),
+    });
+    if (!v.core && !v.ask) return null;
+    const button = el('button', 'secondary-button');
+    button.type = 'button';
+    button.id = 'game-source-play';
+    button.dataset.core = v.core || '';
+    button.textContent = 'Play in browser';
+    const why = clean(v.blocked)
+      || (many ? 'This game comes in parts, so it cannot play in the browser. Download it instead.' : '');
+    button.disabled = !armed || Boolean(why);
+    if (!button.disabled) button.addEventListener('click', () => resolveForPlay(row));
+    let note = null;
+    if (why) {
+      note = el('p', 'detail-copy', why);
+      note.id = 'game-source-play-why';
+      button.setAttribute('aria-describedby', note.id);
+    }
+    return { button, note };
+  }
+
+  /**
+   * `playPath` — the add-on's own copy of a resolved file, served WITH CORS
+   * (e.g. /games/play?t=<token>) — as an absolute URL on the SAME base api()
+   * calls. A plain string join, exactly the one api() does, and deliberately not
+   * `new URL(path, …)`: ADDON_BASE may carry a path prefix (a same-origin proxy
+   * such as blazingstream's /fleet), and a root-relative path resolved with
+   * new URL() lands on the host root and walks straight past it. Anything that
+   * is not one absolute path on that base is refused, so the answer can never
+   * point the player at another host.
+   */
+  function playUrl(path) {
+    const p = typeof path === 'string' ? path.trim() : '';
+    if (!p.startsWith('/') || p.startsWith('//') || /[\s\\]/.test(p)) return '';
+    return safeDownloadUrl(`${ADDON_BASE}${p}`);
+  }
+
   /**
    * PLAY IN BROWSER. Resolve the same way the Download button does — the server
    * picks the lane — but hand the link to the in-browser emulator instead of to
@@ -1820,6 +1883,11 @@
    * the http lane needs no account, so a direct retro release plays with no
    * debrid key at all. A debrid lane answers 202 "preparing" and is reported as
    * such, exactly as the Download button reports it.
+   *
+   * THE LINK THE PLAYER GETS. The emulator fetches the ROM itself, cross-origin,
+   * so the host that serves it must send CORS headers — and a debrid or file-host
+   * link usually does not. When the answer carries `playPath` (the add-on serving
+   * the same file with CORS) that is what plays; `url` is the fallback.
    */
   async function resolveForPlay(row) {
     const r = refs();
@@ -1852,19 +1920,33 @@
       return;
     }
     const url = safeDownloadUrl(res.json.url);
-    if (!url) {
+    const romUrl = playUrl(res.json.playPath) || url;
+    if (!romUrl) {
       r.dStatus.textContent = 'The add-on answered with no usable link.';
       return;
     }
+    // A host folder of several files (`parts`, see resolveAndFetch) is a set the
+    // player cannot be handed one piece of.
+    const parts = (Array.isArray(res.json.parts) ? res.json.parts : []).filter((p) => p && p.url);
+    if (parts.length > 1) {
+      r.dStatus.textContent = `This release is ${parts.length} files, so it cannot play in the browser. Use Download instead.`;
+      return;
+    }
 
+    // The ROM's real name: the answer's own `filename` when a lane sent one,
+    // else the last piece of `url`. The play path ends in "play" and names
+    // nothing, so it is never the source of the name.
+    const named = clean(res.json.filename).split(/[\\/]/).pop();
+    const fileName = (/\.[a-z0-9]{1,6}$/i.test(named) ? named : '') || fileNameFrom(url);
     const title = clean(row.title || row.name, 'Game');
     if (r.dialog && r.dialog.open) r.dialog.close();
     window.BlazingEmulator.open({
-      romUrl: url,
+      romUrl,
       title,
       platform: row.platform,
+      collection: row.collection,
       format: row.format,
-      fileName: fileNameFrom(url),
+      fileName,
     });
   }
 

@@ -25,101 +25,250 @@
  * A srcdoc iframe inherits this document's origin, so a blob: URL minted here for
  * a local file is readable inside it.
  *
- * THE ONE EXTERNAL DEPENDENCY THAT CAN FAIL. A remote ROM URL is fetched by the
+ * THE ONE EXTERNAL DEPENDENCY THAT CAN FAIL. A remote ROM is fetched by the
  * emulator cross-origin, so it needs CORS on the host that finally serves it.
- * The add-on's /games/resolve link is that host; if it does not send
- * Access-Control-Allow-Origin, the fetch fails and the watchdog below shows a
- * hint and the always-present "load a local ROM" fallback. See REPORT/TODO.
+ * /games/resolve can answer `playPath`, the add-on's own CORS-enabled copy of the
+ * file, and games.js hands that over when it is there (resolveForPlay). A plain
+ * debrid link may not allow it; the watchdog below then says so and offers the
+ * always-present "load a ROM from this device" path.
+ *
+ * WHICH ROWS GET A BUTTON — see verdict(). Every row on one of the 27 systems
+ * below does. A row that names no machine at all but is plainly retro gets one
+ * too, and the on-screen picker asks which machine it is. A row that names a
+ * machine EmulatorJS cannot run gets none. And a system that cannot start ON
+ * THIS PAGE (a BIOS we cannot ship, a browser feature the host cannot turn on)
+ * keeps its button but disabled, with one plain sentence saying why, instead of
+ * a black screen after a long download.
  * =========================================================================== */
 (() => {
   'use strict';
 
   // EmulatorJS 4.2.3, PINNED. 'stable'/'latest' would move under us; a number
   // does not. Read off data.jsdelivr.com (@emulatorjs/emulatorjs latest) and
-  // the CDN docs on 2026-10-13.
+  // the CDN docs on 2026-10-13; data/version.json on the CDN answers "4.2.3".
   const EJS_VERSION = '4.2.3';
   const EJS_DATA = `https://cdn.emulatorjs.org/${EJS_VERSION}/data/`;
 
-  // EJS_core takes a SYSTEM id and EmulatorJS picks that system's default core.
-  // The system ids and the cores behind them are off emulatorjs.org/docs4devs/cores
-  // (read 2026-10-13). `ext` holds only the file extensions that name ONE system
-  // on their own: .zip, .7z and bare disc images (.iso/.cue/.bin/.chd) are left
-  // out on purpose, because they do not, and guessing a core for them is how a
-  // player boots the wrong machine and shows a black screen.
+  // ── THE 27 SYSTEMS ─────────────────────────────────────────────────────────
+  //
+  // EJS_core takes a SYSTEM id and EmulatorJS picks that system's default core
+  // (getCores() in data/src/emulator.js, 4.2.3). `ext` holds only the file
+  // extensions that name ONE system on their own, taken from each core's own
+  // list in data/cores/cores.json: .zip, .7z and bare disc images
+  // (.iso/.cue/.bin/.chd/.pbp) are left out on purpose, because they do not, and
+  // guessing a core for them is how a player boots the wrong machine.
+  //
+  // `needs` is what stops a system starting on this page, checked 14 Oct 2026:
+  //   'bios'     the default core will not boot without a BIOS file, and a
+  //              public repo cannot ship one. Sega CD and ColecoVision say
+  //              "Required" on emulatorjs.org/docs/systems; 3DO's core (Opera)
+  //              logs "no BIOS ROM found" and runs nothing (opera_lr_opts.c).
+  //   'threads'  PSP: requiresThreads() is ["ppsspp", "dosbox_pure"] in 4.2.3, and
+  //              the docs page says it needs EJS_threads = true. Threads need
+  //              SharedArrayBuffer, which only a cross-origin-isolated page
+  //              (COOP + COEP headers) has. GitHub Pages cannot send headers, so
+  //              the check is made at run time — see isolated().
+  // NOT listed as needing one, though a docs page says "Required": DS (the
+  // EmulatorJS melonDS fork logs "Using FreeBIOS" and carries on), Lynx (Handy
+  // falls back to its internal boot ROM), PlayStation (pcsx_rearmed's HLE BIOS),
+  // Saturn (Yabause's HLE BIOS) and Amiga (PUAE's built-in AROS). Each was read
+  // in the EmulatorJS fork of that core, not assumed.
   const SYSTEMS = [
-    { core: 'nes',        label: 'NES / Famicom',            ext: ['nes', 'fds', 'unf', 'unif'] },
-    { core: 'snes',       label: 'SNES / Super Famicom',     ext: ['sfc', 'smc'] },
-    { core: 'gb',         label: 'Game Boy / Color',         ext: ['gb', 'gbc', 'dmg'] },
-    { core: 'gba',        label: 'Game Boy Advance',         ext: ['gba'] },
-    { core: 'n64',        label: 'Nintendo 64',              ext: ['n64', 'z64', 'v64'] },
-    { core: 'nds',        label: 'Nintendo DS',              ext: ['nds'] },
-    { core: 'vb',         label: 'Virtual Boy',              ext: ['vb', 'vboy'] },
+    { core: 'nes',        label: 'NES / Famicom',             ext: ['nes', 'unf', 'unif'] },
+    { core: 'snes',       label: 'SNES / Super Famicom',      ext: ['sfc', 'smc', 'swc', 'fig'] },
+    { core: 'gb',         label: 'Game Boy / Color',          ext: ['gb', 'gbc', 'dmg'] },
+    { core: 'gba',        label: 'Game Boy Advance',          ext: ['gba'] },
+    { core: 'n64',        label: 'Nintendo 64',               ext: ['n64', 'z64', 'v64'] },
+    { core: 'nds',        label: 'Nintendo DS',               ext: ['nds'] },
+    { core: 'vb',         label: 'Virtual Boy',               ext: ['vb', 'vboy'] },
     { core: 'segaMD',     label: 'Sega Genesis / Mega Drive', ext: ['md', 'gen', 'smd'] },
-    { core: 'segaMS',     label: 'Sega Master System',       ext: ['sms'] },
-    { core: 'segaGG',     label: 'Sega Game Gear',           ext: ['gg'] },
-    { core: 'sega32x',    label: 'Sega 32X',                 ext: ['32x'] },
-    { core: 'segaCD',     label: 'Sega CD',                  ext: [] },
-    { core: 'segaSaturn', label: 'Sega Saturn',              ext: [] },
-    { core: 'psx',        label: 'PlayStation',              ext: ['pbp'] },
-    { core: 'psp',        label: 'PSP',                      ext: [] },
-    { core: 'atari2600',  label: 'Atari 2600',               ext: ['a26'] },
-    { core: 'atari7800',  label: 'Atari 7800',               ext: ['a78'] },
-    { core: 'lynx',       label: 'Atari Lynx',               ext: ['lnx'] },
-    { core: 'jaguar',     label: 'Atari Jaguar',             ext: ['j64', 'jag'] },
+    { core: 'segaMS',     label: 'Sega Master System',        ext: ['sms'] },
+    { core: 'segaGG',     label: 'Sega Game Gear',            ext: ['gg'] },
+    { core: 'sega32x',    label: 'Sega 32X',                  ext: ['32x'] },
+    { core: 'segaCD',     label: 'Sega CD',                   ext: [], needs: 'bios' },
+    { core: 'segaSaturn', label: 'Sega Saturn',               ext: [] },
+    { core: 'psx',        label: 'PlayStation',               ext: [] },
+    { core: 'psp',        label: 'PSP',                       ext: [], needs: 'threads' },
+    { core: 'atari2600',  label: 'Atari 2600',                ext: ['a26'] },
+    { core: 'atari7800',  label: 'Atari 7800',                ext: ['a78'] },
+    { core: 'lynx',       label: 'Atari Lynx',                ext: ['lnx'] },
+    { core: 'jaguar',     label: 'Atari Jaguar',              ext: ['j64', 'jag'] },
     { core: 'pce',        label: 'PC Engine / TurboGrafx-16', ext: ['pce'] },
-    { core: 'ngp',        label: 'Neo Geo Pocket',           ext: ['ngp', 'ngc'] },
-    { core: 'ws',         label: 'WonderSwan',               ext: ['ws', 'wsc'] },
-    { core: 'coleco',     label: 'ColecoVision',             ext: ['col'] },
-    { core: 'c64',        label: 'Commodore 64',             ext: ['d64', 't64'] },
-    { core: 'amiga',      label: 'Amiga',                    ext: ['adf', 'adz'] },
-    { core: '3do',        label: '3DO',                      ext: [] },
-    { core: 'arcade',     label: 'Arcade',                   ext: [] },
+    { core: 'ngp',        label: 'Neo Geo Pocket',            ext: ['ngp', 'ngc'] },
+    { core: 'ws',         label: 'WonderSwan',                ext: ['ws', 'wsc'] },
+    { core: 'coleco',     label: 'ColecoVision',              ext: ['col', 'cv'], needs: 'bios' },
+    { core: 'c64',        label: 'Commodore 64',              ext: ['d64', 't64', 'g64'] },
+    { core: 'amiga',      label: 'Amiga',                     ext: ['adf', 'adz', 'dms', 'ipf'] },
+    { core: '3do',        label: '3DO',                       ext: [], needs: 'bios' },
+    { core: 'arcade',     label: 'Arcade',                    ext: [] },
   ];
 
   const CORE_SET = new Set(SYSTEMS.map((s) => s.core));
+  const SYSTEM_BY_CORE = new Map(SYSTEMS.map((s) => [s.core, s]));
 
-  // Extension -> core, built from SYSTEMS above (first system that claims it).
-  const EXT_CORE = (() => {
+  // What detect() answers. `none` is a machine no EmulatorJS 4.2.3 core runs, so
+  // no button at all. `bucket` is the add-on's `retro` token: the archive, not a
+  // machine. `variant` is a machine that runs under one of the 27 systems only
+  // with a BIOS file of its own (the Famicom Disk System under NES).
+  const NONE = Object.freeze({ none: true });
+  const BUCKET = Object.freeze({ bucket: true });
+  const hit = (core, variant = '') => Object.freeze({ core, variant });
+
+  /** ASCII, lower case, nothing but letters and digits: "Sega Genesis" -> "segagenesis". */
+  const norm = (v) => String(v == null ? '' : v).normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]/g, '');
+  /** The same, with each run of punctuation kept as ONE space, so \b can see words. */
+  const words = (v) => String(v == null ? '' : v).normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  // ── ONE-WORD TOKENS: what a `platform`, `system` or `format` field holds ──
+  //
+  // The add-on's own vocabulary, read off the live add-on on 14 Oct 2026:
+  // PLATFORMS (GET /games/sources: ps5 … nds … retro, arcade), the retro system
+  // ids (GET /games/systems: nes, fds, snes, n64, gb, gbc, gba, genesis,
+  // mastersystem, gamegear, psx, arcade, atari2600, virtualboy, pokemonmini),
+  // and the row tokens its sources send (`ps1` from NoPayStation, `psp` from the
+  // PSP Game Browser, `nds`/`arcade`/`retro` from NYC Games). Plus every
+  // EmulatorJS system id, and the common spellings of each machine.
+  const TOKENS = (() => {
+    const t = {};
+    SYSTEMS.forEach((s) => { t[norm(s.core)] = hit(s.core); });
+    const alias = {
+      nes: ['famicom', 'nintendoentertainmentsystem'],
+      snes: ['superfamicom', 'supernintendo', 'supernes', 'sfc'],
+      gb: ['gameboy', 'gbc', 'gameboycolor', 'gameboycolour'],
+      gba: ['gameboyadvance'],
+      n64: ['nintendo64'],
+      nds: ['nintendods', 'ds'],
+      vb: ['virtualboy'],
+      segaMD: ['genesis', 'megadrive', 'segagenesis', 'segamegadrive', 'md'],
+      segaMS: ['mastersystem', 'segamastersystem', 'sms'],
+      segaGG: ['gamegear', 'segagamegear', 'gg'],
+      segaCD: ['megacd', 'segamegacd'],
+      segaSaturn: ['saturn'],
+      psx: ['ps1', 'psone', 'playstation', 'playstation1'],
+      psp: ['playstationportable'],
+      atari2600: ['2600', 'vcs'],
+      atari7800: ['7800'],
+      lynx: ['atarilynx'],
+      jaguar: ['atarijaguar'],
+      pce: ['pcengine', 'turbografx', 'turbografx16', 'tg16'],
+      ngp: ['neogeopocket', 'neogeopocketcolor', 'ngpc'],
+      ws: ['wonderswan', 'wonderswancolor', 'wsc'],
+      coleco: ['colecovision'],
+      c64: ['commodore64'],
+      amiga: ['commodoreamiga'],
+      arcade: ['mame', 'fbneo', 'finalburnneo'],
+    };
+    Object.entries(alias).forEach(([core, list]) => list.forEach((w) => { t[w] = hit(core); }));
+    t.fds = hit('nes', 'fds');
+    t.famicomdisksystem = hit('nes', 'fds');
+    t.neogeo = hit('arcade', 'neogeo');
+    // The add-on's tokens for machines no EmulatorJS 4.2.3 core runs.
+    ['ps5', 'ps4', 'ps3', 'ps2', 'psvita', 'switch', 'wiiu', 'wii', 'gamecube', '3ds', 'xboxone',
+      'xbox360', 'xbox', 'dreamcast', 'triforce', 'pc', 'mac', 'linux', 'android', 'pokemonmini',
+    ].forEach((w) => { t[w] = NONE; });
+    t.retro = BUCKET;
+    return t;
+  })();
+
+  // Extension -> system, built from SYSTEMS above, plus the one variant a file
+  // extension names by itself.
+  const EXT = (() => {
     const map = {};
-    SYSTEMS.forEach((s) => s.ext.forEach((e) => { if (!map[e]) map[e] = s.core; }));
+    SYSTEMS.forEach((s) => s.ext.forEach((e) => { if (!map[e]) map[e] = hit(s.core); }));
+    map.fds = hit('nes', 'fds');
     return map;
   })();
 
-  // Loose platform/format words -> core. The catalog's `platform` is often the
-  // bucket "retro"; a specific source may still tag a row "nes", "genesis", etc,
-  // and the `format` field can name the system too. Everything is lower-cased and
-  // stripped of spaces/punctuation before lookup.
-  const TOKEN_CORE = {
-    nes: 'nes', famicom: 'nes', nintendoentertainmentsystem: 'nes',
-    snes: 'snes', superfamicom: 'snes', supernintendo: 'snes', supernes: 'snes',
-    gb: 'gb', gameboy: 'gb', gbc: 'gb', gameboycolor: 'gb',
-    gba: 'gba', gameboyadvance: 'gba',
-    n64: 'n64', nintendo64: 'n64',
-    nds: 'nds', nintendods: 'nds', ds: 'nds',
-    vb: 'vb', virtualboy: 'vb',
-    segamd: 'segaMD', genesis: 'segaMD', megadrive: 'segaMD', segagenesis: 'segaMD', md: 'segaMD',
-    sms: 'segaMS', mastersystem: 'segaMS', segamastersystem: 'segaMS',
-    gg: 'segaGG', gamegear: 'segaGG', segagamegear: 'segaGG',
-    sega32x: 'sega32x', '32x': 'sega32x',
-    segacd: 'segaCD', megacd: 'segaCD',
-    saturn: 'segaSaturn', segasaturn: 'segaSaturn',
-    psx: 'psx', ps1: 'psx', psone: 'psx', playstation: 'psx', playstation1: 'psx',
-    psp: 'psp', playstationportable: 'psp',
-    atari2600: 'atari2600', '2600': 'atari2600', vcs: 'atari2600',
-    atari7800: 'atari7800', '7800': 'atari7800',
-    lynx: 'lynx', atarilynx: 'lynx',
-    jaguar: 'jaguar', atarijaguar: 'jaguar',
-    pce: 'pce', pcengine: 'pce', turbografx: 'pce', turbografx16: 'pce', tg16: 'pce',
-    ngp: 'ngp', neogeopocket: 'ngp', ngpc: 'ngp',
-    ws: 'ws', wonderswan: 'ws', wonderswancolor: 'ws',
-    coleco: 'coleco', colecovision: 'coleco',
-    c64: 'c64', commodore64: 'c64',
-    amiga: 'amiga',
-    '3do': '3do',
-    arcade: 'arcade', mame: 'arcade', neogeo: 'arcade',
-  };
+  // ── FREE TEXT: the machine an ARCHIVE row names ───────────────────────────
+  //
+  // The add-on passes a release's own platform text through untouched, and it is
+  // never a token: "Nintendo - Nintendo Entertainment System (Headered)"
+  // (No-Intro), "Nintendo Game Boy" (TOSEC), "RA - Super Nintendo Entertainment
+  // System" (RetroAchievements), "Sega Mark III & Master System" — all measured on
+  // the live /games/search, 14 Oct 2026. NYC Games keeps platform at `retro` and
+  // names the machine in its collection instead ("NYC Games · Super Nintendo ·
+  // ZIP · archive.org"). An exact-token lookup matched NONE of those, so the
+  // Play button never showed on a real catalog row. These rules read text the
+  // way the add-on's own RETRO_RULES do (lib/game-sources.js): ASCII, lower case,
+  // punctuation to spaces, most specific first ("game boy advance" before "game
+  // boy", "super nintendo" before "nintendo entertainment system", "mega cd"
+  // and "32x" before "mega drive") — extended to all 27 systems.
+  //
+  // A TEXT THAT NAMES A MACHINE THESE RULES DO NOT KNOW GETS NO BUTTON — see
+  // detect(). Measured: the same retro search returns "IBM PC Compatibles",
+  // "Sharp X68000", "Tiger Electronics Game.com" and, under platform=arcade,
+  // TeknoParrot PC loaders ("!EXTRAS Loaders JConfig …") and Naomi GD-ROMs. A
+  // picker cannot help any of those; it would be a dead-end press. The NONE rules
+  // first name the ones a looser rule below would otherwise claim.
+  const RULES = [
+    // Not a game at all: "SPC Music … SNES" (sound files), "PlayStation Portable
+    // (UMD Video)" (films on a disc) — both measured under a retro search.
+    [/\bmusic\b|\bumd video\b/, NONE],
+    [/\bplaystation ?(2|3|4|5|vita)\b|\bps ?[2-5]\b|\bps ?vita\b/, NONE],
+    [/\bgame ?cube\b|\bwii\b|\bswitch\b|\b3ds\b|\bnintendo dsi\b|\b64 ?dd\b|\bpokemon mini\b/, NONE],
+    [/\bdreamcast\b|\bnaomi\b|\batomiswave\b|\bchihiro\b|\blindbergh\b|\btriforce\b|\bxbox\b/, NONE],
+    [/\bjaguar ?cd\b|\bcd ?32\b|\bcdtv\b|\bneo ?geo ?cd\b|\bpc ?fx\b/, NONE],
+    [/\bdisk system\b|\bfds\b/, hit('nes', 'fds')],
+    [/\bpc ?engine ?cd\b|\bturbo ?grafx ?cd\b|\bpce ?cd\b|\bsuper ?cd ?rom\b/, hit('pce', 'pcecd')],
+    [/\b(sega|mega|genesis) ?cd\b/, hit('segaCD')],
+    [/\b32x\b/, hit('sega32x')],
+    [/\bplaystation portable\b|\bpsp\b/, hit('psp')],
+    [/\bgame ?boy advance\b|\bgba\b/, hit('gba')],
+    [/\bgame ?boy\b|\bgbc\b/, hit('gb')],
+    [/\bvirtual ?boy\b/, hit('vb')],
+    [/\bsuper (famicom|nintendo)\b|\bsnes\b/, hit('snes')],
+    [/\bnintendo 64\b|\bn64\b/, hit('n64')],
+    [/\bnintendo ds\b|\bnds\b/, hit('nds')],
+    [/\bfamicom\b|\bnintendo entertainment system\b|\bnes\b/, hit('nes')],
+    [/\bmega ?drive\b|\bgenesis\b/, hit('segaMD')],
+    [/\bmaster system\b|\bmark iii\b/, hit('segaMS')],
+    [/\bgame ?gear\b/, hit('segaGG')],
+    [/\bsaturn\b/, hit('segaSaturn')],
+    [/\batari ?2600\b|\bvcs\b/, hit('atari2600')],
+    [/\batari ?7800\b/, hit('atari7800')],
+    [/\blynx\b/, hit('lynx')],
+    [/\bjaguar\b/, hit('jaguar')],
+    [/\bpc ?engine\b|\bturbo ?grafx\b|\bsuper ?grafx\b|\btg ?16\b/, hit('pce')],
+    [/\bneo ?geo ?pocket\b|\bngpc?\b/, hit('ngp')],
+    [/\bwonder ?swan\b|\bwswan\b/, hit('ws')],
+    [/\bcoleco ?vision\b/, hit('coleco')],
+    [/\bcommodore 64\b|\bc64\b/, hit('c64')],
+    [/\bamiga\b/, hit('amiga')],
+    [/\b3do\b/, hit('3do')],
+    [/\bplaystation\b|\bpsx\b|\bps ?1\b|\bps ?one\b/, hit('psx')],
+    // Neo Geo MVS/AES carts are arcade sets that FBNeo runs only beside the Neo
+    // Geo BIOS set (neogeo.zip). Same reason as the BIOS systems above.
+    [/\bneo ?geo\b/, hit('arcade', 'neogeo')],
+    // The arcade core is FBNeo. NOT the bare word "arcade": "Eggman's Arcade
+    // Repository" is TeknoParrot PC loaders, not a single FBNeo set.
+    [/\bfinal ?burn\b|\bfbneo\b|\bhb ?mame\b|\bmame\b|\bcp ?system\b|\bcps ?[123]\b/, hit('arcade')],
+    // A MAME SOFTWARE LIST names its machine by MAME's short name ("Software List
+    // ROMs (merged) wswan"). One the rules above did not catch is NOT an arcade
+    // set, so it must not fall through to the collection ("MAME") below.
+    [/\bsoftware list\b/, NONE],
+  ];
 
-  const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Formats that are never a game: MAME's artwork packs ("all_non-zipped_content
+  // gameover", format PNG) and a host's page (NYC Games, format HTML).
+  const NOT_GAME = new Set(['png', 'jpg', 'jpeg', 'gif', 'ico', 'bmp', 'webp', 'txt', 'nfo', 'pdf',
+    'html', 'htm', 'xml', 'dat', 'json', 'mp3', 'ogg', 'wav', 'flac', 'mp4', 'mkv', 'avi']);
+
+  function ruleHit(text) {
+    const w = words(text);
+    if (!w) return null;
+    for (const [re, out] of RULES) if (re.test(w)) return out;
+    return null;
+  }
+
+  /** A collection minus the parts that are host names ("archive.org", "1fichier.com"). */
+  function machineText(collection) {
+    return String(collection == null ? '' : collection).split(/[·|]/)
+      .map((s) => s.trim())
+      .filter((s) => s && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s))
+      .join(' ');
+  }
 
   /** The extension of a filename or URL, lower-cased, no dot. '' if none. */
   function extOf(nameOrUrl) {
@@ -132,35 +281,132 @@
   }
 
   /**
-   * Decide which EmulatorJS core to boot, from strongest signal to weakest:
-   *   an explicit core, then an explicit system id, then the platform word,
-   *   then the format word, then the ROM's own file extension.
-   * Returns a core string, or '' when nothing names one system for certain —
-   * which is the case the on-screen system picker exists to cover.
+   * Which system a release is for, from the strongest signal to the weakest:
+   * an explicit core, an explicit system id, the platform, then — only when the
+   * platform names no machine (the `retro` bucket, or nothing) — the collection,
+   * the format, and the ROM's own file extension.
+   *
+   * A platform that is FREE TEXT is a machine name, and the rules decide it,
+   * with one fallback: the archive's collection. Minerva files MAME sets as
+   * platform "ROMs (merged)" in collection "MAME", so the collection is the only
+   * place that one names its machine. A text neither of them knows is a machine
+   * we cannot run (NONE) — not a reason to guess from the format.
+   */
+  function detect(opts) {
+    const o = opts || {};
+    if (o.core && CORE_SET.has(o.core)) return hit(o.core);
+    if (NOT_GAME.has(norm(o.format))) return NONE;
+    const bySystem = TOKENS[norm(o.system)];
+    if (bySystem && !bySystem.bucket) return bySystem;
+    const platform = String(o.platform == null ? '' : o.platform).trim();
+    const byToken = TOKENS[norm(platform)];
+    if (byToken && !byToken.bucket) return byToken;
+    if (platform && !byToken) return ruleHit(platform) || ruleHit(machineText(o.collection)) || NONE;
+    const byCollection = ruleHit(machineText(o.collection));
+    if (byCollection) return byCollection;
+    const f = norm(o.format);
+    const byFormat = (TOKENS[f] && TOKENS[f].core ? TOKENS[f] : null) || EXT[f];
+    if (byFormat) return byFormat;
+    const byExt = EXT[extOf(o.name || o.fileName || o.romUrl)];
+    if (byExt) return byExt;
+    return byToken || {};
+  }
+
+  /**
+   * The EmulatorJS system to boot, or '' when nothing names one system for
+   * certain — which is the case the on-screen system picker exists to cover.
    */
   function coreFor(opts) {
-    const o = opts || {};
-    if (o.core && CORE_SET.has(o.core)) return o.core;
-    const bySystem = TOKEN_CORE[norm(o.system)];
-    if (bySystem) return bySystem;
-    const byPlatform = TOKEN_CORE[norm(o.platform)];
-    if (byPlatform) return byPlatform;
-    const byFormat = TOKEN_CORE[norm(o.format)] || EXT_CORE[norm(o.format)];
-    if (byFormat) return byFormat;
-    const byExt = EXT_CORE[extOf(o.name || o.fileName || o.romUrl)];
-    if (byExt) return byExt;
+    const d = detect(opts);
+    return d.none ? '' : (d.core || '');
+  }
+
+  // ── WHY A KNOWN SYSTEM CANNOT START HERE ──────────────────────────────────
+  // One plain sentence each, saying what is missing. Shown under a disabled
+  // "Play in browser" in the dialog, or in the player if it gets that far.
+  const VARIANT_WHY = {
+    fds: 'Famicom Disk System games need the Disk System BIOS file to start, and this page does not have one.',
+    pcecd: 'PC Engine CD games need a CD BIOS file to start, and this page does not have one.',
+    neogeo: 'Neo Geo games need the Neo Geo BIOS file to start, and this page does not have one.',
+  };
+  const PKG_WHY = 'This is a PlayStation Store package (.pkg). The in-browser player cannot open those, '
+    + 'so pick a copy in another format.';
+  const THREADS_WHY = 'PSP games need a browser feature this website cannot switch on, so they cannot play here yet.';
+
+  /**
+   * SharedArrayBuffer, which threaded cores need, exists only on a page served
+   * with COOP + COEP headers. GitHub Pages cannot send headers at all, so on
+   * kaoz625.github.io this is false; it is read at run time so a host that does
+   * send them gets PSP with no code change.
+   */
+  function isolated() {
+    return window.crossOriginIsolated === true && typeof window.SharedArrayBuffer === 'function';
+  }
+
+  function blockedReason(core, variant, format) {
+    if (variant && VARIANT_WHY[variant]) return VARIANT_WHY[variant];
+    if (norm(format) === 'pkg') return PKG_WHY;
+    const sys = SYSTEM_BY_CORE.get(core);
+    if (!sys) return '';
+    if (sys.needs === 'bios') return `${sys.label} games need a ${sys.label} BIOS file to start, and this page does not have one.`;
+    if (sys.needs === 'threads' && !isolated()) return THREADS_WHY;
     return '';
   }
 
-  // The app's live accent, handed to EmulatorJS so its menu matches the house
-  // look under whichever theme is active (red by default, gold under kids_warm).
-  function accentHex() {
+  /**
+   * What the Games dialog does with a release:
+   *   { core, ask: false, blocked: '' }   a Play button that boots `core`
+   *   { core, ask: false, blocked: why }  a DISABLED Play button and `why` under it
+   *   { core: '', ask: true }             a Play button; the player asks the system
+   *   { core: '', ask: false }            no Play button: not a machine we run
+   * opts: platform, collection, format (the row), and `retro` — true when the
+   * caller knows the row came from a retro archive, so that a row naming no
+   * machine at all is still plainly a retro game.
+   */
+  function verdict(opts) {
+    const o = opts || {};
+    const d = detect(o);
+    if (d.none) return { core: '', ask: false, blocked: '' };
+    if (d.core) return { core: d.core, ask: false, blocked: blockedReason(d.core, d.variant, o.format) };
+    return { core: '', ask: Boolean(d.bucket || o.retro), blocked: '' };
+  }
+
+  // A live colour token, handed to EmulatorJS so its menu and its ground match
+  // the house look under whichever theme is active (red by default, gold under
+  // kids_warm).
+  function tokenHex(name, fallback) {
     try {
-      const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-      const m = v.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-      if (m) return v;
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v)) return v;
     } catch { /* ignore */ }
-    return '#FF3D47';
+    return fallback;
+  }
+
+  /** A file name we can hand on: the last path piece, with an extension, or ''. */
+  function safeName(value) {
+    const base = String(value == null ? '' : value).split(/[\\/]/).pop().trim();
+    return /\.[a-z0-9]{1,6}$/i.test(base) ? base.slice(-180) : '';
+  }
+
+  /**
+   * THE ROM'S REAL NAME, ON THE END OF ITS URL AS A FRAGMENT: `<url>#/<name>`.
+   *
+   * EmulatorJS 4.2.3 names the file it hands the core after the LAST PATH PIECE
+   * of EJS_gameUrl — getBaseFileName() is
+   * `gameUrl.split("/").pop().split("#")[0].split("?")[0]`. The add-on's
+   * CORS copy is a path like /games/play?t=<token>, so the core would be handed
+   * a file called "play" with no extension: genesis_plus_gx tells a Master
+   * System cart from a Mega Drive one by it, and FBNeo finds an arcade game by
+   * its set name ("sf2.zip") and nothing else. A fragment is never sent to the
+   * server (neither XHR nor fetch transmits it), so the request is unchanged and
+   * the name still reaches the core. It also keys EmulatorJS's ROM cache by the
+   * real name rather than by "play".
+   */
+  function namedUrl(src, fileName) {
+    const s = String(src || '');
+    const name = safeName(fileName);
+    if (!name || !/^https?:/i.test(s)) return s;
+    return `${s.split('#')[0]}#/${encodeURIComponent(name)}`;
   }
 
   // ── overlay DOM (built once, lazily) ───────────────────────────────────────
@@ -176,7 +422,7 @@
     blobUrl: '',
     watchdog: 0,
     booted: false,
-    pending: null, // { src, title, core }
+    pending: null, // { src, title, core, variant, format, fileName }
     lastFocus: null,
     onKeydown: null,
     onMessage: null,
@@ -251,6 +497,7 @@
     status.setAttribute('role', 'status');
     state.status = status;
     setup.append(status);
+    state.picker = null;
 
     if (needSystem) {
       const label = h('p', 'emulator-setup-label', 'Choose the system');
@@ -258,11 +505,7 @@
       grid.id = 'emulator-picker';
       grid.setAttribute('role', 'group');
       grid.setAttribute('aria-label', 'Choose the system');
-      // One button per DISTINCT core, labelled by its system.
-      const seen = new Set();
       SYSTEMS.forEach((sys) => {
-        if (seen.has(sys.core)) return;
-        seen.add(sys.core);
         const b = h('button', 'secondary-button emulator-system', sys.label);
         b.type = 'button';
         b.dataset.core = sys.core;
@@ -270,7 +513,9 @@
         grid.append(b);
       });
       state.picker = grid;
-      setup.append(label, grid);
+      // Said once, in plain words: the list IS the set this page can play.
+      const unlisted = h('p', 'emulator-status detail-copy', 'If its system is not in this list, this page cannot play it.');
+      setup.append(label, grid, unlisted);
     }
 
     // Always present: load a ROM from this device.
@@ -280,7 +525,9 @@
     const input = h('input');
     input.id = 'emulator-file-input';
     input.type = 'file';
-    input.accept = '.nes,.fds,.sfc,.smc,.gb,.gbc,.gba,.n64,.z64,.v64,.nds,.md,.gen,.smd,.sms,.gg,.32x,.pce,.ngp,.ws,.wsc,.vb,.a26,.a78,.lnx,.col,.d64,.t64,.adf,.zip,.7z,.chd,.cue,.bin,.iso,.pbp';
+    const exts = new Set(SYSTEMS.flatMap((s) => s.ext));
+    ['fds', 'zip', '7z', 'rar', 'chd', 'cue', 'bin', 'iso', 'img', 'ccd', 'm3u', 'pbp', 'cso'].forEach((e) => exts.add(e));
+    input.accept = [...exts].map((e) => `.${e}`).join(',');
     input.addEventListener('change', () => {
       const f = input.files && input.files[0];
       if (f) chooseFile(f);
@@ -292,12 +539,14 @@
     setup.hidden = false;
   }
 
-  function showSetup() { if (state.setup) state.setup.hidden = false; }
   function hideSetup() { if (state.setup) state.setup.hidden = true; }
 
   function pickSystem(core) {
     if (!state.pending) state.pending = {};
     state.pending.core = core;
+    // A system picked by hand is that system: a variant read off the row (the
+    // Disk System) no longer applies. A .pkg is still a .pkg.
+    state.pending.variant = '';
     if (state.pending.src) {
       launch(state.pending);
     } else {
@@ -315,7 +564,7 @@
   }
 
   function labelForCore(core) {
-    const s = SYSTEMS.find((x) => x.core === core);
+    const s = SYSTEM_BY_CORE.get(core);
     return s ? s.label : core;
   }
 
@@ -323,12 +572,21 @@
     revokeBlob();
     state.blobUrl = URL.createObjectURL(file);
     if (!state.pending) state.pending = {};
-    state.pending.src = state.blobUrl;
-    state.pending.title = state.pending.title || file.name.replace(/\.[^.]+$/, '');
-    const core = state.pending.core || coreFor({ name: file.name });
-    if (core) {
-      state.pending.core = core;
-      launch(state.pending);
+    const p = state.pending;
+    p.src = state.blobUrl;
+    p.fileName = safeName(file.name);
+    p.format = extOf(file.name);
+    p.title = p.title || file.name.replace(/\.[^.]+$/, '');
+    // The file's own extension, when it names one system, beats whatever the
+    // player was opened on: a .gba loaded after a catalog NES row did not start
+    // is a Game Boy Advance game. A bare .zip keeps the system already picked.
+    const d = detect({ name: file.name });
+    if (d.core) {
+      p.core = d.core;
+      p.variant = d.variant || '';
+    }
+    if (p.core) {
+      launch(p);
     } else {
       renderSetup('Could not tell which system "' + file.name + '" is for. Pick it below.', { needSystem: true });
     }
@@ -344,29 +602,27 @@
   // Build the srcdoc that boots EmulatorJS for ONE ROM. Everything is inlined so
   // the iframe needs no file of its own; the only network it does is the CDN
   // loader.js and, from inside it, the cores and the ROM.
-  function frameDoc({ src, core, title }) {
-    const cfg = {
-      core,
-      gameUrl: src,
-      gameName: title || 'Game',
-      pathtodata: EJS_DATA,
-      color: accentHex(),
-    };
+  function frameDoc({ src, core, gameName, threads }) {
+    const ground = tokenHex('--bg', '#0A0A0B');
     const j = (v) => JSON.stringify(String(v));
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;}
+  html,body{margin:0;padding:0;height:100%;background:${ground};overflow:hidden;}
   #game{width:100%;height:100%;}
 </style></head><body>
 <div id="game"></div>
 <script>
   window.EJS_player = '#game';
-  window.EJS_core = ${j(cfg.core)};
-  window.EJS_gameUrl = ${j(cfg.gameUrl)};
-  window.EJS_gameName = ${j(cfg.gameName)};
-  window.EJS_pathtodata = ${j(cfg.pathtodata)};
-  window.EJS_color = ${j(cfg.color)};
+  window.EJS_core = ${j(core)};
+  window.EJS_gameUrl = ${j(src)};
+  window.EJS_gameName = ${j(gameName || 'Game')};
+  window.EJS_pathtodata = ${j(EJS_DATA)};
+  window.EJS_color = ${j(tokenHex('--accent', '#FF3D47'))};
+  // EmulatorJS paints rgb(51,51,51) behind the game by default: the grey the
+  // house banned. The page black instead.
+  window.EJS_backgroundColor = ${j(ground)};
+  ${threads ? 'window.EJS_threads = true;' : ''}
   window.EJS_startOnLoaded = true;
   window.EJS_ready = function(){ try { parent.postMessage({ __blz_emu: 'ready' }, '*'); } catch(e){} };
   window.EJS_onGameStart = function(){ try { parent.postMessage({ __blz_emu: 'start' }, '*'); } catch(e){} };
@@ -378,9 +634,18 @@
   function launch(pending) {
     const { src, core, title } = pending;
     if (!src || !core) return;
-    hideSetup();
     teardownFrame();
 
+    // A system that cannot start on this page says so, in the player, instead of
+    // downloading a ROM into a black screen.
+    const reason = blockedReason(core, pending.variant, pending.format);
+    if (reason) {
+      renderSetup(reason);
+      return;
+    }
+    hideSetup();
+
+    const blob = src.startsWith('blob:');
     const frame = document.createElement('iframe');
     frame.className = 'emulator-frame';
     frame.id = 'emulator-frame';
@@ -389,23 +654,29 @@
     // launch click is the user gesture that lets audio start.
     frame.setAttribute('allow', 'fullscreen; gamepad; autoplay');
     frame.setAttribute('allowfullscreen', 'true');
-    frame.srcdoc = frameDoc({ src, core, title });
+    frame.srcdoc = frameDoc({
+      src: blob ? src : namedUrl(src, pending.fileName),
+      core,
+      // For a blob: URL EmulatorJS names the file after EJS_gameName instead of
+      // the URL (getBaseFileName), so a local ROM keeps its extension that way.
+      gameName: blob ? (safeName(pending.fileName) || title) : title,
+      threads: (SYSTEM_BY_CORE.get(core) || {}).needs === 'threads' && isolated(),
+    });
     state.stage.append(frame);
     state.frame = frame;
     state.booted = false;
 
     if (state.titleEl) state.titleEl.textContent = title || 'Game';
 
-    // Watchdog: if nothing starts, the likeliest cause for a remote ROM is a
-    // missing CORS header on the resolve link. Say so and leave the local-file
-    // path available rather than a frozen black rectangle.
+    // Watchdog: if the emulator never comes up, the likeliest cause for a remote
+    // ROM is a link that does not allow in-browser play. Say so and leave the
+    // local-file path available rather than a frozen black rectangle.
     clearWatchdog();
     state.watchdog = window.setTimeout(() => {
       if (state.booted) return;
       renderSetup(
-        'This game is taking a while to start. If it was opened from the catalog, the '
-        + 'download link may not allow in-browser play (a CORS header on the add-on). '
-        + 'You can load a local copy of the ROM below.',
+        'This game is taking a long time to start. The link it came from may not allow '
+        + 'playing in the browser. You can load a copy of the ROM from this device below.',
         { needSystem: !core }
       );
     }, 30000);
@@ -430,8 +701,9 @@
    *   opts.romUrl   a resolved, CORS-enabled ROM/zip URL (from /games/resolve)
    *   opts.file     a File the viewer chose (alternative to romUrl)
    *   opts.title    the game's name
+   *   opts.fileName the ROM's real file name, when the URL does not carry it
    *   opts.core     an explicit EmulatorJS core/system id (optional)
-   *   opts.system / opts.platform / opts.format / opts.fileName  hints for coreFor()
+   *   opts.system / opts.platform / opts.collection / opts.format  hints for detect()
    * With no src at all it opens on the picker + local-file chooser.
    */
   function open(opts) {
@@ -440,31 +712,39 @@
     bindGlobalHandlers();
 
     state.lastFocus = document.activeElement;
+    teardownFrame();
     revokeBlob();
 
     let src = '';
+    let fileName = safeName(o.fileName);
     if (o.file instanceof File || (o.file && typeof o.file === 'object' && 'name' in o.file)) {
       state.blobUrl = URL.createObjectURL(o.file);
       src = state.blobUrl;
+      fileName = safeName(o.file.name) || fileName;
     } else if (o.romUrl) {
       src = String(o.romUrl);
     }
 
-    const title = (o.title && String(o.title)) || (o.fileName ? String(o.fileName).replace(/\.[^.]+$/, '') : 'Game');
-    const core = coreFor({
-      core: o.core, system: o.system, platform: o.platform,
-      format: o.format, name: o.fileName || o.file && o.file.name, romUrl: o.romUrl,
+    const title = (o.title && String(o.title)) || (fileName ? fileName.replace(/\.[^.]+$/, '') : 'Game');
+    const d = detect({
+      core: o.core, system: o.system, platform: o.platform, collection: o.collection,
+      format: o.format, name: fileName, romUrl: o.romUrl,
     });
 
-    state.pending = { src, title, core };
+    state.pending = {
+      src, title, fileName,
+      core: d.none ? '' : (d.core || ''),
+      variant: d.variant || '',
+      format: o.format || extOf(fileName),
+    };
     if (state.titleEl) state.titleEl.textContent = title;
 
     state.overlay.hidden = false;
     document.documentElement.classList.add('emulator-open');
 
-    if (src && core) {
+    if (src && state.pending.core) {
       launch(state.pending);
-    } else if (src && !core) {
+    } else if (src) {
       renderSetup('Choose the system this game is for.', { needSystem: true });
     } else {
       renderSetup('Load a ROM to play, or choose a system first.', { needSystem: true });
@@ -523,7 +803,7 @@
   }
 
   window.BlazingEmulator = Object.assign(window.BlazingEmulator || {}, {
-    open, close, isOpen, coreFor,
+    open, close, isOpen, coreFor, verdict,
     // Exposed for the smoke harness and for anyone wiring another entry point.
     SYSTEMS, EJS_VERSION, EJS_DATA,
   });

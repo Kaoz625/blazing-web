@@ -3590,14 +3590,17 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .games-source-item[data-kind="indexer"] .games-source-sub::first-line { color: var(--text-body); }
 
 /* ── In-browser emulator (emulator.js) ───────────────────────────────────────
-   A full-screen player for one retro ROM. It follows the house full-screen
-   pattern already used by .comic-reader and .player: fixed inset:0, z-index 60,
-   black ground, a thin bar on top and the game filling the rest. Colours come
-   from the live tokens so it tracks whatever theme is active (Blazing red by
-   default, gold under kids_warm). Mobile-first: 16px side gutter, and the
-   overlay clips its own overflow so nothing can scroll the page sideways. */
+   A full-screen player for one retro ROM: fixed inset:0, z-index 60 (the
+   .player's layer), a thin bar on top and the game filling the rest.
+   ON THE LIVE TOKENS, per DESIGN-V2.md §2.5 rather than the older comic-reader
+   look it was first copied from: the ground is `bg`, the one page black (a
+   resting #000 is the scrim colour, and the scrim is "never a resting colour");
+   the Close pill rests on `surface` like .player-close, not on a white-alpha
+   grey; the one hairline is `line`, the accent at 20%, 2px. They track the
+   active theme (red by default, gold under kids_warm). Mobile-first: 16px side
+   gutter, and the overlay clips its own overflow so nothing scrolls sideways. */
 .emulator-overlay {
-  position: fixed; inset: 0; z-index: 60; background: #000;
+  position: fixed; inset: 0; z-index: 60; background: var(--bg);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .emulator-overlay[hidden] { display: none; }
@@ -3606,8 +3609,9 @@ html.emulator-open, html.emulator-open body { overflow: hidden; }
 
 .emulator-bar {
   flex: 0 0 auto; display: flex; align-items: center; gap: 16px;
-  padding: calc(10px + var(--safe-top, 0px)) 16px 10px;
-  background: rgba(0, 0, 0, 0.85); color: #fff; font-size: var(--fs-body);
+  padding: calc(12px + var(--safe-top, 0px)) 16px 12px;
+  background: var(--bg); border-bottom: 2px solid var(--border);
+  color: var(--text); font-size: var(--fs-body);
 }
 .emulator-title {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -3616,24 +3620,24 @@ html.emulator-open, html.emulator-open body { overflow: hidden; }
 .emulator-close {
   flex: 0 0 auto; border: 0; border-radius: var(--radius-pill);
   padding: 8px 16px; min-height: 44px; cursor: pointer;
-  color: #fff; background: rgba(255, 255, 255, 0.14);
+  color: var(--text); background: var(--surface);
   font: inherit; font-weight: var(--fw-bold);
-  transition: background var(--settle, 140ms ease-out);
+  transition: background var(--settle);
 }
-.emulator-close:hover { background: rgba(255, 61, 71, 0.3); }
-.emulator-close:focus-visible { outline: 3px solid var(--accent, #FF3D47); outline-offset: 3px; }
+.emulator-close:hover { background: rgba(255, 61, 71, .3); }
+.emulator-close:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
-.emulator-stage { position: relative; flex: 1; min-height: 0; width: 100%; background: #000; }
-.emulator-frame { display: block; width: 100%; height: 100%; border: 0; background: #000; }
+.emulator-stage { position: relative; flex: 1; min-height: 0; width: 100%; background: var(--bg); }
+.emulator-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 
 /* The setup panel overlays the stage: the system picker, the local-ROM chooser,
-   and the watchdog hint all live here, centred and scrollable, never wider than
-   the screen. */
+   a refusal that says why a system cannot start here, and the watchdog hint
+   all live here, centred and scrollable, never wider than the screen. */
 .emulator-setup {
   position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 18px; padding: 24px 16px calc(24px + var(--safe-bottom, 0px));
-  background: var(--bg, #0A0A0B); color: var(--text, #f7f7f8);
+  gap: 16px; padding: 24px 16px calc(24px + var(--safe-bottom, 0px));
+  background: var(--bg); color: var(--text);
 }
 .emulator-setup[hidden] { display: none; }
 .emulator-status { max-width: 640px; margin: 0; text-align: center; color: var(--muted); line-height: 1.55; }
@@ -3643,14 +3647,14 @@ html.emulator-open, html.emulator-open body { overflow: hidden; }
   width: 100%; max-width: 760px;
 }
 .emulator-system { min-height: 44px; }
-.emulator-system[aria-pressed="true"] { outline: 2px solid var(--accent, #FF3D47); outline-offset: 2px; }
+.emulator-system[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 .emulator-file {
   display: flex; flex-direction: column; gap: 8px; align-items: center;
   width: 100%; max-width: 480px; margin-top: 4px;
-  padding-top: 18px; border-top: 1px solid var(--border, rgba(255,255,255,.14));
+  padding-top: 16px; border-top: 2px solid var(--border);
 }
 .emulator-file-label { color: var(--muted); font-size: var(--fs-body); }
-.emulator-file input[type="file"] { max-width: 100%; color: var(--text, #f7f7f8); font: inherit; }
+.emulator-file input[type="file"] { max-width: 100%; color: var(--text); font: inherit; }
 
 @media (max-width: 640px) {
   .emulator-picker { max-width: 100%; }
