@@ -100,3 +100,34 @@ Keys: livetv.js owns arrows/OK/Back inside #livetv-view and consumes what it han
 Fallbacks: /live/rows 404 -> /live/groups + /live/channels + /live/now; /live/sports 404 -> from Games Today; View All 404 -> /live/channels?group=. 404 only.
 Blockers: (1) feed LEFT/RIGHT cannot work on the web: /live/ticket/:id always takes the first candidate — needs ?feed=N plus a feed count in the ticket answer. (2) The live overlay and channel up/down run only on the HTML5 #player; the native shells (Apple TV avplayer, Android bridge, Tizen avplay, BlazeOS) hand off and never show #player.
 - 10 Oct, later: blocker (1) above is CLEARED. blazing-fleet 6d0c503 added /live/ticket/:id?feed=N -> { feed, feeds, label }; the web player's LEFT/RIGHT now step the feed ((feed ± 1 + feeds) % feeds), mint a new ticket, swap the source and show "Feed 2/5 · label" in the overlay. Unit 159/159, livetv.smoke 85/85. Still branch livetv-binged only. sw.js stays v51 (unreleased, so no second bump).
+
+---
+
+## 2026-10-13 — In-browser retro emulator (web-emu agent, Claude Opus 4.8)
+
+Working on: play a retro ROM in the browser (phone/PC/TV), no install.
+Last action: committed + pushed branch `blz-web-emulator` (commit a57fc8c). NOT
+deployed, NOT merged (pages.yml deploys only on push to main).
+Next step: run the suite — `cd blazing-web && npm install && node scripts/run-smokes.mjs emulator`
+  (playwright is NOT installed here; the Comet harness was not run this session).
+
+Key files:
+- emulator.js (new) — window.BlazingEmulator.open/close/coreFor; EmulatorJS 4.2.3
+  in a srcdoc iframe; cores from cdn.emulatorjs.org, lazy, only on launch.
+- games.js — "Play in browser" button in openDialog (~1416), resolveForPlay (~1513);
+  resolves via the existing /games/resolve, hands the link to the player.
+- index.html — #emulator-overlay markup + deferred <script>.
+- styles.css — .emulator-* overlay (house full-screen pattern, live tokens).
+- sw.js — emulator.js in SHELL, CACHE v46 -> v47.
+- emulator.smoke.mjs (new) + run-smokes floor 43 -> 44.
+
+What I verified: node --check on every touched file; coreFor() mapping proven on
+the real emulator.js in Node (all 20 cases pass, incl. retro/zip/disc -> picker).
+What I did NOT run: the Comet/Playwright smoke suite (not installed; hub warns of
+Comet reaper collisions). emulator.smoke.mjs is written but UNEXECUTED.
+
+Blockers / needs Markus:
+- CORS: in-browser play of a CATALOG ROM needs Access-Control-Allow-Origin on the
+  add-on's /games/resolve link target (services/addon/lib/game-source-routes.js).
+  Local-file play works regardless. Download/Send-to-PS5 unaffected (not fetch).
+- Which systems/cores to feature, and DEPLOY approval (branch is undeployed).
