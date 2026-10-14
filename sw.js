@@ -185,7 +185,7 @@
 // play_failed names the title instead of sending an empty id. Code is
 // network-first, so this is the hygiene bump again: it evicts the app.js that
 // walked 24 refused sources in silence from a device's offline fallback.
-const CACHE = 'blazing-shell-v46';
+const CACHE = 'blazing-shell-v47';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -213,6 +213,13 @@ const SHELL = [
   './emby.js',
   './dpad.js',
   './games.js',
+  // The in-browser emulator. A NEW FILE — see the v37 note on CACHE above: an
+  // installed PWA holding the previous shell has no entry for it, so the Games
+  // dialog would find window.BlazingEmulator undefined and draw no "Play in
+  // browser" button. EmulatorJS's own loader and cores are NOT precached here —
+  // they are cross-origin (cdn.emulatorjs.org), the fetch handler returns early
+  // on any cross-origin URL, and they are pulled only when a game is launched.
+  './emulator.js',
   // Roadmaps and Calendar. NEW FILES — see the v38 note on CACHE above.
   './roadmaps.js',
   './calendar.js',

@@ -108,7 +108,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 42 -> 43 when rating-blocked.smoke.mjs landed: a title the add-on's
 // gate refuses says so in the player, stops the source walk, and sends ONE
 // play_failed that names the title. Counted on disk before writing it.
-const MIN_SUITES = 43;
+// Raised 43 -> 44 when emulator.smoke.mjs landed with the in-browser emulator —
+// a retro ROM played in the web app with no install. Counted on disk before
+// writing it (`ls *.smoke.mjs | wc -l` answered 44). Same rule: the real count.
+const MIN_SUITES = 44;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

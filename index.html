@@ -936,6 +936,23 @@
       </article>
     </dialog>
 
+    <!-- ── In-browser emulator overlay ── full-screen player for one retro ROM.
+         emulator.js (window.BlazingEmulator) drives it; it is opened by the
+         "Play in browser" button on a retro release in #game-source-dialog, or
+         on its own with a locally chosen ROM. EmulatorJS's loader and cores load
+         lazily from its CDN only when a game is launched — nothing here loads it
+         up front. Modelled on the comic-reader overlay, not the router: like the
+         reader and the watch party, the player is an overlay, not a nav view. -->
+    <div id="emulator-overlay" class="emulator-overlay" hidden role="dialog" aria-modal="true" aria-label="Game player">
+      <header class="emulator-bar">
+        <span id="emulator-title" class="emulator-title"></span>
+        <button id="emulator-close" class="emulator-close" type="button" aria-label="Close the game player">Close</button>
+      </header>
+      <div id="emulator-stage" class="emulator-stage">
+        <div id="emulator-setup" class="emulator-setup" hidden></div>
+      </div>
+    </div>
+
     <!-- ── Requests View ── -->
     <section id="requests-view" class="view" hidden>
       <div class="page-heading">
@@ -1278,6 +1295,9 @@
   <script src="./manga.js" defer></script>
   <script src="./anime-room.js" defer></script>
   <script src="./games.js" defer></script>
+  <!-- In-browser retro emulator. A tiny loader; EmulatorJS's own data/cores are
+       pulled from its CDN only when a ROM is launched (see emulator.js). -->
+  <script src="./emulator.js" defer></script>
   <!-- B25 / B12. Two self-contained modules, the same shape as games.js and
        livetv.js: showRoute() flips the view and calls mount(), and each module
        owns its own fetch, state and markup. -->

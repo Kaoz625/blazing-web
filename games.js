@@ -1413,7 +1413,30 @@
           + 'TorBox account to fetch it with. A source on the Direct download lane still '
           + 'works with no account at all.';
       }
-      r.dLanes.replaceChildren(go, el('p', 'detail-copy', why));
+      // IN-BROWSER PLAY. A retro release whose system EmulatorJS can run gets a
+      // "Play in browser" button beside Download — no install, straight into the
+      // game on a phone, PC or TV browser. It is progressive: no emulator.js, or
+      // no system this release maps to, means no button and the screen is exactly
+      // as it was. It is shown only when the release can actually be FETCHED
+      // (`armed`), the same gate the Download button obeys: a direct/http retro
+      // release is always armed and needs no account, so this is its natural home;
+      // a release behind a debrid lane with no key cannot be fetched OR played, so
+      // offering Play there would be a dead-end press. The ROM link is resolved on
+      // press, the same /games/resolve the Download button uses.
+      const nodes = [go];
+      const playCore = armed && window.BlazingEmulator
+        && window.BlazingEmulator.coreFor({ platform: row.platform, format: row.format });
+      if (playCore) {
+        const play = el('button', 'secondary-button');
+        play.type = 'button';
+        play.id = 'game-source-play';
+        play.dataset.core = playCore;
+        play.textContent = 'Play in browser';
+        play.addEventListener('click', () => resolveForPlay(row));
+        nodes.push(play);
+      }
+      nodes.push(el('p', 'detail-copy', why));
+      r.dLanes.replaceChildren(...nodes);
     }
 
     r.dStatus.textContent = '';
@@ -1489,6 +1512,64 @@
     const name = fileNameFrom(url);
     r.dStatus.dataset.lane = lane;
     r.dStatus.textContent = `Started on ${provider}${name ? ` — ${name}` : ''}.`;
+  }
+
+  /**
+   * PLAY IN BROWSER. Resolve the same way the Download button does — the server
+   * picks the lane — but hand the link to the in-browser emulator instead of to
+   * an <a download>. On success the dialog closes and emulator.js takes the
+   * screen; the system is refined with the resolved file's own extension.
+   *
+   * It shares /games/resolve with resolveAndFetch rather than inventing a path:
+   * the http lane needs no account, so a direct retro release plays with no
+   * debrid key at all. A debrid lane answers 202 "preparing" and is reported as
+   * such, exactly as the Download button reports it.
+   */
+  async function resolveForPlay(row) {
+    const r = refs();
+    if (!window.BlazingEmulator) {
+      r.dStatus.textContent = 'The in-browser player is not loaded, so this cannot play here yet.';
+      return;
+    }
+    r.dStatus.textContent = 'Preparing to play…';
+    const res = await api(`/games/resolve?ref=${encodeURIComponent(String(row.ref || ''))}`);
+
+    if (res.status === 404) {
+      r.dStatus.textContent = 'This add-on has no /games/resolve route yet.';
+      return;
+    }
+    if (res.status === 202 && res.json && res.json.preparing) {
+      const wait = Number(res.json.retryAfterSeconds) || 20;
+      r.dStatus.textContent = `This release is being fetched first. Try Play again in about ${wait}s.`;
+      return;
+    }
+    if (!res.ok || !res.json) {
+      r.dStatus.textContent = failureText(res);
+      return;
+    }
+    if (res.json.ok !== true) {
+      const tried = Array.isArray(res.json.tried) ? res.json.tried : [];
+      const why = clean(res.json.message || res.json.reason, 'No lane could resolve this release.');
+      r.dStatus.textContent = tried.length
+        ? `${why} Tried: ${tried.map((t) => clean(t && (t.lane || t))).filter(Boolean).join(', ')}.`
+        : why;
+      return;
+    }
+    const url = safeDownloadUrl(res.json.url);
+    if (!url) {
+      r.dStatus.textContent = 'The add-on answered with no usable link.';
+      return;
+    }
+
+    const title = clean(row.title || row.name, 'Game');
+    if (r.dialog && r.dialog.open) r.dialog.close();
+    window.BlazingEmulator.open({
+      romUrl: url,
+      title,
+      platform: row.platform,
+      format: row.format,
+      fileName: fileNameFrom(url),
+    });
   }
 
   // BLZ-0088: show the five-destination picker; the actual queue call follows
