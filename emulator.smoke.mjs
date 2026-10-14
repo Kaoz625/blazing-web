@@ -65,6 +65,24 @@ const ctx = await browser.newContext();
 const stubCdn = (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '/* stubbed in test */' });
 await ctx.route('https://cdn.emulatorjs.org/**', stubCdn);
 
+// THE FLEET AND THE ADD-ON ARE STUBBED TOO, the way games-hub.smoke.mjs does
+// it. Measured 14 Oct 2026: with only the CDN stubbed, this page sent LIVE
+// requests to the production fleet and add-on — a POST to
+// fleet.lyreosai.com/agent/dev-1/heartbeat with the fixture's fake token among
+// them. A test has no business there. And it broke this suite at random: the
+// fixture's addInitScript runs in EVERY frame, including each srcdoc player
+// iframe, and rewrites the device key; once a live answer has made the app
+// store different credentials, that rewrite fires a `storage` event in the page,
+// profile.js reloads on it, and the next step dies with "Execution context was
+// destroyed". Registered BEFORE prepareProfile, so its /profiles route wins.
+const stubFleet = (route) => {
+  if (route.request().url().includes('/party/active')) return route.fulfill({ status: 204, body: '' });
+  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+};
+await ctx.route('https://fleet.lyreosai.com/**', stubFleet);
+await ctx.route('https://addon.lyreosai.com/**', (route) =>
+  route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ catalogs: [], metas: [] }) }));
+
 await prepareProfile(ctx);
 const page = await ctx.newPage();
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -437,10 +455,7 @@ await ctx2.route('https://addon.lyreosai.com/**', (route) => {
   }
   return json(200, { catalogs: [], metas: [] });
 });
-await ctx2.route('https://fleet.lyreosai.com/**', (route) => {
-  if (route.request().url().includes('/party/active')) return route.fulfill({ status: 204, body: '' });
-  return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
-});
+await ctx2.route('https://fleet.lyreosai.com/**', stubFleet);
 await ctx2.route(/^https:\/\/(cdn|dl|media|evil)\.example\.test\//, (route) =>
   route.fulfill({ status: 200, contentType: 'application/octet-stream', body: 'ok' }));
 await ctx2.addInitScript((addon) => { window.BLAZING_API_BASE = addon; }, ADDON);
