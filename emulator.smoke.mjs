@@ -246,7 +246,8 @@ await page.evaluate(() => window.BlazingEmulator.close());
 // The add-on's CORS copy ends in "/games/play?t=…", and EmulatorJS 4.2.3 names
 // the file it gives the core after the URL's last path piece — "play", no
 // extension. The real name rides on the end as a fragment, which no request
-// ever sends.
+// ever sends, and it rides RAW: getBaseFileName() never decodes %XX, so an
+// encoded name would reach the core as "Sonic%20The%20Hedgehog…".
 async function frameGlobals(p) {
   await p.waitForFunction(() => {
     const f = document.getElementById('emulator-frame');
@@ -267,14 +268,42 @@ await page.evaluate(() => window.BlazingEmulator.open({
   platform: 'Sega - Mega Drive - Genesis',
 }));
 const g = await frameGlobals(page);
-check('the ROM URL carries the real file name as a fragment',
-  g.gameUrl === `https://addon.example.test/games/play?t=tok-1#/${encodeURIComponent('Sonic The Hedgehog (USA, Europe).md')}`,
+check('the ROM URL carries the real file name, raw, as a fragment',
+  g.gameUrl === 'https://addon.example.test/games/play?t=tok-1#/Sonic The Hedgehog (USA, Europe).md',
   g.gameUrl);
+// What EmulatorJS 4.2.3 will call the file, by ITS OWN rule (getBaseFileName).
+const ejsName = (u) => u.split('/').pop().split('#')[0].split('?')[0];
+check('...which is exactly the name EmulatorJS gives the core',
+  ejsName(g.gameUrl) === 'Sonic The Hedgehog (USA, Europe).md', ejsName(g.gameUrl));
 check('the core is the one the row named', g.core === 'segaMD', g.core);
 check('the frame is painted the page black, not EmulatorJS\'s grey',
   /^#0a0a0b$/i.test(String(g.background)), String(g.background));
 check('threads stay off on a page that is not cross-origin isolated', g.threads === false);
+check('a cartridge game shows no disc-loading hint', !(await page.locator('#emulator-hint').isVisible()));
 await page.evaluate(() => window.BlazingEmulator.close());
+
+// The two characters that would cut EmulatorJS's split short are replaced.
+await page.evaluate(() => window.BlazingEmulator.open({
+  romUrl: 'https://addon.example.test/games/play?t=tok-3', fileName: 'Who? #1.gb', title: 'Who',
+  platform: 'Nintendo - Game Boy',
+}));
+const odd = await frameGlobals(page);
+check('"#" and "?" in a file name cannot break the name EmulatorJS reads',
+  ejsName(odd.gameUrl) === 'Who_ _1.gb', `${odd.gameUrl} -> ${ejsName(odd.gameUrl)}`);
+await page.evaluate(() => window.BlazingEmulator.close());
+
+// A CD image comes through the house's upload link and takes minutes: say so.
+await page.evaluate(() => window.BlazingEmulator.open({
+  romUrl: 'https://addon.example.test/games/play?t=tok-2', fileName: 'Crash Bandicoot (USA).zip',
+  title: 'Crash Bandicoot', platform: 'Sony - PlayStation',
+}));
+await frameGlobals(page);
+check('a PlayStation disc says it can take a few minutes to load',
+  (await page.locator('#emulator-hint').isVisible())
+  && /Disc games are big.*few minutes/.test(await page.locator('#emulator-hint').innerText()),
+  await page.locator('#emulator-hint').innerText().catch(() => ''));
+await page.evaluate(() => window.BlazingEmulator.close());
+check('...and the hint goes with the player', !(await page.locator('#emulator-hint').isVisible()));
 
 // A ROM from this device is a blob: URL, and for one of those EmulatorJS names
 // the file after EJS_gameName instead of the URL — so the name it gets must
@@ -322,6 +351,12 @@ const ROWS = [
   row('ref-ps2', 'Metal Slug 3 (USA)', 'Sony - PlayStation 2', 'Redump', 'ZIP', 'minerva', 'realdebrid'),
   row('ref-pkg', 'Crash Bandicoot', 'ps1', 'NoPayStation', 'PKG', 'nps-ps1', 'http'),
   row('ref-ask', 'Mystery Cart', 'retro', 'NYC Games · archive.org', 'ZIP', 'nyc-games', 'http'),
+  // One per refusal the play relay can give (lib/game-play.js).
+  row('ref-big', 'Big Disc (USA)', 'Sony - PlayStation', 'Redump', 'ZIP', 'minerva', 'realdebrid'),
+  row('ref-busy', 'Busy Cart (USA)', 'Sega - Game Gear', 'No-Intro', 'ZIP', 'minerva', 'realdebrid'),
+  row('ref-old', 'Late Cart (USA)', 'Sega - Game Gear', 'No-Intro', 'ZIP', 'minerva', 'realdebrid'),
+  row('ref-down', 'Gone Cart (USA)', 'Sega - Game Gear', 'No-Intro', 'ZIP', 'minerva', 'realdebrid'),
+  row('ref-slow', 'Slow Cart (USA)', 'Sega - Game Gear', 'No-Intro', 'ZIP', 'minerva', 'realdebrid'),
 ];
 // GET /games/resolve, per ref. `playPath` is the new field; `url` is the
 // lane's own link, which the Download button keeps using.
@@ -332,10 +367,32 @@ const RESOLVE = {
   // plain link is used instead. Protocol-relative would point at another host.
   'ref-bad': { url: 'https://cdn.example.test/roms/Columns%20(World).zip', playPath: '//evil.example.test/x.zip' },
   'ref-ask': { url: 'https://cdn.example.test/roms/mystery.zip', playPath: '/games/play?t=tok-ask' },
+  'ref-big': { url: 'https://dl.example.test/d/BIG/Big%20Disc%20(USA).zip', playPath: '/games/play?t=tok-big' },
+  'ref-busy': { url: 'https://dl.example.test/d/BUSY/Busy%20Cart%20(USA).zip', playPath: '/games/play?t=tok-busy' },
+  // The FIRST resolve hands out a token the relay no longer honours; the second
+  // a good one. A token lives half an hour, so a fresh resolve is the cure.
+  'ref-old': [
+    { url: 'https://dl.example.test/d/OLD/Late%20Cart%20(USA).zip', playPath: '/games/play?t=tok-old' },
+    { url: 'https://dl.example.test/d/OLD/Late%20Cart%20(USA).zip', playPath: '/games/play?t=tok-new' },
+  ],
+  'ref-down': { url: 'https://dl.example.test/d/DOWN/Gone%20Cart%20(USA).zip', playPath: '/games/play?t=tok-down' },
+  'ref-slow': { url: 'https://dl.example.test/d/SLOW/Slow%20Cart%20(USA).zip', playPath: '/games/play?t=tok-slow' },
+};
+// GET|HEAD /games/play?t=…, by token: the relay's real statuses and reasons.
+// A HEAD has no body, so the client can only go by the status — exactly what
+// the live relay gives it.
+const PLAY = {
+  'tok-nes': { status: 200 }, 'tok-ask': { status: 200 }, 'tok-new': { status: 200 },
+  'tok-old': { status: 404, reason: 'invalid-play-token' },
+  'tok-big': { status: 413, reason: 'too-large' },
+  'tok-busy': { status: 503, reason: 'busy', headers: { 'retry-after': '5' } },
+  'tok-down': { status: 502, reason: 'upstream-unreachable' },
+  'tok-slow': { status: 504, reason: 'upstream-timeout' },
 };
 
 const ctx2 = await browser.newContext();
 const resolved = [];
+const plays = [];
 await ctx2.route('https://cdn.emulatorjs.org/**', stubCdn);
 await ctx2.route('https://addon.lyreosai.com/**', (route) => {
   const u = new URL(route.request().url());
@@ -359,10 +416,22 @@ await ctx2.route('https://addon.lyreosai.com/**', (route) => {
       asked: ['minerva', 'nps-ps1', 'nyc-games'], errors: [], lanes: LANES, debridEnabled: true, unavailable: null,
     });
   }
+  if (path === '/games/play') {
+    const t = u.searchParams.get('t') || '';
+    plays.push({ method: route.request().method(), t, path: u.pathname });
+    const p = PLAY[t] || { status: 404, reason: 'invalid-play-token' };
+    return route.fulfill({
+      status: p.status,
+      contentType: p.status === 200 ? 'application/zip' : 'application/json',
+      headers: { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'Content-Length, Retry-After', ...(p.headers || {}) },
+      body: p.status === 200 ? 'PK' : JSON.stringify({ error: p.reason, reason: p.reason, message: p.reason }),
+    });
+  }
   if (path === '/games/resolve') {
     const ref = u.searchParams.get('ref') || '';
     resolved.push({ ref, path: u.pathname });
-    const answer = RESOLVE[ref];
+    const seen = resolved.filter((x) => x.ref === ref).length;
+    const answer = Array.isArray(RESOLVE[ref]) ? RESOLVE[ref][Math.min(seen, RESOLVE[ref].length) - 1] : RESOLVE[ref];
     if (!answer) return json(404, { error: 'invalid-reference', reason: 'invalid-reference', message: 'That reference is expired or was not issued here.' });
     return json(200, { ok: true, lane: 'realdebrid', provider: 'Real-Debrid', source: 'minerva', tried: ['realdebrid'], ...answer });
   }
@@ -431,14 +500,19 @@ check('the ROM keeps its real name, taken from url (the play path names nothing)
   nes.fileName === 'Super Mario Bros. (World).zip', nes.fileName);
 check('the dialog closes and the player takes the screen',
   !(await p2.locator('#game-source-dialog[open]').count()) && (await p2.locator('#emulator-overlay').isVisible()));
+check('a HEAD to the play link was asked BEFORE the player opened',
+  plays.some((x) => x.t === 'tok-nes' && x.method === 'HEAD' && x.path === `${PREFIX}/games/play`),
+  JSON.stringify(plays));
 const g2 = await frameGlobals(p2);
 check('the frame gets the play URL, named', g2.gameUrl
-  === `${ADDON}/games/play?t=tok-nes#/${encodeURIComponent('Super Mario Bros. (World).zip')}` && g2.core === 'nes',
+  === `${ADDON}/games/play?t=tok-nes#/Super Mario Bros. (World).zip` && g2.core === 'nes',
   `${g2.gameUrl} ${g2.core}`);
 
 // 6c — no playPath: the plain url is what plays.
+const headsBefore = plays.length;
 const gg = await play('ref-gg');
 check('with no playPath the plain url plays', gg.romUrl === RESOLVE['ref-gg'].url, gg.romUrl);
+check('...and no relay HEAD is sent for it', plays.length === headsBefore, JSON.stringify(plays.slice(headsBefore)));
 
 // 6d — a playPath that is not a path on the add-on is refused.
 const bad = await play('ref-bad');
@@ -475,6 +549,49 @@ check('...and its Download button is untouched',
   (await p2.locator('#game-source-lanes button').count()) === 1
   && (await p2.locator('#game-source-go').count()) === 1);
 await p2.evaluate(() => document.getElementById('game-source-dialog').close());
+
+// 6h — the relay says no: the reason in plain words, and the player stays shut.
+async function refused(ref) {
+  await openRow(ref);
+  const before = await p2.evaluate(() => window.__emuOpens.length);
+  await p2.click('#game-source-play');
+  await p2.waitForFunction(() => {
+    const t = document.getElementById('game-source-status').textContent || '';
+    return t && !/Preparing to play|Checking the game file|fresh play link/.test(t);
+  }, null, { timeout: 8000 });
+  const status = (await p2.locator('#game-source-status').innerText()).trim();
+  const opened = (await p2.evaluate(() => window.__emuOpens.length)) !== before;
+  const stillOpen = (await p2.locator('#game-source-dialog[open]').count()) === 1;
+  await p2.evaluate(() => document.getElementById('game-source-dialog').close());
+  return { status, opened, stillOpen };
+}
+const big = await refused('ref-big');
+check('413 too-large: "too big to play in the browser, use Download", no player',
+  /too big to play in the browser.*Use Download/i.test(big.status) && !big.opened && big.stillOpen, big.status);
+const busy = await refused('ref-busy');
+check('503 busy: "busy, try again in a few seconds", no player',
+  /busy.*try again in a few seconds/i.test(busy.status) && !busy.opened, busy.status);
+const down = await refused('ref-down');
+check('502 upstream: the source is not answering, no player',
+  /not answering/i.test(down.status) && !down.opened, down.status);
+const slow = await refused('ref-slow');
+check('504 upstream-timeout: the source is not answering, no player',
+  /not answering/i.test(slow.status) && !slow.opened, slow.status);
+
+// 6i — an expired token: ONE fresh resolve, then it plays on the new token.
+const old = await play('ref-old');
+check('404 invalid-play-token resolves again once and plays the fresh token',
+  old.romUrl === `${ADDON}/games/play?t=tok-new`
+  && resolved.filter((x) => x.ref === 'ref-old').length === 2
+  && plays.some((x) => x.t === 'tok-old') && plays.some((x) => x.t === 'tok-new'),
+  `${old.romUrl} resolves=${resolved.filter((x) => x.ref === 'ref-old').length}`);
+
+// 6j — EVERY press resolves again: a play token is never kept.
+const nesResolves = resolved.filter((x) => x.ref === 'ref-nes').length;
+await play('ref-nes');
+check('pressing Play again asks /games/resolve again (no cached play link)',
+  resolved.filter((x) => x.ref === 'ref-nes').length === nesResolves + 1);
+await p2.evaluate(() => window.BlazingEmulator.close());
 
 const real2 = errors2.filter((e) => !/Failed to fetch|NetworkError|CORS|load resource|EJS|emulatorjs/i.test(e));
 check('no page errors (Games dialog)', real2.length === 0, real2.join(' | '));

@@ -68,6 +68,9 @@
   //              SharedArrayBuffer, which only a cross-origin-isolated page
   //              (COOP + COEP headers) has. GitHub Pages cannot send headers, so
   //              the check is made at run time — see isolated().
+  // `disc` marks the CD systems. Their images are hundreds of MB and reach the
+  // browser through the add-on's play relay — the house's own upload link — so
+  // one takes minutes to arrive, and the player says so while it loads.
   // NOT listed as needing one, though a docs page says "Required": DS (the
   // EmulatorJS melonDS fork logs "Using FreeBIOS" and carries on), Lynx (Handy
   // falls back to its internal boot ROM), PlayStation (pcsx_rearmed's HLE BIOS),
@@ -85,10 +88,10 @@
     { core: 'segaMS',     label: 'Sega Master System',        ext: ['sms'] },
     { core: 'segaGG',     label: 'Sega Game Gear',            ext: ['gg'] },
     { core: 'sega32x',    label: 'Sega 32X',                  ext: ['32x'] },
-    { core: 'segaCD',     label: 'Sega CD',                   ext: [], needs: 'bios' },
-    { core: 'segaSaturn', label: 'Sega Saturn',               ext: [] },
-    { core: 'psx',        label: 'PlayStation',               ext: [] },
-    { core: 'psp',        label: 'PSP',                       ext: [], needs: 'threads' },
+    { core: 'segaCD',     label: 'Sega CD',                   ext: [], needs: 'bios', disc: true },
+    { core: 'segaSaturn', label: 'Sega Saturn',               ext: [], disc: true },
+    { core: 'psx',        label: 'PlayStation',               ext: [], disc: true },
+    { core: 'psp',        label: 'PSP',                       ext: [], needs: 'threads', disc: true },
     { core: 'atari2600',  label: 'Atari 2600',                ext: ['a26'] },
     { core: 'atari7800',  label: 'Atari 7800',                ext: ['a78'] },
     { core: 'lynx',       label: 'Atari Lynx',                ext: ['lnx'] },
@@ -99,7 +102,7 @@
     { core: 'coleco',     label: 'ColecoVision',              ext: ['col', 'cv'], needs: 'bios' },
     { core: 'c64',        label: 'Commodore 64',              ext: ['d64', 't64', 'g64'] },
     { core: 'amiga',      label: 'Amiga',                     ext: ['adf', 'adz', 'dms', 'ipf'] },
-    { core: '3do',        label: '3DO',                       ext: [], needs: 'bios' },
+    { core: '3do',        label: '3DO',                       ext: [], needs: 'bios', disc: true },
     { core: 'arcade',     label: 'Arcade',                    ext: [] },
   ];
 
@@ -332,6 +335,7 @@
   const PKG_WHY = 'This is a PlayStation Store package (.pkg). The in-browser player cannot open those, '
     + 'so pick a copy in another format.';
   const THREADS_WHY = 'PSP games need a browser feature this website cannot switch on, so they cannot play here yet.';
+  const DISC_HINT = 'Disc games are big, so this one can take a few minutes to load before it starts.';
 
   /**
    * SharedArrayBuffer, which threaded cores need, exists only on a page served
@@ -392,21 +396,33 @@
    * THE ROM'S REAL NAME, ON THE END OF ITS URL AS A FRAGMENT: `<url>#/<name>`.
    *
    * EmulatorJS 4.2.3 names the file it hands the core after the LAST PATH PIECE
-   * of EJS_gameUrl — getBaseFileName() is
-   * `gameUrl.split("/").pop().split("#")[0].split("?")[0]`. The add-on's
-   * CORS copy is a path like /games/play?t=<token>, so the core would be handed
-   * a file called "play" with no extension: genesis_plus_gx tells a Master
-   * System cart from a Mega Drive one by it, and FBNeo finds an arcade game by
-   * its set name ("sf2.zip") and nothing else. A fragment is never sent to the
-   * server (neither XHR nor fetch transmits it), so the request is unchanged and
-   * the name still reaches the core. It also keys EmulatorJS's ROM cache by the
-   * real name rather than by "play".
+   * of EJS_gameUrl. Read in its own data/src/emulator.js (14 Oct 2026):
+   * getBaseFileName(true) is `gameUrl.split("/").pop().split("#")[0]
+   * .split("?")[0]`, and nothing on that path calls decodeURIComponent. The
+   * add-on's CORS copy is /games/play?t=<token>, so the core would be handed a
+   * file called "play" with no extension: genesis_plus_gx tells a Master System
+   * cart from a Mega Drive one by it, and FBNeo finds an arcade game by its set
+   * name ("sf2.zip") and nothing else. (A .zip of one ROM is fine either way —
+   * EmulatorJS unzips it and uses the names inside.)
+   *
+   * WHY A FRAGMENT, not `&f=/<name>` on the query. Both give the same last
+   * piece, but a fragment is never sent — XHR drops it, so the request the
+   * add-on sees is byte-for-byte the one it signed, and a `url` fallback (a
+   * signed CDN link that may check its whole query) is untouched too. The same
+   * piece keys EmulatorJS's IndexedDB ROM cache ("rom" store, by
+   * `gameUrl.split("/").pop()`), so the cache is keyed by the real name, not by
+   * "play" for every game.
+   *
+   * THE NAME GOES IN RAW, because EmulatorJS does not decode it: encoded, a
+   * file would reach the core as "Super%20Mario%20Bros..zip". The only
+   * characters that would break the split above are cut first — safeName()
+   * keeps the last path piece, and "#" and "?" become "_".
    */
   function namedUrl(src, fileName) {
     const s = String(src || '');
-    const name = safeName(fileName);
+    const name = safeName(fileName).replace(/[#?]/g, '_');
     if (!name || !/^https?:/i.test(s)) return s;
-    return `${s.split('#')[0]}#/${encodeURIComponent(name)}`;
+    return `${s.split('#')[0]}#/${name}`;
   }
 
   // ── overlay DOM (built once, lazily) ───────────────────────────────────────
@@ -418,6 +434,7 @@
     picker: null,
     fileInput: null,
     titleEl: null,
+    hintEl: null,
     frame: null,
     blobUrl: '',
     watchdog: 0,
@@ -477,6 +494,16 @@
     state.stage = overlay.querySelector('#emulator-stage') || overlay.querySelector('.emulator-stage');
     state.setup = overlay.querySelector('#emulator-setup') || overlay.querySelector('.emulator-setup');
     state.titleEl = overlay.querySelector('#emulator-title') || overlay.querySelector('.emulator-title');
+    // One quiet line under the bar, shown only while a slow game loads.
+    let hint = overlay.querySelector('#emulator-hint');
+    if (!hint) {
+      hint = h('p', 'emulator-hint');
+      hint.id = 'emulator-hint';
+      hint.setAttribute('role', 'status');
+      hint.hidden = true;
+      overlay.insertBefore(hint, state.stage);
+    }
+    state.hintEl = hint;
     const closeBtn = overlay.querySelector('#emulator-close') || overlay.querySelector('.emulator-close');
     if (closeBtn && !closeBtn.dataset.bound) {
       closeBtn.dataset.bound = '1';
@@ -540,6 +567,12 @@
   }
 
   function hideSetup() { if (state.setup) state.setup.hidden = true; }
+
+  function setHint(text) {
+    if (!state.hintEl) return;
+    state.hintEl.textContent = text || '';
+    state.hintEl.hidden = !text;
+  }
 
   function pickSystem(core) {
     if (!state.pending) state.pending = {};
@@ -667,6 +700,9 @@
     state.booted = false;
 
     if (state.titleEl) state.titleEl.textContent = title || 'Game';
+    // A CD image is hundreds of MB through the house's upload link: minutes, not
+    // seconds. EmulatorJS's own text only counts a percentage, so say why.
+    setHint((SYSTEM_BY_CORE.get(core) || {}).disc && !blob ? DISC_HINT : '');
 
     // Watchdog: if the emulator never comes up, the likeliest cause for a remote
     // ROM is a link that does not allow in-browser play. Say so and leave the
@@ -687,6 +723,7 @@
   }
 
   function teardownFrame() {
+    setHint('');
     if (state.frame) {
       try { state.frame.srcdoc = 'about:blank'; } catch { /* ignore */ }
       state.frame.remove();
@@ -786,6 +823,9 @@
           clearWatchdog();
           hideSetup();
         }
+        // 'ready' is EmulatorJS's own UI coming up, before the ROM is fetched;
+        // only 'start' means the game is running and the wait is over.
+        if (d && d.__blz_emu === 'start') setHint('');
       };
       window.addEventListener('message', state.onMessage);
     }

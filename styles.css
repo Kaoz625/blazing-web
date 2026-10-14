@@ -3627,6 +3627,14 @@ html.emulator-open, html.emulator-open body { overflow: hidden; }
 .emulator-close:hover { background: rgba(255, 61, 71, .3); }
 .emulator-close:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
+/* The disc-loading line: textDim on the page black, one hairline under it. It
+   leaves the moment the game starts, and the stage takes the room back. */
+.emulator-hint {
+  flex: 0 0 auto; margin: 0; padding: 8px 16px;
+  color: var(--muted); font-size: var(--fs-body); line-height: 1.5;
+  background: var(--bg); border-bottom: 2px solid var(--border);
+}
+.emulator-hint[hidden] { display: none; }
 .emulator-stage { position: relative; flex: 1; min-height: 0; width: 100%; background: var(--bg); }
 .emulator-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 

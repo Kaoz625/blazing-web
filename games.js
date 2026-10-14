@@ -482,6 +482,9 @@
     // What each part's press got, by ref, so a second press asks only for
     // the parts the first one did not get.
     partState: new Map(),
+    // The Play press in flight, or null. Closing the dialog clears it, so an
+    // answer that comes back after he has walked away never opens the player.
+    playTicket: null,
   };
 
   function el(tag, className, text) {
@@ -1874,6 +1877,39 @@
   }
 
   /**
+   * ASK THE RELAY BEFORE THE PLAYER OPENS. Left to itself, EmulatorJS says
+   * "Network Error" for every way a fetch can fail. A HEAD to the play link
+   * makes the add-on do the real work — sign check, reach the host, read the
+   * size — and answer with a status that says which: 404 invalid-play-token,
+   * 413 too-large, 503 busy, 502 upstream-status / not-a-file /
+   * upstream-unreachable, 504 upstream-timeout (lib/game-play.js). A HEAD
+   * carries no body, so the STATUS is the reason here. No custom headers, so it
+   * is a simple request with no preflight; the relay sends
+   * Access-Control-Allow-Origin on its refusals too (measured live), so the
+   * status is readable.
+   */
+  async function headPlay(url) {
+    try {
+      const res = await fetch(url, { method: 'HEAD', credentials: 'omit', signal: timeoutSignal(TIMEOUT_MS) });
+      return { status: res.status, ok: res.ok, json: null };
+    } catch (error) {
+      const name = error && error.name;
+      return { status: 0, ok: false, json: null, timeout: name === 'TimeoutError' || name === 'AbortError' };
+    }
+  }
+
+  /** The relay's refusal, in plain words: what happened and what to do. */
+  function playFailureText(head) {
+    if (head.status === 413) return 'This game is too big to play in the browser. Use Download instead.';
+    if (head.status === 503) return 'The add-on is busy sending other games. Try again in a few seconds.';
+    if (head.status === 404) return 'The play link ran out before the game could start. Press Play again.';
+    if (head.status === 502 || head.status === 504) {
+      return 'The place this game comes from is not answering right now. Try again in a while.';
+    }
+    return failureText(head);
+  }
+
+  /**
    * PLAY IN BROWSER. Resolve the same way the Download button does — the server
    * picks the lane — but hand the link to the in-browser emulator instead of to
    * an <a download>. On success the dialog closes and emulator.js takes the
@@ -1886,20 +1922,33 @@
    *
    * THE LINK THE PLAYER GETS. The emulator fetches the ROM itself, cross-origin,
    * so the host that serves it must send CORS headers — and a debrid or file-host
-   * link usually does not. When the answer carries `playPath` (the add-on serving
-   * the same file with CORS) that is what plays; `url` is the fallback.
+   * link usually does not (measured 14 Oct 2026: Real-Debrid's CDN sends none,
+   * NoPayStation's is plain http an https page cannot fetch at all; TorBox's
+   * does). Every 200 now carries `playPath`, the add-on relaying the same file
+   * with CORS, and that is what plays; `url` is the fallback, and stays the
+   * link for Download, Send to PS5 and the file's name. Before the player opens,
+   * headPlay() asks the relay whether the file will come, so a refusal is said
+   * in words here instead of EmulatorJS's "Network Error" there.
    */
-  async function resolveForPlay(row) {
+  async function resolveForPlay(row, again = null) {
     const r = refs();
     if (!window.BlazingEmulator) {
       r.dStatus.textContent = 'The in-browser player is not loaded, so this cannot play here yet.';
       return;
     }
-    r.dStatus.textContent = 'Preparing to play…';
+    // EVERY press resolves afresh: a play token is good for half an hour
+    // (PLAY_TTL_MS), so nothing here keeps one. `again` is the press's own
+    // ticket when this is the one fresh resolve after an expired token.
+    const ticket = again || {};
+    if (!again) hub.playTicket = ticket;
+    const current = () => hub.playTicket === ticket;
+    r.dStatus.textContent = again ? 'Getting a fresh play link…' : 'Preparing to play…';
     const res = await api(`/games/resolve?ref=${encodeURIComponent(String(row.ref || ''))}`);
+    if (!current()) return;
 
     if (res.status === 404) {
-      r.dStatus.textContent = 'This add-on has no /games/resolve route yet.';
+      // The route answers 404 for a ref that has expired too, and says so.
+      r.dStatus.textContent = clean(res.json && res.json.message, 'This add-on has no /games/resolve route yet.');
       return;
     }
     if (res.status === 202 && res.json && res.json.preparing) {
@@ -1920,7 +1969,8 @@
       return;
     }
     const url = safeDownloadUrl(res.json.url);
-    const romUrl = playUrl(res.json.playPath) || url;
+    const play = playUrl(res.json.playPath);
+    const romUrl = play || url;
     if (!romUrl) {
       r.dStatus.textContent = 'The add-on answered with no usable link.';
       return;
@@ -1933,12 +1983,28 @@
       return;
     }
 
+    if (play) {
+      r.dStatus.textContent = 'Checking the game file…';
+      const head = await headPlay(play);
+      if (!current()) return;
+      // An expired or unknown token: resolve once more for a fresh one.
+      if (head.status === 404 && !again) {
+        await resolveForPlay(row, ticket);
+        return;
+      }
+      if (!head.ok) {
+        r.dStatus.textContent = playFailureText(head);
+        return;
+      }
+    }
+
     // The ROM's real name: the answer's own `filename` when a lane sent one,
     // else the last piece of `url`. The play path ends in "play" and names
     // nothing, so it is never the source of the name.
     const named = clean(res.json.filename).split(/[\\/]/).pop();
     const fileName = (/\.[a-z0-9]{1,6}$/i.test(named) ? named : '') || fileNameFrom(url);
     const title = clean(row.title || row.name, 'Game');
+    hub.playTicket = null;
     if (r.dialog && r.dialog.open) r.dialog.close();
     window.BlazingEmulator.open({
       romUrl,
@@ -2168,7 +2234,7 @@
     }
     if (r.srcAdd) r.srcAdd.addEventListener('submit', addSource);
     if (r.dClose) r.dClose.addEventListener('click', () => r.dialog && r.dialog.open && r.dialog.close());
-    if (r.dialog) r.dialog.addEventListener('close', () => { hub.current = null; });
+    if (r.dialog) r.dialog.addEventListener('close', () => { hub.current = null; hub.playTicket = null; });
     if (r.dPs5) r.dPs5.addEventListener('click', handToPs5);
   }
 
