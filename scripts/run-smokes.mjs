@@ -113,7 +113,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // suite had landed without a raise. A title
 // the add-on's gate refuses says so in the player, stops the source walk, and sends ONE
 // play_failed that names the title. `ls *.smoke.mjs | wc -l` answered 47.
-const MIN_SUITES = 47;
+// Raised 47 -> 48 on 14 Oct 2026: emulator.smoke.mjs (BLZ-0120), the in-browser
+// retro emulator — a ROM played in the web app with no install. `ls
+// *.smoke.mjs | wc -l` answered 48, counted on disk after it landed.
+const MIN_SUITES = 48;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

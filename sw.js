@@ -203,7 +203,13 @@
 // a pane now, and styles.css holds the new .lt-* block. No new file, but all
 // three are SHELL files and they only work as a set — an offline fallback
 // holding v50's index.html has no #livetv-pane for the new livetv.js to draw in.
-const CACHE = 'blazing-shell-v51';
+// v52: the in-browser retro emulator (BLZ-0120). emulator.js is a NEW FILE in
+// SHELL, so this is the v37 case, not the hygiene bump: an installed PWA holding
+// v51's shell has no entry for it, its Games dialog finds window.BlazingEmulator
+// undefined, and it draws no "Play in browser" button at all. index.html gains
+// #emulator-overlay and its <script>, styles.css the .emulator-* block, and
+// games.js the button — four shell files that only work as a set.
+const CACHE = 'blazing-shell-v52';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -231,6 +237,13 @@ const SHELL = [
   './emby.js',
   './dpad.js',
   './games.js',
+  // The in-browser emulator. A NEW FILE — see the v37 note on CACHE above: an
+  // installed PWA holding the previous shell has no entry for it, so the Games
+  // dialog would find window.BlazingEmulator undefined and draw no "Play in
+  // browser" button. EmulatorJS's own loader and cores are NOT precached here —
+  // they are cross-origin (cdn.emulatorjs.org), the fetch handler returns early
+  // on any cross-origin URL, and they are pulled only when a game is launched.
+  './emulator.js',
   // Roadmaps and Calendar. NEW FILES — see the v38 note on CACHE above.
   './roadmaps.js',
   './calendar.js',
