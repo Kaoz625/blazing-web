@@ -1,3 +1,22 @@
+# blazing-web — handoff, 17 Oct 2026 (claude, MacBook, feedback-and-short-links)
+
+Working on: Short install links (/tv, /ios) + "Send feedback" with an error log (Markus, 17 Oct 2026). Branch `feedback-and-short-links` in blazing-site, blazing-fleet, blazing-web and firetv.
+Last action: all four pushed and tested — site 0322e48, fleet be3a429 (+handoff), web b28cef6 (+handoff), firetv 2d66612 (+handoff). NOT merged, NOT deployed: waiting on Markus's go (register DEP-12).
+Next step: after the fleet is live: `cd ~/NYCT/blazing-web && git switch main && git merge --ff-only feedback-and-short-links && git push origin main` (step 3 below)
+Key files: blazing-site public/_redirects, public/iphone/index.html, tests/short-links.test.mjs · blazing-fleet feedback.js, feedback.test.js, server.js (/feedback, /admin/feedback), telemetry.js (recentProblemsFor) · blazing-web feedback.js, settings.js (Help -> Send feedback), sw.js v53, feedback.smoke.mjs · firetv dashboard/index.html (Feedback tab), dashboard/dashboard-problems.smoke.mjs
+Blockers: Markus's OK for the public deploy (DEP-12); the Downloader code needs his captcha at go.aftvnews.com, pointed at https://blazingstream.lyreosai.com/tv (MK-28).
+
+Deploy order, once Markus says go (fleet first, because the web form and the dashboard both call it):
+1. blazing-fleet: `cd ~/NYCT/blazing-fleet && git switch main && git merge --ff-only feedback-and-short-links && git push origin main`, then `ssh mac1 'cd ~/blazing-fleet && git pull --ff-only origin main && docker compose up -d --build'`. Check: `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://fleet.lyreosai.com/feedback` -> 401 (route exists, auth required), not 404.
+2. Dashboard: `ssh mac1 'cp ~/blazing-fleet-dashboard/index.html ~/blazing-fleet-dashboard/index.html.bak-20261017-before-feedback'`, then `scp ~/NYCT/firetv/dashboard/index.html mac1:~/blazing-fleet-dashboard/index.html` (mounted read-only into the container; no restart). Merge firetv's branch to main too.
+3. blazing-web: merge to main and push. GitHub Pages publishes after its smoke gate; blazingstream.lyreosai.com/app/ follows via blazing-site's reconciler, or now with `~/.claude-team/bin/deploy-web.sh`.
+4. blazing-site: merge to main and push (deploy.yml publishes on push). Check: `curl -sI https://blazingstream.lyreosai.com/tv | grep -i location` -> /dl/blazing-firetv.apk.
+
+Known, NOT caused by this work (register STL-9): blazing-fleet binged-live.test.js fails by time of day and stops `npm test`; test.js "admin token is tab-scoped" is stale; blazing-web settings.smoke.mjs fails on the MacBook because Comet reloads a new page once and scroll-into-view can hang.
+Follow-up (register FLT-11): Send feedback on native Fire TV, Apple TV and Roku. The fleet contract is ready.
+
+---
+
 # blazing-web — handoff, 25 Sep 2026 12:15 (claude-polish-slop, relay BLZ-0045)
 
 Working on: the AI-slop pass, on branch `polish-slop` (NOT main; main is a public deploy and needs Markus's OK).
