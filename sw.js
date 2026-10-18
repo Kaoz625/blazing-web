@@ -209,7 +209,12 @@
 // undefined, and it draws no "Play in browser" button at all. index.html gains
 // #emulator-overlay and its <script>, styles.css the .emulator-* block, and
 // games.js the button — four shell files that only work as a set.
-const CACHE = 'blazing-shell-v52';
+// v53: Send feedback (17 Oct 2026). feedback.js is a NEW FILE in SHELL — the v37
+// case, not the hygiene bump: an installed PWA holding v52's shell has no entry
+// for it, so Settings would draw "Send feedback" and the press would do nothing.
+// index.html gains its <script>, settings.js the Help row, styles.css the
+// .feedback-* block; four shell files that only work as a set.
+const CACHE = 'blazing-shell-v53';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
@@ -231,6 +236,8 @@ const SHELL = [
   './caps.js',
   './hls.min.js',
   './telemetry.js',
+  // Send feedback — see the v53 note on CACHE above.
+  './feedback.js',
   './profile.js',
   // emby.js was never in this list, although index.html has loaded it since the
   // Emby rows were added. It was reaching devices through the HTTP cache alone.

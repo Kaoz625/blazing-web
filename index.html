@@ -1265,6 +1265,11 @@
        fails to load must cost the viewer a worse sort, never the whole list. -->
   <script src="./caps.js" defer></script>
   <script src="./telemetry.js" defer></script>
+  <!-- Send feedback (feedback.js). Straight after telemetry.js and before every
+       other app script, on purpose: its error log can only hold what happens
+       after its hooks are in place, and it wraps BlazingTelemetry.log, which
+       must already exist. Its form is drawn by settings.js on demand. -->
+  <script src="./feedback.js" defer></script>
   <script src="./profile.js" defer></script>
   <script src="./emby.js" defer></script>
   <!-- BEFORE the readers, and that order is load-bearing: tv-comics-reader.js,

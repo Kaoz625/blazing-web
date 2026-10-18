@@ -116,7 +116,8 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Raised 47 -> 48 on 14 Oct 2026: emulator.smoke.mjs (BLZ-0120), the in-browser
 // retro emulator — a ROM played in the web app with no install. `ls
 // *.smoke.mjs | wc -l` answered 48, counted on disk after it landed.
-const MIN_SUITES = 48;
+// Raised 48 -> 49 on 17 Oct 2026 when feedback.smoke.mjs landed with Send feedback.
+const MIN_SUITES = 49;
 
 // The unit tests were not run AT ALL. This runner is what `npm test` calls and
 // what the pages workflow gates on, and it only ever globbed *.smoke.mjs — so

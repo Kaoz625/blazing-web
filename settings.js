@@ -337,6 +337,9 @@
     profile: null,
     addonValue: '',
     addonLoaded: false,
+    // Settings → Send feedback draws the form (feedback.js) in this same host
+    // instead of the rows, and its Back button flips this off again.
+    feedbackOpen: false,
   };
 
   function element(tag, className, text) {
@@ -396,6 +399,23 @@
   function render() {
     const root = host();
     if (!root) return;
+    if (state.feedbackOpen && window.BlazingFeedback) {
+      // Already on screen: leave it alone. render() also runs on every profile
+      // broadcast and every time app.js re-enters this route, and rebuilding the
+      // form then would yank focus out of the text box under somebody's typing.
+      // The profile is read when Send is pressed, so it is never stale.
+      if (root.querySelector('#feedback-message')) return;
+      window.BlazingFeedback.mount(root, {
+        getProfile: () => state.profile,
+        onClose: () => {
+          state.feedbackOpen = false;
+          render();
+          const again = document.getElementById('settings-feedback');
+          if (again) again.focus();
+        },
+      });
+      return;
+    }
     const focusedId = document.activeElement && root.contains(document.activeElement)
       ? document.activeElement.id : '';
     root.replaceChildren();
@@ -479,6 +499,17 @@
       renderAddonForm(root);
       renderPlaylistForm(root);
     }
+
+    /* ── Help ── Markus, 17 Oct 2026: a place to say what is wrong or what
+       they do not like, with this screen's error log attached (feedback.js).
+       Drawn even with no profile chosen: a screen that cannot get past the
+       gate is exactly the one somebody wants to complain about. ── */
+    sectionTitle(root, 'Help');
+    row(root, 'Send feedback', () => { state.feedbackOpen = !!window.BlazingFeedback; })
+      .id = 'settings-feedback';
+    statusLine(root, 'settings-feedback-note',
+      "Tell us what's broken or what you'd change. Your note reaches the team with this screen's recent errors.",
+      'info');
 
     /* ── About ── tvOS keeps its read-only fields below the controls
        (Sections.swift:516-519) and that is the right place for them. The raw
