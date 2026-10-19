@@ -214,7 +214,12 @@
 // for it, so Settings would draw "Send feedback" and the press would do nothing.
 // index.html gains its <script>, settings.js the Help row, styles.css the
 // .feedback-* block; four shell files that only work as a set.
-const CACHE = 'blazing-shell-v53';
+// v54: Kids age groups (BLZ-0055, 18 Oct 2026). No new file, so this is the
+// hygiene bump: profile.js now puts ageBand on blazing-profile-selected and
+// app.js filters by it. Network-first already lands both online; the bump keeps
+// an offline fallback from pairing a v53 profile.js with a v54 app.js, which
+// would only ever fall back to the default 10-12, never loosen anything.
+const CACHE = 'blazing-shell-v54';
 
 /** How long the code fetch may take before the cached copy is served instead. */
 const NETWORK_TIMEOUT_MS = 3000;
