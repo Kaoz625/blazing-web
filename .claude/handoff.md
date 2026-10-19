@@ -1,3 +1,15 @@
+# blazing-web — handoff, 18 Oct 2026 22:55 ET (claude, MacBook) — FLT-12: Kids age group on the web (branch web-kids-age-group)
+
+Working on: Markus 18 Oct, "Set the Kids profile to 7-9 (drop TV-PG shows) and make the Fire TV app respect the age group first, then web and Roku".
+Last action: web-kids-age-group 116f7a6 + 3933405 (sw v54) pushed, NOT merged, NOT deployed. profile.js reads ageBand and puts it on blazing-profile-selected. app.js keeps it in state and on the remembered session, ratingAllowed(tier, band) checks the band, every rating check passes the title's ageBand, and the add-on's kids catalogs are asked with ?band=.
+Next step: Markus's OK, then merge to main; the pages gate publishes. Check: as the Kids profile, a kids row holds no TV-PG title.
+Key files: profile.js (effectiveAgeBand, bandAllowed, profileFrom), app.js (ratingAllowed, profileAgeBand, ageBandAllows, safeMeta.ageBand, loadSDUIRow ?band=), anime-room.js, kids-age-group.test.mjs, sw.js v54.
+Blockers: none; shipping is Markus's call.
+Tests: kids-age-group.test.mjs 3/3, profile-parental + settings 17/17, smokes rating-blocked / home-profile / anime-room / profile-restore pass (profile-restore needed one rerun for the known Comet reload, STL-9).
+Note: the fleet's fresh shelves (New Movies / New Shows / Top Rated) carry no rating, so the web already hid them from Kids; only the add-on's kids rows carry ageBand.
+
+---
+
 # blazing-web — handoff, 17 Oct 2026 22:10 ET (claude, MacBook) — feedback + short links: ALL LIVE
 
 Working on: nothing in flight. Short install links + Send feedback (Markus, 17 Oct 2026) are ALL LIVE (register DEP-12 done).
