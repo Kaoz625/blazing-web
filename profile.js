@@ -133,6 +133,36 @@
     return tierIndex <= capIndex;
   }
 
+  /*
+   * KIDS AGE GROUPS (BLZ-0055). Markus, 18 Oct 2026: "Set the Kids profile to 7-9
+   * (drop TV-PG shows) and make the Fire TV app respect the age group first, then
+   * web and Roku". The fleet has kept a Kids profile's `ageBand` (little 0-6, kids
+   * 7-9, tween 10-12) since 26 Sep and titles carry a `band`; no client read either.
+   * Same ladders and the same fail-closed rules as firetv ProfileGateRules.kt
+   * (effectiveAgeBand / bandAllowed) and fleet profiles.js / ratings.js.
+   */
+  const KIDS_AGE_BANDS = Object.freeze(['little', 'kids', 'tween']);
+  const DEFAULT_KIDS_AGE_BAND = 'tween';
+  const BAND_ORDER = Object.freeze(['little', 'kids', 'tween', 'teen', 'mature']);
+
+  /** A profile's age group: none for grown-ups, the default when unset, the youngest when unreadable. */
+  function effectiveAgeBand(isKids, raw) {
+    if (isKids !== true) return null;
+    const band = String(raw == null ? '' : raw).toLowerCase();
+    if (!band || band === 'null') return DEFAULT_KIDS_AGE_BAND;
+    return KIDS_AGE_BANDS.includes(band) ? band : KIDS_AGE_BANDS[0];
+  }
+
+  /** May a profile in `ageBand` see a title in `band`? No age group: the tier cap alone decides. */
+  function bandAllowed(ageBand, band) {
+    if (!ageBand) return true;
+    const limit = Math.max(0, BAND_ORDER.indexOf(String(ageBand)));
+    const value = String(band == null ? '' : band).toLowerCase();
+    if (!value || value === 'null') return ageBand === DEFAULT_KIDS_AGE_BAND;
+    const at = BAND_ORDER.indexOf(value);
+    return at >= 0 && at <= limit;
+  }
+
   /**
    * May the edit form offer Delete?
    *
@@ -305,6 +335,7 @@
       isKids: value.isKids === true,
       hasPin: value.hasPin === true,
       maxRating: text(value.effectiveMaxRating, text(value.maxRating, 'teen')),
+      ageBand: effectiveAgeBand(value.isKids === true, value.ageBand),
       allowAdult: value.effectiveAllowAdult === undefined ? value.allowAdult === true : value.effectiveAllowAdult === true,
       disabled: value.disabled === true,
       artRestricted: value.allowAdult === true || text(value.maxRating).toLowerCase() === 'adult',
@@ -784,6 +815,7 @@
         name: profile.name,
         isKids: profile.isKids,
         maxRating: profile.maxRating,
+        ageBand: profile.ageBand || null,
         allowAdult: profile.allowAdult,
         unlocked: Boolean(state.unlockToken && state.unlockExpiresAt > Date.now()),
       },
@@ -4104,7 +4136,10 @@
       return Boolean(ui.layer && !ui.layer.hidden);
     },
     /** The pure parental rules, for profile-parental.test.mjs. */
-    rules: Object.freeze({ RATINGS, KIDS_CAP, ratingAllowed, canDelete, newProfileFields, raising, grownUp, avatarChange }),
+    rules: Object.freeze({
+      RATINGS, KIDS_CAP, ratingAllowed, canDelete, newProfileFields, raising, grownUp, avatarChange,
+      KIDS_AGE_BANDS, DEFAULT_KIDS_AGE_BAND, effectiveAgeBand, bandAllowed,
+    }),
     /**
      * The two string helpers, for profile-parental.test.mjs.
      *

@@ -530,6 +530,9 @@ function safeMeta(raw) {
     // so the profile cap has something to judge; the web app has no kids gate
     // yet, and this is the field it will need when it gets one.
     contentRating: plainText(raw.contentRating).slice(0, 12),
+    // The kids AGE BAND inside `general` (little / kids / tween), when the source
+    // knows it — the add-on's kids rows always do. ratingAllowed() reads it.
+    ageBand: plainText(raw.ageBand).slice(0, 8),
     genres,
     videos: safeEpisodes(raw),
     isAnime: raw.isAnime === true || raw._isAnime === true
@@ -1150,7 +1153,7 @@ function requestHomeWarm(meta) {
  * newer answer is the one held. A film already asked is not asked twice.
  */
 function startWarmSearch(meta, from) {
-  if (!state.profileId || !ratingAllowed(meta.contentRating)) return;
+  if (!state.profileId || !ratingAllowed(meta.contentRating, meta.ageBand)) return;
   if (homeWarm.asked === meta.id) return;
   const id = meta.id;
   const gen = (homeWarm.gen += 1);
@@ -1642,7 +1645,7 @@ async function openDiscover(kind, slug, label) {
   if (data && data.name) discoverTitle.textContent = data.name;
   if (data && data.subtitle) discoverCopy.textContent = data.subtitle;
   const cards = items.map(embyMetaSafe).filter(Boolean)
-    .filter((meta) => ratingAllowed(meta.contentRating));
+    .filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
   if (!cards.length) {
     discoverResults.replaceChildren();
     discoverStatus.textContent = 'Nothing is listed here today.';
@@ -2053,7 +2056,7 @@ async function runSearch(event) {
   const embyRows = [];
   for (const raw of searchMetasOf(emby)) {
     const meta = embyMeta(raw);
-    if (meta && ratingAllowed(meta.contentRating)) embyRows.push([raw, meta]);
+    if (meta && ratingAllowed(meta.contentRating, meta.ageBand)) embyRows.push([raw, meta]);
   }
   const catalogRows = [];
   for (const settled of [movies, series]) {
@@ -2078,7 +2081,7 @@ async function runSearch(event) {
   const siteRows = [];
   for (const raw of searchMetasOf(sites)) {
     const meta = safeMeta(raw);
-    if (meta && ratingAllowed(meta.contentRating)) siteRows.push([raw, meta]);
+    if (meta && ratingAllowed(meta.contentRating, meta.ageBand)) siteRows.push([raw, meta]);
   }
 
   // FIRST writer wins, and the Emby rows go in first, so the card that survives a
@@ -2182,7 +2185,7 @@ function renderLibrary() {
     // every other source in the app takes.
     const visible = snapshot[spec.list]
       .map(safeMeta)
-      .filter((meta) => meta && ratingAllowed(meta.contentRating));
+      .filter((meta) => meta && ratingAllowed(meta.contentRating, meta.ageBand));
     total += visible.length;
     results.appendChild(buildListSection(spec, visible));
   }
@@ -2731,7 +2734,7 @@ async function openViewAll(section) {
   try { metas = (await viewAll.load()) || []; } catch { metas = []; }
   // The route may have moved on while a slower source answered.
   if (state.route !== 'viewall') return;
-  metas = metas.filter((meta) => ratingAllowed(meta.contentRating));
+  metas = metas.filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
   $('#viewall-count').textContent = metas.length ? `${metas.length} titles` : 'Nothing here right now.';
   grid.replaceChildren(...metas.map(buildCard));
 }
@@ -3070,14 +3073,14 @@ function attachHoverTrailer(card, meta) {
     textTimer = setTimeout(async () => {
       const full = await fetchFullMeta(meta);
       mergeFullMeta(meta, full);
-      if (!ratingAllowed(meta.contentRating)) { stop(); card.remove(); return; }
+      if (!ratingAllowed(meta.contentRating, meta.ageBand)) { stop(); card.remove(); return; }
       fillCardHeroContent(card, meta);
     }, DWELL_MS);
 
     videoTimer = setTimeout(async () => {
       const full = await fetchFullMeta(meta);
       mergeFullMeta(meta, full);
-      if (!ratingAllowed(meta.contentRating)) { stop(); card.remove(); return; }
+      if (!ratingAllowed(meta.contentRating, meta.ageBand)) { stop(); card.remove(); return; }
       const url = await resolveTrailerUrl(meta);
       // The pointer may have left while that was in flight - resolving runs
       // yt-dlp server-side and is not instant on a cold cache.
@@ -3243,7 +3246,7 @@ function openShelfCinema(card) {
   // Still the card the viewer is on, by focus or by pointer.
   if (!(card.matches(':hover') || card.contains(document.activeElement))) return;
   const meta = CARD_META.get(card);
-  if (!meta || !ratingAllowed(meta.contentRating)) return;
+  if (!meta || !ratingAllowed(meta.contentRating, meta.ageBand)) return;
   const gen = (shelfCinema.gen += 1);
   shelfCinema.open = true;
   shelfCinema.meta = meta;
@@ -3285,7 +3288,7 @@ function openShelfCinema(card) {
   fetchFullMeta(meta).then((full) => {
     if (gen !== shelfCinema.gen || !shelfCinema.open) return;
     mergeFullMeta(meta, full);
-    if (!ratingAllowed(meta.contentRating)) {
+    if (!ratingAllowed(meta.contentRating, meta.ageBand)) {
       // Its own Play Now search goes with it: nothing held for a film this
       // profile may not open.
       if (homeWarm.asked === meta.id) forgetHomeWarm();
@@ -3547,7 +3550,7 @@ async function loadRow(catalog, section, request = homeRequest) {
     // catalog go through here — and it had NO rating check at all: a Kids
     // profile saw whatever the catalog carried, unrated and mature included.
     const metas = (Array.isArray(data.metas) ? data.metas : [])
-      .map(safeMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+      .map(safeMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
     if (!metas.length) {
       section.remove();
       return [];
@@ -3568,7 +3571,7 @@ async function loadFreshHomeRow(shelf, section, request = homeRequest) {
     if (request !== homeRequest || !section.isConnected) return [];
     const metas = (Array.isArray(data.items) ? data.items : [])
       .map((item) => safeDiscoverMeta({ ...item, type: item.type || shelf.type }))
-      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
     if (!metas.length) {
       section.remove();
       return [];
@@ -3625,8 +3628,12 @@ async function loadSDUIRow(catalogInfo, section, request = homeRequest) {
   // three it cost the BrightMinds home are the only three the addon says are
   // reliably populated at all right now — every blazing-edu-* catalog returns
   // zero items while its YouTube quota is exhausted. Same shape as loadRow().
+  // A Kids profile's age group rides along: the add-on's kids catalogs
+  // (lib/kids-rows.js catalog(id, band)) keep a row to that band themselves, so a
+  // 7-9 viewer gets a full 7-9 row rather than a 10-12 row thinned here.
+  const bandQuery = state.profileAgeBand ? `?band=${encodeURIComponent(state.profileAgeBand)}` : '';
   const fetchUrl =
-    `${API_BASE}/catalog/${encodeURIComponent(catalogInfo.type)}/${encodeURIComponent(catalogInfo.catalogSlug)}.json`;
+    `${API_BASE}/catalog/${encodeURIComponent(catalogInfo.type)}/${encodeURIComponent(catalogInfo.catalogSlug)}.json${bandQuery}`;
 
   try {
     const data = await fetchJSON(fetchUrl);
@@ -3635,7 +3642,7 @@ async function loadSDUIRow(catalogInfo, section, request = homeRequest) {
     
     const metas = rawMetas
       .map((item) => safeDiscoverMeta({ ...item, type: item.type || catalogInfo.type }))
-      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+      .filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
 
     if (!metas.length) {
       section.remove();
@@ -4215,7 +4222,7 @@ function openDetail(meta, opts) {
   // The shelf cinema gives way to the sheet; startDetailTrailer() carries its
   // trailer on from the same second (BLZ-0110).
   closeShelfCinema('detail');
-  if (!ratingAllowed(meta.contentRating)) return showToast('This title is not available for this profile.', 'error');
+  if (!ratingAllowed(meta.contentRating, meta.ageBand)) return showToast('This title is not available for this profile.', 'error');
   state.selected = meta;
   $('#detail-verification')?.replaceChildren();
   state.selectedEpisode = null;
@@ -4268,7 +4275,7 @@ function openDetail(meta, opts) {
   const fullMeta = fetchFullMeta(meta, true).then((full) => {
     if (!full || state.selected !== meta) return;
     mergeFullMeta(meta, full);
-    if (!ratingAllowed(meta.contentRating)) {
+    if (!ratingAllowed(meta.contentRating, meta.ageBand)) {
       closeDetail();
       showToast('This title is not available for this profile.', 'error');
       return;
@@ -4285,7 +4292,7 @@ function openDetail(meta, opts) {
   // is a guaranteed 404. Asking anyway would spin the streams panel and then
   // report "no sources" for something that plays perfectly.
   fullMeta.finally(() => {
-    if (state.selected !== meta || !ratingAllowed(meta.contentRating)) return;
+    if (state.selected !== meta || !ratingAllowed(meta.contentRating, meta.ageBand)) return;
     detailPlay.disabled = false;
     // PLAY NOW and the WATCHED REPLAY (BLZ-0108, BLZ-0109). The viewer pressed a
     // button that says it plays, so the film starts here — through
@@ -4579,7 +4586,7 @@ function renderRelated(rich) {
     .map((it) => safeDiscoverMeta(it))
     .filter(Boolean)
     .filter((m) => m.poster)
-    .filter((m) => ratingAllowed(m.contentRating))
+    .filter((m) => ratingAllowed(m.contentRating, m.ageBand))
     .slice(0, RICH_RELATED_MAX);
 
   if (!items.length) {
@@ -4640,7 +4647,7 @@ async function openPerson(name, role) {
       releaseInfo: it && it.year,
     }))
     .filter(Boolean)
-    .filter((m) => ratingAllowed(m.contentRating));
+    .filter((m) => ratingAllowed(m.contentRating, m.ageBand));
 
   if (!items.length) {
     $('#person-status').textContent = `Nothing found for ${cleanName}.`;
@@ -4760,8 +4767,8 @@ async function openCompany(company) {
     .filter((m) => m.poster);
   const movies = shape(data && data.movies, 'movie');
   const series = shape(data && data.series, 'series');
-  const allowedMovies = movies.filter((m) => ratingAllowed(m.contentRating));
-  const allowedSeries = series.filter((m) => ratingAllowed(m.contentRating));
+  const allowedMovies = movies.filter((m) => ratingAllowed(m.contentRating, m.ageBand));
+  const allowedSeries = series.filter((m) => ratingAllowed(m.contentRating, m.ageBand));
   const restricted = (movies.length - allowedMovies.length) + (series.length - allowedSeries.length);
 
   if (!allowedMovies.length && !allowedSeries.length) {
@@ -5293,7 +5300,7 @@ async function playSelected(opts = {}) {
     && (!contentId || (state.selectedEpisode?.id || meta.id) === contentId) && detailDialog.open;
   const fromStart = opts.fromStart === true;
   await fetchFullMeta(meta, true);
-  if (!isCurrent() || !ratingAllowed(meta.contentRating)) return false;
+  if (!isCurrent() || !ratingAllowed(meta.contentRating, meta.ageBand)) return false;
   contentId = state.selectedEpisode?.id || meta.id;
   const held = opts.held;
   if (held && !meta.embyId && !state.selectedEpisode) {
@@ -6752,7 +6759,7 @@ async function openWatched(meta) {
   if (!meta) return;
   const saved = meta.type === 'movie' && state.profileId ? replayLinkFor(state.profileId, meta.id) : null;
   const cap = streamCapParameter();
-  if (!saved || saved.cap !== cap || !ratingAllowed(meta.contentRating)) {
+  if (!saved || saved.cap !== cap || !ratingAllowed(meta.contentRating, meta.ageBand)) {
     if (saved && saved.cap !== cap) console.log(`[replay] ${meta.id}: saved under cap ${saved.cap || 'none'}, not ${cap} - opening as usual`);
     openDetail(meta);
     return;
@@ -7303,13 +7310,40 @@ const RATINGS = ['general', 'teen', 'mature', 'adult'];
  * and the panel somehow yields, the shelves are still capped at 'general' rather
  * than showing the whole library.
  */
-function ratingAllowed(tier) {
+function ratingAllowed(tier, band) {
   const cap = state.profileCap || 'general';
   const capIndex = RATINGS.indexOf(String(cap).toLowerCase());
   if (capIndex < 0) return false;
   const tierIndex = RATINGS.indexOf(String(tier || '').toLowerCase());
   if (tierIndex < 0) return String(cap).toLowerCase() !== 'general';
-  return tierIndex <= capIndex;
+  if (tierIndex > capIndex) return false;
+  // Inside the cap, a Kids profile's age group narrows further (BLZ-0055): at
+  // 7-9 a TV-PG title (band `tween`) is refused although its tier is `general`.
+  // Same rule as profile.js bandAllowed and firetv ProfileGateRules.bandAllowed.
+  return ageBandAllows(state.profileAgeBand, band);
+}
+
+/* Kids age groups, the same ladder and fail-closed rules as profile.js
+   (effectiveAgeBand / bandAllowed) — duplicated because app.js cannot reach
+   that file's closure, and pinned to it by kids-age-group.test.mjs. */
+const KIDS_AGE_BANDS = ['little', 'kids', 'tween'];
+const DEFAULT_KIDS_AGE_BAND = 'tween';
+const AGE_BAND_ORDER = ['little', 'kids', 'tween', 'teen', 'mature'];
+
+function profileAgeBand(isKids, raw) {
+  if (isKids !== true) return null;
+  const band = String(raw == null ? '' : raw).toLowerCase();
+  if (!band || band === 'null') return DEFAULT_KIDS_AGE_BAND;
+  return KIDS_AGE_BANDS.includes(band) ? band : KIDS_AGE_BANDS[0];
+}
+
+function ageBandAllows(ageBand, band) {
+  if (!ageBand) return true;
+  const limit = Math.max(0, AGE_BAND_ORDER.indexOf(String(ageBand)));
+  const value = String(band == null ? '' : band).toLowerCase();
+  if (!value || value === 'null') return ageBand === DEFAULT_KIDS_AGE_BAND;
+  const at = AGE_BAND_ORDER.indexOf(value);
+  return at >= 0 && at <= limit;
 }
 
 /**
@@ -7481,7 +7515,7 @@ async function appendEmbyRow(title, type, load, request = homeRequest) {
   try { items = await load(); } catch { return; }
   if (request !== homeRequest) return;
   const metas = items.map(embyMeta).filter(Boolean)
-    .filter((meta) => ratingAllowed(meta.contentRating));
+    .filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
   // An empty row is NOT drawn. A shelf that says "Emby" over six grey rectangles
   // reads as broken; no shelf reads as "not today".
   if (!metas.length) return;
@@ -7540,7 +7574,7 @@ async function loadEmbyPage(reset) {
   // SAME filter appendEmbyRow applies to the Home teaser rows — this is still
   // Emby content, and a Kids profile must not see more of it just because it
   // came from a paged library view instead of a Home row.
-  const cards = metas.map(embyMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating));
+  const cards = metas.map(embyMeta).filter(Boolean).filter((meta) => ratingAllowed(meta.contentRating, meta.ageBand));
   results.append(...cards.map(buildCard));
   embyBrowseState.skip += metas.length;
   if (!results.children.length) {
@@ -7615,6 +7649,7 @@ function rememberProfileSession(detail) {
       id: String(detail.id),
       maxRating: String(detail.maxRating || 'general').toLowerCase(),
       isKids: detail.isKids === true,
+      ageBand: detail.ageBand || null,
       // Recorded so the restore can refuse. See the note above: true here means
       // a human answered a PIN for this profile, so a human has to answer again.
       neededPin: detail.unlocked === true,
@@ -7685,6 +7720,7 @@ function restoreProfileSession() {
   const cap = String(stored.maxRating || '').toLowerCase();
   state.profileCap = RATINGS.includes(cap) ? cap : 'general';
   state.profileIsKids = stored.isKids === true;
+  state.profileAgeBand = profileAgeBand(stored.isKids === true, stored.ageBand);
   state.profileId = id;
   // A RESTORED SESSION IS A PROFILE CHANGE TOO. This path never goes through
   // the blazing-profile-selected listener below, which is why the saved list is
@@ -7710,6 +7746,7 @@ document.addEventListener('blazing-profile-selected', (event) => {
   state.mediaProfile = { ...detail };
   state.profileCap = detail.maxRating || 'general';
   state.profileIsKids = detail.isKids === true;
+  state.profileAgeBand = profileAgeBand(detail.isKids === true, detail.ageBand);
   window.BlazingLists?.setProfile(state.profileId);
   state.selected = null;
   state.selectedEpisode = null;
@@ -7771,6 +7808,7 @@ document.addEventListener('blazing-profile-signed-out', () => {
   state.mediaProfile = null;
   state.profileCap = null;
   state.profileIsKids = false;
+  state.profileAgeBand = null;
   // Signing out takes the saved list off the screen and out of memory. The
   // fleet keeps it, which is the point: it is there again at the next sign-in,
   // on this browser or on any of the four boxes.

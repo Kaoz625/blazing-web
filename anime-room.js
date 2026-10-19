@@ -36,7 +36,7 @@
   }
   function animeItems(data) {
     return unique((data?.items || data?.metas || []).map((raw) => state.services.safeMeta({ ...raw, type: raw.type === 'movie' ? 'movie' : 'series', isAnime: true }))
-      .filter((item) => item && state.services.ratingAllowed(item.contentRating)));
+      .filter((item) => item && state.services.ratingAllowed(item.contentRating, item.ageBand)));
   }
   function readCard(raw, kind) {
     const name = text(raw.title || raw.name);
@@ -129,7 +129,7 @@
         if (!current(request) || !full) return;
         // A detail lookup can add a rating that was absent from discovery.
         if (full.contentRating) selected.contentRating = full.contentRating;
-        if (!state.services.ratingAllowed(selected.contentRating)) {
+        if (!state.services.ratingAllowed(selected.contentRating, selected.ageBand)) {
           feature(null);
           $('anime-room-results').querySelectorAll('[data-anime-id]').forEach((card) => { if (card.dataset.animeId === selected.id) card.remove(); });
           return;
